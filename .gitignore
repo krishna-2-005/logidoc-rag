@@ -1,0 +1,12 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Generated vector database (rebuild with: python src\vector_store.py)
+chroma_db/
+
+# Backups and logs
+*_backup.py
+logs/
+.env
