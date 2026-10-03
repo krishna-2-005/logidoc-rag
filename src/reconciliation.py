@@ -2,26 +2,27 @@ from pathlib import Path
 import sys
 import re
 
-# Add project root to Python path
+# ============================================================
+# PROJECT PATH
+# ============================================================
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from chunker import create_all_chunks
 
 
+# ============================================================
+# FIELD EXTRACTION
+# ============================================================
+
 def extract_field(text, field_name):
     """
-    Extract a value appearing after a field label.
-
-    Example:
-    Carrier:
-    SwiftLine Logistics
-
-    Returns:
-    SwiftLine Logistics
+    Extract value appearing after a field label.
+    Handles blank lines between label and value.
     """
 
-    pattern = rf"{re.escape(field_name)}:\s*\n([^\n]+)"
+    pattern = rf"{re.escape(field_name)}:\s*\n\s*([^\n]+)"
 
     match = re.search(
         pattern,
@@ -36,18 +37,15 @@ def extract_field(text, field_name):
 
 
 def extract_amount(text, field_name):
-    """
-    Extract a monetary value.
-
-    Example:
-    Total Invoice Amount:
-    $1,430.00
-    """
-
     value = extract_field(text, field_name)
 
     if value:
-        value = value.replace("$", "").replace(",", "").strip()
+        value = (
+            value
+            .replace("$", "")
+            .replace(",", "")
+            .strip()
+        )
 
         try:
             return float(value)
@@ -57,10 +55,11 @@ def extract_amount(text, field_name):
     return None
 
 
+# ============================================================
+# DOCUMENT ORGANIZATION
+# ============================================================
+
 def extract_document_data(chunks):
-    """
-    Organize chunks by document type.
-    """
 
     documents = {}
 
@@ -68,9 +67,12 @@ def extract_document_data(chunks):
 
         metadata = chunk["metadata"]
 
-        document_type = metadata.get("document_type")
+        document_type = metadata.get(
+            "document_type"
+        )
 
         if document_type not in documents:
+
             documents[document_type] = {
                 "text": "",
                 "metadata": metadata
@@ -83,24 +85,25 @@ def extract_document_data(chunks):
     return documents
 
 
-def compare_values(label, value1, value2):
-    """
-    Compare two values and return MATCH / MISMATCH / NOT AVAILABLE.
-    """
+# ============================================================
+# COMPARISON
+# ============================================================
+
+def compare_values(value1, value2):
 
     if value1 is None or value2 is None:
         return "NOT AVAILABLE"
 
-    if value1.strip().lower() == value2.strip().lower():
+    if (
+        value1.strip().lower()
+        == value2.strip().lower()
+    ):
         return "MATCH"
 
     return "MISMATCH"
 
 
-def compare_numbers(label, value1, value2):
-    """
-    Compare two numeric values.
-    """
+def compare_numbers(value1, value2):
 
     if value1 is None or value2 is None:
         return "NOT AVAILABLE"
@@ -111,72 +114,40 @@ def compare_numbers(label, value1, value2):
     return "MISMATCH"
 
 
+# ============================================================
+# RECONCILIATION
+# ============================================================
+
 def reconcile_shipment():
-
-    print("=" * 70)
-    print("LogiDoc-RAG → Shipment Reconciliation")
-    print("=" * 70)
-
-    print("\nLoading logistics documents...")
 
     chunks = create_all_chunks()
 
     if not chunks:
-        print("\nNo documents found.")
-        return
-
-    print(f"Total chunks loaded: {len(chunks)}")
+        return None
 
     documents = extract_document_data(chunks)
-
-    print("\nDocuments detected:")
-
-    for document_type in documents:
-        print(f"- {document_type}")
-
-    # ---------------------------------------------------------
-    # Get documents
-    # ---------------------------------------------------------
 
     bol = documents.get("BOL")
     invoice = documents.get("INVOICE")
     pod = documents.get("POD")
 
-    print("\n" + "-" * 70)
-    print("DOCUMENT AVAILABILITY")
-    print("-" * 70)
-
-    print(
-        f"BOL     : {'FOUND' if bol else 'NOT FOUND'}"
-    )
-
-    print(
-        f"Invoice : {'FOUND' if invoice else 'NOT FOUND'}"
-    )
-
-    print(
-        f"POD     : {'FOUND' if pod else 'NOT FOUND'}"
-    )
+    # --------------------------------------------------------
+    # Required documents
+    # --------------------------------------------------------
 
     if not bol or not invoice or not pod:
-
-        print(
-            "\nReconciliation requires BOL, Invoice and POD."
-        )
-
-        return
-
-    # ---------------------------------------------------------
-    # Extract text
-    # ---------------------------------------------------------
+        return {
+            "success": False,
+            "error": "Reconciliation requires BOL, Invoice and POD."
+        }
 
     bol_text = bol["text"]
     invoice_text = invoice["text"]
     pod_text = pod["text"]
 
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
     # Shipment ID
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
 
     shipment_id = (
         bol["metadata"].get("shipment_id")
@@ -184,9 +155,9 @@ def reconcile_shipment():
         or pod["metadata"].get("shipment_id")
     )
 
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
     # Carrier
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
 
     bol_carrier = extract_field(
         bol_text,
@@ -203,9 +174,19 @@ def reconcile_shipment():
         "Carrier"
     )
 
-    # ---------------------------------------------------------
-    # Origin
-    # ---------------------------------------------------------
+    carrier_bol_invoice = compare_values(
+        bol_carrier,
+        invoice_carrier
+    )
+
+    carrier_bol_pod = compare_values(
+        bol_carrier,
+        pod_carrier
+    )
+
+    # --------------------------------------------------------
+    # Route
+    # --------------------------------------------------------
 
     bol_origin = extract_field(
         bol_text,
@@ -217,10 +198,6 @@ def reconcile_shipment():
         "Origin"
     )
 
-    # ---------------------------------------------------------
-    # Destination
-    # ---------------------------------------------------------
-
     bol_destination = extract_field(
         bol_text,
         "Destination"
@@ -231,23 +208,58 @@ def reconcile_shipment():
         "Destination"
     )
 
-    # ---------------------------------------------------------
-    # Number of pieces
-    # ---------------------------------------------------------
+    origin_status = compare_values(
+        bol_origin,
+        invoice_origin
+    )
 
-    bol_pieces = extract_field(
+    destination_status = compare_values(
+        bol_destination,
+        invoice_destination
+    )
+
+    # --------------------------------------------------------
+    # Quantity
+    # --------------------------------------------------------
+
+    bol_pieces_raw = extract_field(
         bol_text,
         "Number of Pieces"
     )
 
-    pod_pieces = extract_field(
+    pod_pieces_raw = extract_field(
         pod_text,
         "Number of Pieces Delivered"
     )
 
-    # ---------------------------------------------------------
-    # Dates
-    # ---------------------------------------------------------
+    try:
+        bol_pieces = int(bol_pieces_raw)
+    except (TypeError, ValueError):
+        bol_pieces = None
+
+    try:
+        pod_pieces = int(pod_pieces_raw)
+    except (TypeError, ValueError):
+        pod_pieces = None
+
+    pieces_status = compare_numbers(
+        bol_pieces,
+        pod_pieces
+    )
+
+    if (
+        bol_pieces is not None
+        and pod_pieces is not None
+    ):
+        pieces_difference = (
+            bol_pieces - pod_pieces
+        )
+    else:
+        pieces_difference = None
+
+    # --------------------------------------------------------
+    # Delivery dates
+    # --------------------------------------------------------
 
     expected_delivery = extract_field(
         bol_text,
@@ -259,9 +271,14 @@ def reconcile_shipment():
         "Delivery Date"
     )
 
-    # ---------------------------------------------------------
-    # Invoice amounts
-    # ---------------------------------------------------------
+    delivery_status = compare_values(
+        expected_delivery,
+        actual_delivery
+    )
+
+    # --------------------------------------------------------
+    # Invoice
+    # --------------------------------------------------------
 
     base_freight = extract_amount(
         invoice_text,
@@ -288,210 +305,218 @@ def reconcile_shipment():
         "Total Invoice Amount"
     )
 
-    # ---------------------------------------------------------
-    # Perform comparisons
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
+    # Discrepancies
+    # --------------------------------------------------------
 
-    carrier_status_1 = compare_values(
-        "Carrier",
-        bol_carrier,
-        invoice_carrier
-    )
+    discrepancies = []
 
-    carrier_status_2 = compare_values(
-        "Carrier",
-        bol_carrier,
-        pod_carrier
-    )
+    if pieces_status == "MISMATCH":
 
-    origin_status = compare_values(
-        "Origin",
-        bol_origin,
-        invoice_origin
-    )
+        discrepancies.append({
+            "category": "Quantity",
+            "description": (
+                f"BOL shows {bol_pieces} pieces, "
+                f"but POD shows {pod_pieces} pieces delivered."
+            ),
+            "difference": pieces_difference
+        })
 
-    destination_status = compare_values(
-        "Destination",
-        bol_destination,
-        invoice_destination
-    )
+    if delivery_status == "MISMATCH":
 
-    pieces_status = compare_numbers(
-        "Pieces",
-        (
-            int(bol_pieces)
-            if bol_pieces and bol_pieces.isdigit()
-            else None
-        ),
-        (
-            int(pod_pieces)
-            if pod_pieces and pod_pieces.isdigit()
-            else None
-        )
-    )
+        discrepancies.append({
+            "category": "Delivery Date",
+            "description": (
+                f"Expected delivery was {expected_delivery}, "
+                f"but actual delivery was {actual_delivery}."
+            )
+        })
 
-    # ---------------------------------------------------------
-    # Delivery status
-    # ---------------------------------------------------------
+    if carrier_bol_invoice == "MISMATCH":
 
-    if expected_delivery and actual_delivery:
+        discrepancies.append({
+            "category": "Carrier",
+            "description": (
+                "Carrier differs between BOL and Invoice."
+            )
+        })
 
-        if (
-            expected_delivery.strip().lower()
-            == actual_delivery.strip().lower()
-        ):
-            delivery_status = "ON TIME"
-        else:
-            delivery_status = "DATE DIFFERENCE"
+    if carrier_bol_pod == "MISMATCH":
 
-    else:
-        delivery_status = "NOT AVAILABLE"
+        discrepancies.append({
+            "category": "Carrier",
+            "description": (
+                "Carrier differs between BOL and POD."
+            )
+        })
 
-    # ---------------------------------------------------------
-    # Print report
-    # ---------------------------------------------------------
+    if origin_status == "MISMATCH":
 
-    print("\n")
-    print("=" * 70)
-    print("SHIPMENT RECONCILIATION REPORT")
-    print("=" * 70)
+        discrepancies.append({
+            "category": "Origin",
+            "description": (
+                "Origin differs between BOL and Invoice."
+            )
+        })
 
-    print(f"\nShipment ID: {shipment_id}")
+    if destination_status == "MISMATCH":
 
-    # ---------------------------------------------------------
-    # Carrier
-    # ---------------------------------------------------------
+        discrepancies.append({
+            "category": "Destination",
+            "description": (
+                "Destination differs between BOL and Invoice."
+            )
+        })
 
-    print("\n" + "-" * 70)
-    print("CARRIER")
-    print("-" * 70)
-
-    print(f"BOL     : {bol_carrier}")
-    print(f"Invoice : {invoice_carrier}")
-    print(f"POD     : {pod_carrier}")
-
-    print(
-        f"Status  : "
-        f"{carrier_status_1}"
-        if carrier_status_1 == "MISMATCH"
-        else f"Status  : {carrier_status_1}"
-    )
-
-    # ---------------------------------------------------------
-    # Route
-    # ---------------------------------------------------------
-
-    print("\n" + "-" * 70)
-    print("ROUTE")
-    print("-" * 70)
-
-    print("\nOrigin")
-    print(f"BOL     : {bol_origin}")
-    print(f"Invoice : {invoice_origin}")
-    print(f"Status  : {origin_status}")
-
-    print("\nDestination")
-    print(f"BOL     : {bol_destination}")
-    print(f"Invoice : {invoice_destination}")
-    print(f"Status  : {destination_status}")
-
-    # ---------------------------------------------------------
-    # Quantity
-    # ---------------------------------------------------------
-
-    print("\n" + "-" * 70)
-    print("QUANTITY")
-    print("-" * 70)
-
-    print(f"BOL : {bol_pieces} pieces")
-    print(f"POD : {pod_pieces} pieces")
-    print(f"Status : {pieces_status}")
-
-    # ---------------------------------------------------------
-    # Delivery
-    # ---------------------------------------------------------
-
-    print("\n" + "-" * 70)
-    print("DELIVERY")
-    print("-" * 70)
-
-    print(f"Expected : {expected_delivery}")
-    print(f"Actual   : {actual_delivery}")
-    print(f"Status   : {delivery_status}")
-
-    # ---------------------------------------------------------
-    # Invoice
-    # ---------------------------------------------------------
-
-    print("\n" + "-" * 70)
-    print("INVOICE")
-    print("-" * 70)
-
-    print(
-        f"Base Freight           : "
-        f"${base_freight:,.2f}"
-        if base_freight is not None
-        else "Base Freight           : N/A"
-    )
-
-    print(
-        f"Fuel Surcharge         : "
-        f"${fuel_surcharge:,.2f}"
-        if fuel_surcharge is not None
-        else "Fuel Surcharge         : N/A"
-    )
-
-    print(
-        f"Detention Charge       : "
-        f"${detention_charge:,.2f}"
-        if detention_charge is not None
-        else "Detention Charge       : N/A"
-    )
-
-    print(
-        f"Other Accessorial      : "
-        f"${other_charges:,.2f}"
-        if other_charges is not None
-        else "Other Accessorial      : N/A"
-    )
-
-    print(
-        f"Total Invoice Amount   : "
-        f"${total_invoice:,.2f}"
-        if total_invoice is not None
-        else "Total Invoice Amount   : N/A"
-    )
-
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
     # Final status
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
 
-    statuses = [
-        carrier_status_1,
-        carrier_status_2,
-        origin_status,
-        destination_status,
-        pieces_status,
-    ]
+    final_status = (
+        "DISCREPANCIES DETECTED"
+        if discrepancies
+        else "NO DISCREPANCIES"
+    )
 
-    mismatches = [
-        status
-        for status in statuses
-        if status == "MISMATCH"
-    ]
+    # --------------------------------------------------------
+    # Structured result
+    # --------------------------------------------------------
 
-    print("\n" + "=" * 70)
-    print("FINAL STATUS")
-    print("=" * 70)
+    return {
 
-    if mismatches:
-        print("\n⚠ DISCREPANCIES DETECTED")
-        print(f"Total discrepancies: {len(mismatches)}")
-    else:
-        print("\n✓ NO MAJOR DISCREPANCIES FOUND")
+        "success": True,
 
-    print("\n" + "=" * 70)
+        "shipment_id": shipment_id,
 
+        "carrier": {
+            "bol": bol_carrier,
+            "invoice": invoice_carrier,
+            "pod": pod_carrier,
+            "bol_invoice_status": carrier_bol_invoice,
+            "bol_pod_status": carrier_bol_pod
+        },
+
+        "route": {
+            "origin": bol_origin,
+            "destination": bol_destination,
+            "invoice_origin": invoice_origin,
+            "invoice_destination": invoice_destination,
+            "origin_status": origin_status,
+            "destination_status": destination_status
+        },
+
+        "quantity": {
+            "bol": bol_pieces,
+            "pod": pod_pieces,
+            "difference": pieces_difference,
+            "status": pieces_status
+        },
+
+        "delivery": {
+            "expected": expected_delivery,
+            "actual": actual_delivery,
+            "status": delivery_status
+        },
+
+        "invoice": {
+            "base_freight": base_freight,
+            "fuel_surcharge": fuel_surcharge,
+            "detention_charge": detention_charge,
+            "other_charges": other_charges,
+            "total": total_invoice
+        },
+
+        "discrepancies": discrepancies,
+
+        "final_status": final_status
+    }
+
+
+# ============================================================
+# CLI TEST
+# ============================================================
 
 if __name__ == "__main__":
-    reconcile_shipment()
+
+    result = reconcile_shipment()
+
+    if not result:
+        print("No documents found.")
+        sys.exit()
+
+    if not result.get("success"):
+        print(result["error"])
+        sys.exit()
+
+    print("=" * 70)
+    print("LOGIDOC-RAG SHIPMENT RECONCILIATION")
+    print("=" * 70)
+
+    print(
+        f"\nShipment ID: "
+        f"{result['shipment_id']}"
+    )
+
+    print("\nQUANTITY")
+    print("-" * 70)
+
+    print(
+        f"BOL: "
+        f"{result['quantity']['bol']} pieces"
+    )
+
+    print(
+        f"POD: "
+        f"{result['quantity']['pod']} pieces"
+    )
+
+    print(
+        f"Difference: "
+        f"{result['quantity']['difference']} pieces"
+    )
+
+    print(
+        f"Status: "
+        f"{result['quantity']['status']}"
+    )
+
+    print("\nDELIVERY")
+    print("-" * 70)
+
+    print(
+        f"Expected: "
+        f"{result['delivery']['expected']}"
+    )
+
+    print(
+        f"Actual: "
+        f"{result['delivery']['actual']}"
+    )
+
+    print(
+        f"Status: "
+        f"{result['delivery']['status']}"
+    )
+
+    print("\nINVOICE")
+    print("-" * 70)
+
+    print(
+        f"Total: "
+        f"${result['invoice']['total']:,.2f}"
+    )
+
+    print("\nFINAL STATUS")
+    print("-" * 70)
+
+    print(result["final_status"])
+
+    if result["discrepancies"]:
+
+        print("\nDISCREPANCIES:")
+
+        for item in result["discrepancies"]:
+            print(
+                f"- {item['category']}: "
+                f"{item['description']}"
+            )

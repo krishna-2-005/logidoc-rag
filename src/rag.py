@@ -594,13 +594,30 @@ def extract_exact_answer(
             or "number" in question_lower
             or "quantity" in question_lower
         )
+        and (
+            "deliver" in question_lower
+            or "received" in question_lower
+        )
     ):
 
-        patterns = [
+        # ----------------------------------------------------
+        # IMPORTANT:
+        # Delivered quantity MUST come from POD.
+        # BOL "Number of Pieces" is the shipped quantity,
+        # not necessarily the delivered quantity.
+        # ----------------------------------------------------
+
+        pod_records = [
+            record
+            for record in records
+            if record["type"] == "pod"
+        ]
+
+        # Search ONLY POD documents.
+        # Do NOT use generic "Number of Pieces" here.
+        delivered_patterns = [
 
             r"Number\s+of\s+Pieces\s+Delivered\s*:\s*(\d+)",
-
-            r"Number\s+of\s+Pieces\s*:\s*(\d+)",
 
             r"Pieces\s+Delivered\s*:\s*(\d+)",
 
@@ -611,11 +628,11 @@ def extract_exact_answer(
             r"Delivered\s+Pieces\s*:\s*(\d+)"
         ]
 
-        for record in records:
+        for record in pod_records:
 
             text = record["text"]
 
-            for pattern in patterns:
+            for pattern in delivered_patterns:
 
                 match = re.search(
                     pattern,
@@ -630,7 +647,6 @@ def extract_exact_answer(
                     return (
                         f"{number} pieces were delivered."
                     )
-
     # ========================================================
     # 2. TOTAL INVOICE AMOUNT
     # ========================================================
