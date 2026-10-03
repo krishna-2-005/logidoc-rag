@@ -8,11 +8,44 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import RAW_DATA_DIR
 
+from document_classifier import classify_document as classify_content
+from identifier_extractor import (
+    extract_all_identifiers,
+    find_primary_shipment_identifier,
+)
 
-def classify_document(filename):
+
+def classify_document(filename, text=None):
     """
-    Identify the logistics document type from its filename.
+    Identify the logistics document type.
+
+    Primary method:
+        Classify using document CONTENT.
+
+    Fallback:
+        Use filename only if document content cannot be classified.
     """
+
+    # --------------------------------------------------------
+    # CONTENT-BASED CLASSIFICATION
+    # --------------------------------------------------------
+
+    if text and text.strip():
+
+        result = classify_content(text)
+
+        document_type = result.get(
+            "document_type",
+            "UNKNOWN"
+        )
+
+        if document_type != "UNKNOWN":
+
+            return document_type
+
+    # --------------------------------------------------------
+    # FILENAME FALLBACK
+    # --------------------------------------------------------
 
     filename_upper = filename.upper()
 
@@ -40,13 +73,19 @@ def extract_pdf(pdf_path):
 
     pages = []
 
-    for page_number, page in enumerate(document, start=1):
+    for page_number, page in enumerate(
+        document,
+        start=1
+    ):
 
-        # sort=True returns text in visual reading order (top to bottom),
-        # so values stay next to their labels even if the PDF was edited
-        text = page.get_text("text", sort=True).strip()
+        # sort=True keeps text in visual reading order
+        text = page.get_text(
+            "text",
+            sort=True
+        ).strip()
 
         if text:
+
             pages.append(
                 {
                     "page": page_number,
@@ -62,20 +101,64 @@ def extract_pdf(pdf_path):
 def load_document(pdf_path):
     """
     Load one logistics PDF and return structured document data.
+
+    Document type and identifiers are detected from the
+    actual PDF content rather than relying on the filename.
     """
 
     pdf_path = Path(pdf_path)
 
-    document_type = classify_document(pdf_path.name)
+    # --------------------------------------------------------
+    # 1. Extract PDF pages
+    # --------------------------------------------------------
 
     pages = extract_pdf(pdf_path)
+
+    # Combine page text for analysis
+    full_text = "\n".join(
+        page["text"]
+        for page in pages
+    )
+
+    # --------------------------------------------------------
+    # 2. Detect document type from CONTENT
+    # --------------------------------------------------------
+
+    document_type = classify_document(
+        pdf_path.name,
+        full_text
+    )
+
+    # --------------------------------------------------------
+    # 3. Extract all logistics identifiers
+    # --------------------------------------------------------
+
+    identifiers = extract_all_identifiers(
+        full_text
+    )
+
+    # --------------------------------------------------------
+    # 4. Find primary shipment identifier
+    # --------------------------------------------------------
+
+    primary_identifier = (
+        find_primary_shipment_identifier(
+            identifiers
+        )
+    )
+
+    # --------------------------------------------------------
+    # 5. Return structured document
+    # --------------------------------------------------------
 
     return {
         "filename": pdf_path.name,
         "path": str(pdf_path),
         "document_type": document_type,
         "page_count": len(pages),
-        "pages": pages
+        "pages": pages,
+        "identifiers": identifiers,
+        "primary_identifier": primary_identifier,
     }
 
 
@@ -86,13 +169,19 @@ def load_all_documents():
 
     documents = []
 
-    pdf_files = sorted(RAW_DATA_DIR.glob("*.pdf"))
+    pdf_files = sorted(
+        RAW_DATA_DIR.glob("*.pdf")
+    )
 
     for pdf_file in pdf_files:
 
-        document = load_document(pdf_file)
+        document = load_document(
+            pdf_file
+        )
 
-        documents.append(document)
+        documents.append(
+            document
+        )
 
     return documents
 
@@ -100,27 +189,57 @@ def load_all_documents():
 if __name__ == "__main__":
 
     print("=" * 60)
-    print("LogiDoc-RAG Document Loader Test")
+    print("LogiDoc-RAG Universal Document Loader Test")
     print("=" * 60)
 
     documents = load_all_documents()
 
-    print(f"\nDocuments found: {len(documents)}")
+    print(
+        f"\nDocuments found: {len(documents)}"
+    )
 
     for document in documents:
 
         print("\n" + "-" * 60)
 
-        print(f"File          : {document['filename']}")
-        print(f"Type          : {document['document_type']}")
-        print(f"Pages         : {document['page_count']}")
+        print(
+            f"File              : "
+            f"{document['filename']}"
+        )
+
+        print(
+            f"Type              : "
+            f"{document['document_type']}"
+        )
+
+        print(
+            f"Pages             : "
+            f"{document['page_count']}"
+        )
+
+        print(
+            f"Identifiers       : "
+            f"{document['identifiers']}"
+        )
+
+        print(
+            f"Primary Identifier: "
+            f"{document['primary_identifier']}"
+        )
 
         for page in document["pages"]:
 
-            print(f"\nPage {page['page']}")
+            print(
+                f"\nPage {page['page']}"
+            )
 
-            print(page["text"][:500])
+            print(
+                page["text"][:500]
+            )
 
     print("\n" + "=" * 60)
-    print("Document loading completed successfully.")
+    print(
+        "Universal document loading "
+        "completed successfully."
+    )
     print("=" * 60)
