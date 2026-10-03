@@ -1,4 +1,5 @@
 import sys
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -9,7 +10,6 @@ import streamlit as st
 # ============================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-
 SRC_DIR = PROJECT_ROOT / "src"
 
 if str(SRC_DIR) not in sys.path:
@@ -20,22 +20,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 # ============================================================
-# IMPORT PROJECT MODULES
+# PROJECT IMPORTS
 # ============================================================
 
-from config import (
-    RAW_DATA_DIR,
-    CHROMA_DIR,
-    COLLECTION_NAME,
-    EMBEDDING_MODEL,
-    LLM_MODEL,
-)
-
+from config import RAW_DATA_DIR
 from vector_store import build_vector_database
-
-from rag import ask_question
-
+from rag import ask_question, get_all_documents
 from reconciliation import reconcile_shipment
+from intelligence_service import analyze_shipment
 
 
 # ============================================================
@@ -60,35 +52,1134 @@ st.markdown(
 
     .main-title {
         font-size: 42px;
-        font-weight: 700;
+        font-weight: 750;
         margin-bottom: 0px;
     }
 
     .subtitle {
-        font-size: 17px;
-        color: #666;
-        margin-top: 0px;
-        margin-bottom: 25px;
-    }
-
-    .status-card {
-        padding: 18px;
-        border-radius: 12px;
-        border: 1px solid #ddd;
-        margin-bottom: 15px;
+        font-size: 16px;
+        color: #8b8f98;
+        margin-top: 4px;
+        margin-bottom: 28px;
     }
 
     .section-title {
-        font-size: 24px;
-        font-weight: 650;
-        margin-top: 15px;
-        margin-bottom: 15px;
+        font-size: 26px;
+        font-weight: 700;
+        margin-top: 10px;
+        margin-bottom: 10px;
+    }
+
+    .intelligence-card {
+        padding: 18px;
+        border-radius: 12px;
+        border: 1px solid #30333b;
+        background: #15171d;
+        margin-bottom: 12px;
+    }
+
+    .exception-text {
+        font-size: 14px;
+        line-height: 1.6;
     }
 
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "documents_processed" not in st.session_state:
+    st.session_state.documents_processed = False
+
+if "selected_shipment" not in st.session_state:
+    st.session_state.selected_shipment = "All Shipments"
+
+
+# ============================================================
+# SAFE DOCUMENT DATA
+# ============================================================
+
+def get_indexed_data():
+
+    try:
+
+        documents, metadatas = get_all_documents()
+
+        if documents is None:
+            documents = []
+
+        if metadatas is None:
+            metadatas = []
+
+        if not isinstance(documents, list):
+            documents = list(documents)
+
+        if not isinstance(metadatas, list):
+            metadatas = list(metadatas)
+
+        return documents, metadatas
+
+    except Exception:
+
+        return [], []
+
+
+# ============================================================
+# SHIPMENT INFORMATION
+# ============================================================
+
+def get_shipment_information():
+
+    documents, metadatas = get_indexed_data()
+
+    shipment_map = {}
+
+    for metadata in metadatas:
+
+        if not isinstance(metadata, dict):
+            continue
+
+        shipment_id = str(
+            metadata.get("shipment_id", "")
+        ).strip()
+
+        if not shipment_id:
+            continue
+
+        document_type = str(
+            metadata.get("document_type", "")
+        ).upper()
+
+        source = str(
+            metadata.get("source", "")
+        )
+
+        if shipment_id not in shipment_map:
+
+            shipment_map[shipment_id] = {
+                "documents": set(),
+                "types": set(),
+            }
+
+        if source:
+            shipment_map[shipment_id]["documents"].add(source)
+
+        if document_type:
+            shipment_map[shipment_id]["types"].add(
+                document_type
+            )
+
+    return shipment_map
+
+
+# ============================================================
+# TEXT HELPERS
+# ============================================================
+
+def normalize_text(text):
+
+    if text is None:
+        return ""
+
+    text = str(text)
+
+    text = text.replace("\r\n", "\n")
+    text = text.replace("\r", "\n")
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
+
+    return text.strip()
+
+
+def clean_display_text(text, max_length=420):
+
+    text = normalize_text(text)
+
+    if not text:
+        return ""
+
+    if len(text) > max_length:
+        return text[:max_length].rstrip() + "..."
+
+    return text
+
+
+# ============================================================
+# PRECISE Q&A EVIDENCE
+# ============================================================
+
+def extract_precise_evidence(text, question=""):
+
+    clean = normalize_text(text)
+
+    if not clean:
+        return ""
+
+    question_lower = question.lower()
+
+    patterns = []
+
+    # Quantity
+
+    if (
+        "how many pieces" in question_lower
+        or "pieces delivered" in question_lower
+        or "number of pieces" in question_lower
+        or "quantity delivered" in question_lower
+    ):
+
+        patterns.extend(
+            [
+                (
+                    r"Number\s+of\s+Pieces\s+Delivered\s*:\s*(\d+)",
+                    "Number of Pieces Delivered"
+                ),
+                (
+                    r"Pieces\s+Delivered\s*:\s*(\d+)",
+                    "Pieces Delivered"
+                ),
+                (
+                    r"Number\s+of\s+Pieces\s*:\s*(\d+)",
+                    "Number of Pieces"
+                ),
+            ]
+        )
+
+    # Delivery dates
+
+    if (
+        "delivered on time" in question_lower
+        or "delivery date" in question_lower
+        or "actual delivery" in question_lower
+        or "expected delivery" in question_lower
+    ):
+
+        patterns.extend(
+            [
+                (
+                    r"Expected\s+Delivery\s+Date\s*:\s*"
+                    r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+                    "Expected Delivery Date"
+                ),
+                (
+                    r"Delivery\s+Date\s*:\s*"
+                    r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+                    "Delivery Date"
+                ),
+                (
+                    r"Actual\s+Delivery\s+Date\s*:\s*"
+                    r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+                    "Actual Delivery Date"
+                ),
+            ]
+        )
+
+    # Invoice
+
+    if (
+        "invoice" in question_lower
+        or "amount" in question_lower
+        or "freight" in question_lower
+        or "charge" in question_lower
+        or "cost" in question_lower
+    ):
+
+        patterns.extend(
+            [
+                (
+                    r"Total\s+Invoice\s+Amount\s*:\s*"
+                    r"\$?\s*[\d,]+(?:\.\d{2})?",
+                    None
+                ),
+                (
+                    r"Invoice\s+Total\s*:\s*"
+                    r"\$?\s*[\d,]+(?:\.\d{2})?",
+                    None
+                ),
+                (
+                    r"Base\s+Freight\s*:\s*"
+                    r"\$?\s*[\d,]+(?:\.\d{2})?",
+                    None
+                ),
+            ]
+        )
+
+    # Carrier
+
+    if "carrier" in question_lower:
+
+        patterns.append(
+            (
+                r"Carrier\s*:\s*[A-Za-z0-9 .&_-]+",
+                None
+            )
+        )
+
+    # Route
+
+    if (
+        "origin" in question_lower
+        or "destination" in question_lower
+        or "route" in question_lower
+    ):
+
+        patterns.extend(
+            [
+                (
+                    r"Origin\s*:\s*[A-Za-z0-9 ,.-]+",
+                    None
+                ),
+                (
+                    r"Destination\s*:\s*[A-Za-z0-9 ,.-]+",
+                    None
+                ),
+            ]
+        )
+
+    for pattern, label in patterns:
+
+        match = re.search(
+            pattern,
+            clean,
+            re.IGNORECASE
+        )
+
+        if not match:
+            continue
+
+        if label:
+
+            return (
+                f"{label}: "
+                f"{match.group(1).strip()}"
+            )
+
+        return match.group(0).strip()
+
+    return clean_display_text(clean)
+
+
+# ============================================================
+# SOURCE EVIDENCE UI
+# ============================================================
+
+def show_source_evidence(
+    evidence,
+    question=""
+):
+
+    if not evidence:
+
+        st.info(
+            "No exact source evidence was identified for this answer."
+        )
+
+        return
+
+    if not isinstance(evidence, list):
+        evidence = [evidence]
+
+    st.subheader("Source Evidence")
+
+    for index, item in enumerate(
+        evidence,
+        start=1
+    ):
+
+        if not isinstance(item, dict):
+            continue
+
+        source = item.get(
+            "source",
+            "Unknown"
+        )
+
+        page = item.get(
+            "page",
+            "Unknown"
+        )
+
+        document_type = item.get(
+            "document_type",
+            "Unknown"
+        )
+
+        shipment_id = item.get(
+            "shipment_id",
+            ""
+        )
+
+        raw_text = item.get(
+            "text",
+            ""
+        )
+
+        precise_text = extract_precise_evidence(
+            raw_text,
+            question
+        )
+
+        if not precise_text:
+            precise_text = clean_display_text(
+                raw_text
+            )
+
+        with st.container(border=True):
+
+            st.markdown(
+                f"**Evidence {index}**"
+            )
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+
+                st.caption("SOURCE")
+                st.write(str(source))
+
+            with col2:
+
+                st.caption("PAGE")
+                st.write(str(page))
+
+            with col3:
+
+                st.caption("TYPE")
+                st.write(str(document_type))
+
+            if shipment_id:
+
+                st.caption("SHIPMENT")
+                st.write(str(shipment_id))
+
+            st.caption("EVIDENCE")
+
+            st.markdown(
+                f"**{precise_text}**"
+            )
+
+            pdf_path = (
+                RAW_DATA_DIR
+                / Path(str(source)).name
+            )
+
+            if pdf_path.exists():
+
+                with st.expander(
+                    "📄 View Original PDF"
+                ):
+
+                    try:
+
+                        st.pdf(
+                            str(pdf_path),
+                            height=650
+                        )
+
+                    except Exception as pdf_error:
+
+                        st.error(
+                            f"PDF viewer error: {pdf_error}"
+                        )
+
+
+# ============================================================
+# RECONCILIATION EVIDENCE
+# ============================================================
+
+def build_reconciliation_evidence(result):
+
+    shipment_id = str(
+        result.get(
+            "shipment_id",
+            ""
+        )
+    ).upper()
+
+    documents, metadatas = get_indexed_data()
+
+    evidence = []
+
+    patterns = [
+
+        (
+            "BOL",
+            [
+                (
+                    r"Number\s+of\s+Pieces\s*:\s*(\d+)",
+                    "Number of Pieces"
+                ),
+                (
+                    r"Pieces\s*:\s*(\d+)",
+                    "Pieces"
+                ),
+                (
+                    r"Quantity\s*:\s*(\d+)",
+                    "Quantity"
+                ),
+            ],
+            "BOL Pieces",
+        ),
+
+        (
+            "POD",
+            [
+                (
+                    r"Number\s+of\s+Pieces\s+Delivered\s*:\s*(\d+)",
+                    "Number of Pieces Delivered"
+                ),
+                (
+                    r"Pieces\s+Delivered\s*:\s*(\d+)",
+                    "Pieces Delivered"
+                ),
+                (
+                    r"Quantity\s+Delivered\s*:\s*(\d+)",
+                    "Quantity Delivered"
+                ),
+            ],
+            "Delivered Pieces",
+        ),
+
+        (
+            "BOL",
+            [
+                (
+                    r"Expected\s+Delivery\s+Date\s*:\s*"
+                    r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+                    "Expected Delivery Date"
+                ),
+                (
+                    r"Expected\s+Delivery\s*:\s*"
+                    r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+                    "Expected Delivery"
+                ),
+            ],
+            "Expected Delivery",
+        ),
+
+        (
+            "POD",
+            [
+                (
+                    r"Delivery\s+Date\s*:\s*"
+                    r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+                    "Delivery Date"
+                ),
+                (
+                    r"Actual\s+Delivery\s+Date\s*:\s*"
+                    r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+                    "Actual Delivery Date"
+                ),
+            ],
+            "Actual Delivery",
+        ),
+
+        (
+            "INVOICE",
+            [
+                (
+                    r"Total\s+Invoice\s+Amount\s*:\s*"
+                    r"(\$?\s*[\d,]+(?:\.\d{2})?)",
+                    "Total Invoice Amount"
+                ),
+                (
+                    r"Invoice\s+Total\s*:\s*"
+                    r"(\$?\s*[\d,]+(?:\.\d{2})?)",
+                    "Invoice Total"
+                ),
+            ],
+            "Invoice Total",
+        ),
+    ]
+
+    seen = set()
+
+    for document, metadata in zip(
+        documents,
+        metadatas
+    ):
+
+        if not isinstance(metadata, dict):
+            continue
+
+        metadata_shipment = str(
+            metadata.get(
+                "shipment_id",
+                ""
+            )
+        ).upper()
+
+        if shipment_id:
+
+            if (
+                shipment_id not in str(
+                    document
+                ).upper()
+                and shipment_id != metadata_shipment
+            ):
+                continue
+
+        document_type = str(
+            metadata.get(
+                "document_type",
+                ""
+            )
+        ).upper()
+
+        clean_document = normalize_text(
+            document
+        )
+
+        for (
+            expected_type,
+            type_patterns,
+            label
+        ) in patterns:
+
+            if document_type != expected_type:
+                continue
+
+            match = None
+            matched_label = None
+
+            for pattern, field_label in type_patterns:
+
+                match = re.search(
+                    pattern,
+                    clean_document,
+                    re.IGNORECASE
+                )
+
+                if match:
+
+                    matched_label = field_label
+                    break
+
+            if not match:
+                continue
+
+            source = metadata.get(
+                "source",
+                "Unknown"
+            )
+
+            page = metadata.get(
+                "page",
+                "Unknown"
+            )
+
+            key = (
+                source,
+                page,
+                label
+            )
+
+            if key in seen:
+                continue
+
+            value = match.group(
+                match.lastindex
+            ).strip()
+
+            evidence_text = (
+                f"{matched_label}: {value}"
+            )
+
+            evidence.append(
+                {
+                    "label": label,
+                    "source": source,
+                    "page": page,
+                    "document_type": metadata.get(
+                        "document_type",
+                        "Unknown"
+                    ),
+                    "shipment_id": metadata.get(
+                        "shipment_id"
+                    ),
+                    "text": evidence_text,
+                }
+            )
+
+            seen.add(key)
+
+    return evidence
+
+
+# ============================================================
+# RECONCILIATION EVIDENCE UI
+# ============================================================
+
+def show_reconciliation_evidence(
+    evidence,
+    key_prefix=None
+):
+
+    if not evidence:
+
+        st.info(
+            "No source evidence was found for the reconciliation values."
+        )
+
+        return
+
+    st.subheader("Source Evidence")
+
+    grouped = {}
+
+    for item in evidence:
+
+        source = item.get(
+            "source",
+            "Unknown"
+        )
+
+        if source not in grouped:
+            grouped[source] = []
+
+        grouped[source].append(item)
+
+    for source, items in grouped.items():
+
+        first = items[0]
+
+        with st.container(border=True):
+
+            st.markdown(
+                f"**📄 {source}**"
+            )
+
+            st.caption(
+                f"Document Type: "
+                f"{first.get('document_type', 'Unknown')}"
+                f"  •  Shipment: "
+                f"{first.get('shipment_id', 'Unknown')}"
+            )
+
+            for item in items:
+
+                st.markdown(
+                    f"**{item.get('label', 'Evidence')}:** "
+                    f"{item.get('text', '')}"
+                )
+
+                st.caption(
+                    f"Page {item.get('page', 'Unknown')}"
+                )
+
+            pdf_path = (
+                RAW_DATA_DIR
+                / Path(str(source)).name
+            )
+
+            if pdf_path.exists():
+
+                with st.expander(
+                    "📄 View Original PDF"
+                ):
+
+                    try:
+
+                        # A unique key lets the same PDF appear
+                        # more than once on the page
+                        st.pdf(
+                            str(pdf_path),
+                            height=650,
+                            key=(
+                                f"{key_prefix}_{source}"
+                                if key_prefix
+                                else None
+                            )
+                        )
+
+                    except Exception as pdf_error:
+
+                        st.error(
+                            f"PDF viewer error: {pdf_error}"
+                        )
+
+
+# ============================================================
+# EXCEPTION DETAILS UI
+# ============================================================
+
+def show_exception_details(
+    intelligence
+):
+
+    st.markdown("#### Exception Details")
+
+    exceptions = intelligence.get(
+        "exceptions",
+        []
+    )
+
+    if not exceptions:
+
+        st.success(
+            "No exceptions detected for this shipment."
+        )
+
+        return
+
+    quantity = intelligence.get(
+        "quantity",
+        {}
+    )
+
+    delivery = intelligence.get(
+        "delivery",
+        {}
+    )
+
+    # Per exception category: card title, the evidence labels
+    # produced by build_reconciliation_evidence(), and the
+    # calculation values from the intelligence result
+    details = {
+
+        "Quantity": {
+            "title": (
+                "Quantity "
+                f"{str(quantity.get('status', '')).title()}"
+            ),
+            "labels": [
+                "BOL Pieces",
+                "Delivered Pieces",
+            ],
+            "calculation": [
+                ("Expected", quantity.get("bol_pieces")),
+                ("Delivered", quantity.get("delivered_pieces")),
+                ("Difference", quantity.get("difference")),
+            ],
+        },
+
+        "Delivery": {
+            "title": "Delivery Delay",
+            "labels": [
+                "Expected Delivery",
+                "Actual Delivery",
+            ],
+            "calculation": [
+                ("Expected Date", delivery.get("expected")),
+                ("Actual Date", delivery.get("actual")),
+                (
+                    "Delay",
+                    f"{delivery.get('delay_days', 0)} day(s)"
+                ),
+            ],
+        },
+    }
+
+    evidence = build_reconciliation_evidence(
+        intelligence
+    )
+
+    for index, exception in enumerate(
+        exceptions
+    ):
+
+        category = exception.get(
+            "category",
+            "Other"
+        )
+
+        severity = str(
+            exception.get(
+                "severity",
+                "UNKNOWN"
+            )
+        ).upper()
+
+        detail = details.get(
+            category,
+            {}
+        )
+
+        icon = (
+            "🔴"
+            if severity == "HIGH"
+            else "🟠"
+        )
+
+        with st.container(border=True):
+
+            st.markdown(
+                f"**{icon} {detail.get('title', category)}**"
+                f"  •  Severity: {severity}"
+            )
+
+            st.write(
+                exception.get(
+                    "message",
+                    ""
+                )
+            )
+
+            calculation = detail.get(
+                "calculation",
+                []
+            )
+
+            if calculation:
+
+                columns = st.columns(
+                    len(calculation)
+                )
+
+                for column, (label, value) in zip(
+                    columns,
+                    calculation
+                ):
+
+                    with column:
+
+                        st.caption(label.upper())
+
+                        st.write(
+                            str(value)
+                            if value is not None
+                            else "N/A"
+                        )
+
+            items = [
+                item
+                for item in evidence
+                if item.get("label")
+                in detail.get("labels", [])
+            ]
+
+            if items:
+
+                show_reconciliation_evidence(
+                    items,
+                    key_prefix=f"exception_{index}"
+                )
+
+
+# ============================================================
+# SHIPMENT INTELLIGENCE UI
+# ============================================================
+
+def show_shipment_intelligence():
+
+    st.subheader("Shipment Intelligence")
+
+    try:
+
+        intelligence = analyze_shipment()
+
+    except Exception as error:
+
+        st.error(
+            f"Shipment intelligence failed: {error}"
+        )
+
+        return None
+
+    if not isinstance(intelligence, dict):
+
+        st.error(
+            "Shipment intelligence returned an unexpected result."
+        )
+
+        return None
+
+    if not intelligence.get(
+        "success",
+        False
+    ):
+
+        st.error(
+            "Shipment intelligence failed: "
+            f"{intelligence.get('error', 'Unknown error')}"
+        )
+
+        return None
+
+    # --------------------------------------------------------
+    # analyze_shipment() returns nested sections:
+    #   documents -> found / expected / completeness
+    #   quantity  -> status / difference
+    #   delivery  -> status / delay_days
+    # --------------------------------------------------------
+
+    shipment_status = intelligence.get(
+        "shipment_status",
+        "UNKNOWN"
+    )
+
+    exceptions = intelligence.get(
+        "exceptions",
+        []
+    )
+
+    documents_info = intelligence.get(
+        "documents",
+        {}
+    )
+
+    documents = (
+        f"{documents_info.get('found', 0)}/"
+        f"{documents_info.get('expected', 0)}"
+    )
+
+    completeness = documents_info.get(
+        "completeness",
+        0
+    )
+
+    quantity = intelligence.get(
+        "quantity",
+        {}
+    )
+
+    quantity_status = quantity.get(
+        "status",
+        "UNKNOWN"
+    )
+
+    quantity_difference = quantity.get(
+        "difference",
+        0
+    )
+
+    delivery = intelligence.get(
+        "delivery",
+        {}
+    )
+
+    delivery_status = delivery.get(
+        "status",
+        "UNKNOWN"
+    )
+
+    delay_days = delivery.get(
+        "delay_days",
+        0
+    )
+
+    invoice_total = intelligence.get(
+        "invoice_total"
+    )
+
+    if invoice_total is None:
+
+        invoice_total = "N/A"
+
+    # --------------------------------------------------------
+    # STATUS
+    # --------------------------------------------------------
+
+    if str(shipment_status).upper() == "EXCEPTION":
+
+        st.error(
+            f"⚠️ Shipment Status: {shipment_status}"
+        )
+
+    else:
+
+        st.success(
+            f"Shipment Status: {shipment_status}"
+        )
+
+    # --------------------------------------------------------
+    # KPI CARDS
+    # --------------------------------------------------------
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+
+        st.metric(
+            "Exceptions",
+            len(exceptions)
+        )
+
+    with col2:
+
+        st.metric(
+            "Documents",
+            documents
+        )
+
+    with col3:
+
+        st.metric(
+            "Completeness",
+            f"{completeness}%"
+        )
+
+    with col4:
+
+        st.metric(
+            "Invoice Total",
+            (
+                f"${invoice_total:,.2f}"
+                if isinstance(
+                    invoice_total,
+                    (int, float)
+                )
+                else str(invoice_total)
+            )
+        )
+
+    # --------------------------------------------------------
+    # OPERATIONAL STATUS
+    # --------------------------------------------------------
+
+    st.markdown("#### Operational Status")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.metric(
+            "Quantity Status",
+            quantity_status
+        )
+
+        if str(quantity_status).upper() == "SHORTAGE":
+
+            st.warning(
+                f"Shortage detected: "
+                f"{quantity_difference} pieces"
+            )
+
+    with col2:
+
+        st.metric(
+            "Delivery Status",
+            delivery_status
+        )
+
+        if str(delivery_status).upper() == "DELAYED":
+
+            st.warning(
+                f"Delivery delayed by "
+                f"{delay_days} day(s)"
+            )
+
+    with col3:
+
+        st.metric(
+            "Quantity Difference",
+            quantity_difference
+        )
+
+    show_exception_details(
+        intelligence
+    )
+
+    return intelligence
 
 
 # ============================================================
@@ -102,18 +1193,10 @@ st.markdown(
 
 st.markdown(
     '<div class="subtitle">'
-    "AI-powered logistics document intelligence and shipment reconciliation"
-    "</div>",
+    'AI-powered logistics document intelligence and shipment reconciliation'
+    '</div>',
     unsafe_allow_html=True,
 )
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
-if "documents_processed" not in st.session_state:
-    st.session_state.documents_processed = False
 
 
 # ============================================================
@@ -154,22 +1237,20 @@ with st.sidebar:
                     exist_ok=True
                 )
 
-                # ------------------------------------------------
-                # Remove previous PDFs
-                # ------------------------------------------------
-
                 for pdf_file in RAW_DATA_DIR.glob("*.pdf"):
-                    pdf_file.unlink()
 
-                # ------------------------------------------------
-                # Save uploaded PDFs
-                # ------------------------------------------------
+                    try:
+                        pdf_file.unlink()
+                    except Exception:
+                        pass
 
                 for uploaded_file in uploaded_files:
 
                     destination = (
                         RAW_DATA_DIR
-                        / Path(uploaded_file.name).name
+                        / Path(
+                            uploaded_file.name
+                        ).name
                     )
 
                     with open(
@@ -181,10 +1262,6 @@ with st.sidebar:
                             uploaded_file.getbuffer()
                         )
 
-                # ------------------------------------------------
-                # Build vector database
-                # ------------------------------------------------
-
                 with st.spinner(
                     "Extracting, chunking and indexing documents..."
                 ):
@@ -194,29 +1271,176 @@ with st.sidebar:
                 st.session_state.documents_processed = True
 
                 st.success(
-                    f"{len(uploaded_files)} document(s) processed."
+                    f"{len(uploaded_files)} document(s) "
+                    f"processed successfully."
                 )
 
-            except Exception as e:
+                st.rerun()
+
+            except Exception as error:
 
                 st.error(
-                    f"Processing failed: {e}"
+                    f"Processing failed: {error}"
                 )
 
 
 # ============================================================
-# SIDEBAR SYSTEM STATUS
+# LOAD DASHBOARD DATA
 # ============================================================
+
+shipment_information = (
+    get_shipment_information()
+)
+
+shipment_ids = sorted(
+    shipment_information.keys()
+)
+
+
+# ============================================================
+# SHIPMENT SELECTOR
+# ============================================================
+
+with st.sidebar:
+
+    st.divider()
+
+    st.header("Shipment")
+
+    shipment_options = (
+        ["All Shipments"]
+        + shipment_ids
+    )
+
+    selected_shipment = st.selectbox(
+        "Select shipment",
+        shipment_options,
+        index=0,
+    )
+
+    st.session_state.selected_shipment = (
+        selected_shipment
+    )
+
+    if selected_shipment != "All Shipments":
+
+        info = shipment_information.get(
+            selected_shipment,
+            {}
+        )
+
+        documents_count = len(
+            info.get(
+                "documents",
+                set()
+            )
+        )
+
+        types = sorted(
+            info.get(
+                "types",
+                set()
+            )
+        )
+
+        st.caption(
+            f"Documents: {documents_count}"
+        )
+
+        st.caption(
+            "Types: "
+            + (
+                ", ".join(types)
+                if types
+                else "Unknown"
+            )
+        )
+
+
+# ============================================================
+# DASHBOARD COUNTS
+# ============================================================
+
+documents, metadatas = (
+    get_indexed_data()
+)
+
+unique_sources = set()
+unique_types = set()
+
+for metadata in metadatas:
+
+    if not isinstance(metadata, dict):
+        continue
+
+    source = metadata.get("source")
+    document_type = metadata.get("document_type")
+
+    if source:
+        unique_sources.add(
+            str(source)
+        )
+
+    if document_type:
+        unique_types.add(
+            str(document_type).upper()
+        )
+
+
+# ============================================================
+# DASHBOARD
+# ============================================================
+
+st.subheader(
+    "Shipment Intelligence Dashboard"
+)
+
+st.caption(
+    "Monitor indexed logistics documents, shipments and reconciliation activity."
+)
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+
+    st.metric(
+        "Active Shipment",
+        selected_shipment
+    )
+
+with col2:
+
+    st.metric(
+        "Shipments Indexed",
+        len(shipment_ids)
+    )
+
+with col3:
+
+    st.metric(
+        "Documents",
+        len(unique_sources)
+    )
+
+with col4:
+
+    st.metric(
+        "Document Types",
+        len(unique_types)
+    )
+
+st.divider()
 
 
 # ============================================================
 # MAIN TABS
 # ============================================================
 
-tab1, tab2 = st.tabs(
+tab1, tab2, tab3 = st.tabs(
     [
         "💬 Logistics Assistant",
         "📊 Shipment Reconciliation",
+        "🧠 Shipment Intelligence",
     ]
 )
 
@@ -229,20 +1453,33 @@ with tab1:
 
     st.markdown(
         '<div class="section-title">'
-        "Ask your logistics documents"
-        "</div>",
+        'Ask Your Logistics Documents'
+        '</div>',
         unsafe_allow_html=True,
     )
 
-    st.caption(
-        "Ask questions about BOL, POD and Invoice documents."
-    )
+    if selected_shipment == "All Shipments":
+
+        st.caption(
+            "Ask questions across all indexed logistics shipments."
+        )
+
+    else:
+
+        st.info(
+            f"Selected shipment: {selected_shipment}"
+        )
+
+        st.caption(
+            "Questions are searched across the indexed documents."
+        )
 
     question = st.text_input(
         "Logistics question",
         placeholder=(
             "Example: How many pieces were delivered?"
         ),
+        key="logistics_question",
     )
 
     ask_button = st.button(
@@ -272,23 +1509,88 @@ with tab1:
 
                 st.subheader("Answer")
 
-                st.success(answer)
+                if answer:
 
-                # ------------------------------------------------
-                # Sources
-                # ------------------------------------------------
+                    answer_text = str(
+                        answer
+                    ).strip()
 
-                st.subheader("Sources")
+                    st.success(
+                        answer_text
+                    )
 
-                metadatas = (
-                    results
-                    .get("metadatas", [[]])[0]
-                    or []
+                else:
+
+                    st.warning(
+                        "No answer was generated from the indexed documents."
+                    )
+
+                evidence = {}
+
+                if isinstance(
+                    results,
+                    dict
+                ):
+
+                    evidence = results.get(
+                        "evidence"
+                    )
+
+                show_source_evidence(
+                    evidence,
+                    question
                 )
+
+                st.subheader(
+                    "Retrieved Sources"
+                )
+
+                metadatas_result = []
+
+                if isinstance(
+                    results,
+                    dict
+                ):
+
+                    raw_metadatas = results.get(
+                        "metadatas",
+                        []
+                    )
+
+                    if (
+                        isinstance(
+                            raw_metadatas,
+                            list
+                        )
+                        and raw_metadatas
+                        and isinstance(
+                            raw_metadatas[0],
+                            list
+                        )
+                    ):
+
+                        metadatas_result = (
+                            raw_metadatas[0]
+                        )
+
+                    elif isinstance(
+                        raw_metadatas,
+                        list
+                    ):
+
+                        metadatas_result = (
+                            raw_metadatas
+                        )
 
                 seen_sources = set()
 
-                for metadata in metadatas:
+                for metadata in metadatas_result:
+
+                    if not isinstance(
+                        metadata,
+                        dict
+                    ):
+                        continue
 
                     source = metadata.get(
                         "source",
@@ -311,38 +1613,39 @@ with tab1:
                         document_type
                     )
 
-                    if key not in seen_sources:
+                    if key in seen_sources:
+                        continue
 
-                        st.write(
-                            f"📄 {source} "
-                            f"(Page {page}, "
-                            f"Type: {document_type})"
-                        )
+                    st.write(
+                        f"📄 {source} "
+                        f"(Page {page}, "
+                        f"Type: {document_type})"
+                    )
 
-                        seen_sources.add(key)
+                    seen_sources.add(key)
 
-            except Exception as e:
+            except Exception as error:
 
                 st.error(
-                    f"Question processing failed: {e}"
+                    f"Question processing failed: {error}"
                 )
 
 
 # ============================================================
-# TAB 2 — RECONCILIATION
+# TAB 2 — SHIPMENT RECONCILIATION
 # ============================================================
 
 with tab2:
 
     st.markdown(
         '<div class="section-title">'
-        "Shipment Reconciliation"
-        "</div>",
+        'Shipment Reconciliation'
+        '</div>',
         unsafe_allow_html=True,
     )
 
     st.caption(
-        "Compare BOL, POD and Invoice data to detect shipment discrepancies."
+        "Compare BOL, POD and Invoice information to identify shipment discrepancies."
     )
 
     run_reconciliation = st.button(
@@ -360,13 +1663,25 @@ with tab2:
 
                 result = reconcile_shipment()
 
-            if not result:
+            if not isinstance(
+                result,
+                dict
+            ):
+
+                st.error(
+                    "Reconciliation returned an unexpected result."
+                )
+
+            elif not result:
 
                 st.error(
                     "No shipment documents found."
                 )
 
-            elif not result.get("success"):
+            elif not result.get(
+                "success",
+                False
+            ):
 
                 st.error(
                     result.get(
@@ -377,19 +1692,29 @@ with tab2:
 
             else:
 
-                # ------------------------------------------------
-                # Shipment Header
-                # ------------------------------------------------
+                shipment_id = result.get(
+                    "shipment_id",
+                    "Unknown"
+                )
 
                 st.subheader(
-                    f"Shipment: {result['shipment_id']}"
+                    f"Shipment: {shipment_id}"
                 )
 
                 # ------------------------------------------------
-                # Quantity Metrics
+                # Quantity
                 # ------------------------------------------------
 
-                quantity = result["quantity"]
+                quantity = result.get(
+                    "quantity",
+                    {}
+                )
+
+                if not isinstance(
+                    quantity,
+                    dict
+                ):
+                    quantity = {}
 
                 col1, col2, col3 = st.columns(3)
 
@@ -397,28 +1722,39 @@ with tab2:
 
                     st.metric(
                         "BOL Pieces",
-                        quantity["bol"]
+                        quantity.get(
+                            "bol",
+                            "N/A"
+                        )
                     )
 
                 with col2:
 
                     st.metric(
                         "Delivered Pieces",
-                        quantity["pod"]
+                        quantity.get(
+                            "pod",
+                            "N/A"
+                        )
                     )
 
                 with col3:
 
                     st.metric(
                         "Difference",
-                        quantity["difference"]
+                        quantity.get(
+                            "difference",
+                            "N/A"
+                        )
                     )
 
-                if quantity["status"] == "MISMATCH":
+                if quantity.get(
+                    "status"
+                ) == "MISMATCH":
 
                     st.error(
-                        f"⚠️ Quantity discrepancy: "
-                        f"{quantity['difference']} pieces."
+                        "⚠️ Quantity discrepancy: "
+                        f"{quantity.get('difference', 0)} pieces."
                     )
 
                 else:
@@ -435,7 +1771,16 @@ with tab2:
                     "Delivery"
                 )
 
-                delivery = result["delivery"]
+                delivery = result.get(
+                    "delivery",
+                    {}
+                )
+
+                if not isinstance(
+                    delivery,
+                    dict
+                ):
+                    delivery = {}
 
                 col1, col2 = st.columns(2)
 
@@ -443,17 +1788,25 @@ with tab2:
 
                     st.metric(
                         "Expected Delivery",
-                        delivery["expected"]
+                        delivery.get(
+                            "expected",
+                            "N/A"
+                        )
                     )
 
                 with col2:
 
                     st.metric(
                         "Actual Delivery",
-                        delivery["actual"]
+                        delivery.get(
+                            "actual",
+                            "N/A"
+                        )
                     )
 
-                if delivery["status"] == "MISMATCH":
+                if delivery.get(
+                    "status"
+                ) == "MISMATCH":
 
                     st.warning(
                         "⚠️ Delivery date discrepancy detected."
@@ -473,28 +1826,39 @@ with tab2:
                     "Shipment Route"
                 )
 
-                route = result["route"]
+                route = result.get(
+                    "route",
+                    {}
+                )
+
+                if not isinstance(
+                    route,
+                    dict
+                ):
+                    route = {}
 
                 col1, col2 = st.columns(2)
 
                 with col1:
 
-                    st.write(
-                        "**Origin**"
-                    )
+                    st.caption("ORIGIN")
 
                     st.write(
-                        route["origin"]
+                        route.get(
+                            "origin",
+                            "N/A"
+                        )
                     )
 
                 with col2:
 
-                    st.write(
-                        "**Destination**"
-                    )
+                    st.caption("DESTINATION")
 
                     st.write(
-                        route["destination"]
+                        route.get(
+                            "destination",
+                            "N/A"
+                        )
                     )
 
                 # ------------------------------------------------
@@ -505,19 +1869,51 @@ with tab2:
                     "Carrier"
                 )
 
-                carrier = result["carrier"]
-
-                st.write(
-                    f"**BOL:** {carrier['bol']}"
+                carrier = result.get(
+                    "carrier",
+                    {}
                 )
 
-                st.write(
-                    f"**Invoice:** {carrier['invoice']}"
-                )
+                if not isinstance(
+                    carrier,
+                    dict
+                ):
+                    carrier = {}
 
-                st.write(
-                    f"**POD:** {carrier['pod']}"
-                )
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+
+                    st.caption("BOL")
+
+                    st.write(
+                        carrier.get(
+                            "bol",
+                            "N/A"
+                        )
+                    )
+
+                with col2:
+
+                    st.caption("INVOICE")
+
+                    st.write(
+                        carrier.get(
+                            "invoice",
+                            "N/A"
+                        )
+                    )
+
+                with col3:
+
+                    st.caption("POD")
+
+                    st.write(
+                        carrier.get(
+                            "pod",
+                            "N/A"
+                        )
+                    )
 
                 # ------------------------------------------------
                 # Invoice
@@ -527,67 +1923,145 @@ with tab2:
                     "Invoice"
                 )
 
-                invoice = result["invoice"]
+                invoice = result.get(
+                    "invoice",
+                    {}
+                )
+
+                if not isinstance(
+                    invoice,
+                    dict
+                ):
+                    invoice = {}
 
                 col1, col2, col3, col4 = st.columns(4)
 
                 with col1:
 
+                    value = invoice.get(
+                        "base_freight"
+                    )
+
                     st.metric(
                         "Base Freight",
-                        f"${invoice['base_freight']:,.2f}"
-                        if invoice["base_freight"] is not None
-                        else "N/A"
+                        (
+                            f"${value:,.2f}"
+                            if isinstance(
+                                value,
+                                (int, float)
+                            )
+                            else "N/A"
+                        )
                     )
 
                 with col2:
 
+                    value = invoice.get(
+                        "fuel_surcharge"
+                    )
+
                     st.metric(
                         "Fuel Surcharge",
-                        f"${invoice['fuel_surcharge']:,.2f}"
-                        if invoice["fuel_surcharge"] is not None
-                        else "N/A"
+                        (
+                            f"${value:,.2f}"
+                            if isinstance(
+                                value,
+                                (int, float)
+                            )
+                            else "N/A"
+                        )
                     )
 
                 with col3:
 
+                    value = invoice.get(
+                        "other_charges"
+                    )
+
                     st.metric(
                         "Other Charges",
-                        f"${invoice['other_charges']:,.2f}"
-                        if invoice["other_charges"] is not None
-                        else "N/A"
+                        (
+                            f"${value:,.2f}"
+                            if isinstance(
+                                value,
+                                (int, float)
+                            )
+                            else "N/A"
+                        )
                     )
 
                 with col4:
 
+                    value = invoice.get(
+                        "total"
+                    )
+
                     st.metric(
                         "Invoice Total",
-                        f"${invoice['total']:,.2f}"
-                        if invoice["total"] is not None
-                        else "N/A"
+                        (
+                            f"${value:,.2f}"
+                            if isinstance(
+                                value,
+                                (int, float)
+                            )
+                            else "N/A"
+                        )
                     )
 
                 # ------------------------------------------------
-                # Final Status
+                # Evidence
+                # ------------------------------------------------
+
+                reconciliation_evidence = (
+                    build_reconciliation_evidence(
+                        result
+                    )
+                )
+
+                show_reconciliation_evidence(
+                    reconciliation_evidence
+                )
+
+                # ------------------------------------------------
+                # Final Result
                 # ------------------------------------------------
 
                 st.subheader(
                     "Reconciliation Result"
                 )
 
-                if result["discrepancies"]:
+                discrepancies = result.get(
+                    "discrepancies",
+                    []
+                )
+
+                if discrepancies:
 
                     st.error(
                         "⚠️ DISCREPANCIES DETECTED"
                     )
 
-                    for discrepancy in result[
-                        "discrepancies"
-                    ]:
+                    for discrepancy in discrepancies:
+
+                        if not isinstance(
+                            discrepancy,
+                            dict
+                        ):
+                            continue
+
+                        category = discrepancy.get(
+                            "category",
+                            "Issue"
+                        )
+
+                        description = discrepancy.get(
+                            "description",
+                            ""
+                        )
 
                         st.warning(
-                            f"**{discrepancy['category']}** — "
-                            f"{discrepancy['description']}"
+                            f"**{category}** — "
+                            f"{description}"
                         )
 
                 else:
@@ -596,11 +2070,38 @@ with tab2:
                         "✅ NO DISCREPANCIES"
                     )
 
-        except Exception as e:
+        except Exception as error:
 
             st.error(
-                f"Reconciliation failed: {e}"
+                f"Reconciliation failed: {error}"
             )
+
+
+# ============================================================
+# TAB 3 — SHIPMENT INTELLIGENCE
+# ============================================================
+
+with tab3:
+
+    st.markdown(
+        '<div class="section-title">'
+        'Shipment Intelligence'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.caption(
+        "Operational analysis of shipment completeness, quantity, delivery and financial status."
+    )
+
+    run_intelligence = st.button(
+        "Run Shipment Intelligence",
+        type="primary",
+    )
+
+    if run_intelligence:
+
+        show_shipment_intelligence()
 
 
 # ============================================================
