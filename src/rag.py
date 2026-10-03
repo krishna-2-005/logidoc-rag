@@ -1,9 +1,7 @@
 import sys
 import re
 from pathlib import Path
-
-import chromadb
-import ollama
+from datetime import datetime
 
 
 # ============================================================
@@ -12,9 +10,20 @@ import ollama
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-sys.path.insert(
-    0,
-    str(PROJECT_ROOT)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+# ============================================================
+# THIRD-PARTY IMPORTS
+# ============================================================
+
+import chromadb
+import ollama
+
+from source_evidence import (
+    create_evidence,
+    format_evidence,
 )
 
 
@@ -27,13 +36,17 @@ from config import (
     COLLECTION_NAME,
     EMBEDDING_MODEL,
     LLM_MODEL,
-    TOP_K
+    TOP_K,
 )
 
 
 # ============================================================
 # LOGIDOC-RAG
-# HYBRID RETRIEVAL + EXACT LOGISTICS EXTRACTION
+#
+# Hybrid Retrieval
+# Exact Logistics Extraction
+# Source Evidence
+# Shipment-Aware Answers
 # ============================================================
 
 
@@ -63,19 +76,25 @@ def get_all_documents():
     data = collection.get(
         include=[
             "documents",
-            "metadatas"
+            "metadatas",
         ]
     )
 
-    documents = data.get(
-        "documents",
-        []
-    ) or []
+    documents = (
+        data.get(
+            "documents",
+            []
+        )
+        or []
+    )
 
-    metadatas = data.get(
-        "metadatas",
-        []
-    ) or []
+    metadatas = (
+        data.get(
+            "metadatas",
+            []
+        )
+        or []
+    )
 
     return documents, metadatas
 
@@ -89,7 +108,8 @@ def normalize_text(text):
     if not text:
         return ""
 
-    # Convert different line endings
+    text = str(text)
+
     text = text.replace(
         "\r\n",
         "\n"
@@ -100,7 +120,6 @@ def normalize_text(text):
         "\n"
     )
 
-    # Replace all whitespace/newlines with one space
     text = re.sub(
         r"\s+",
         " ",
@@ -111,27 +130,54 @@ def normalize_text(text):
 
 
 # ============================================================
-# GET DOCUMENT TYPE
+# RAW TEXT NORMALIZATION
 # ============================================================
 
-def get_document_type(metadata, document):
+def normalize_raw_text(text):
+
+    if not text:
+        return ""
+
+    return (
+        str(text)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+    )
+
+
+# ============================================================
+# DOCUMENT TYPE
+# ============================================================
+
+def get_document_type(
+    metadata,
+    document
+):
 
     document_type = str(
         metadata.get(
             "document_type",
             ""
         )
-    ).lower()
+    ).strip().lower()
 
     if document_type:
         return document_type
 
-    document_lower = document.lower()
+    document_lower = (
+        document or ""
+    ).lower()
 
-    if "proof of delivery" in document_lower:
+    if (
+        "proof of delivery"
+        in document_lower
+    ):
         return "pod"
 
-    if "bill of lading" in document_lower:
+    if (
+        "bill of lading"
+        in document_lower
+    ):
         return "bol"
 
     if "invoice" in document_lower:
@@ -150,9 +196,13 @@ def keyword_score(
     metadata
 ):
 
-    question_lower = question.lower()
+    question_lower = (
+        question or ""
+    ).lower()
 
-    document_lower = document.lower()
+    document_lower = (
+        document or ""
+    ).lower()
 
     score = 0
 
@@ -179,7 +229,10 @@ def keyword_score(
         "received",
         "signature",
         "bol",
-        "bill of lading"
+        "bill of lading",
+        "expected",
+        "actual",
+        "on time",
     ]
 
     question_words = set(
@@ -196,11 +249,16 @@ def keyword_score(
         )
     )
 
-    overlap = question_words.intersection(
-        document_words
+    overlap = (
+        question_words
+        .intersection(
+            document_words
+        )
     )
 
-    score += len(overlap) * 3
+    score += (
+        len(overlap) * 3
+    )
 
     for keyword in keywords:
 
@@ -234,6 +292,22 @@ def keyword_score(
         and document_type == "bol"
     ):
         score += 50
+
+    if (
+        (
+            "deliver" in question_lower
+            or "delivery" in question_lower
+            or "on time" in question_lower
+        )
+        and document_type == "pod"
+    ):
+        score += 25
+
+    if (
+        "expected" in question_lower
+        and document_type == "bol"
+    ):
+        score += 25
 
     return score
 
@@ -285,7 +359,9 @@ def search_documents(question):
     # GET ALL DOCUMENTS
     # --------------------------------------------------------
 
-    all_documents, all_metadatas = get_all_documents()
+    all_documents, all_metadatas = (
+        get_all_documents()
+    )
 
     scored_documents = []
 
@@ -308,9 +384,8 @@ def search_documents(question):
             )
         )
 
-    # Highest keyword score first
     scored_documents.sort(
-        key=lambda x: x[0],
+        key=lambda item: item[0],
         reverse=True
     )
 
@@ -322,7 +397,7 @@ def search_documents(question):
 
     seen = set()
 
-    # First keyword results
+    # Keyword results first
     for (
         score,
         document,
@@ -333,30 +408,25 @@ def search_documents(question):
             continue
 
         key = (
-            metadata.get(
-                "source"
-            ),
-            metadata.get(
-                "page"
-            ),
-            metadata.get(
-                "chunk"
-            )
+            metadata.get("source"),
+            metadata.get("page"),
+            metadata.get("chunk")
         )
 
-        if key not in seen:
+        if key in seen:
+            continue
 
-            combined.append(
-                {
-                    "document": document,
-                    "metadata": metadata,
-                    "score": score
-                }
-            )
+        combined.append(
+            {
+                "document": document,
+                "metadata": metadata,
+                "score": score,
+            }
+        )
 
-            seen.add(key)
+        seen.add(key)
 
-    # Then vector results
+    # Vector results second
     for (
         document,
         metadata
@@ -366,30 +436,24 @@ def search_documents(question):
     ):
 
         key = (
-            metadata.get(
-                "source"
-            ),
-            metadata.get(
-                "page"
-            ),
-            metadata.get(
-                "chunk"
-            )
+            metadata.get("source"),
+            metadata.get("page"),
+            metadata.get("chunk")
         )
 
-        if key not in seen:
+        if key in seen:
+            continue
 
-            combined.append(
-                {
-                    "document": document,
-                    "metadata": metadata,
-                    "score": 0
-                }
-            )
+        combined.append(
+            {
+                "document": document,
+                "metadata": metadata,
+                "score": 0,
+            }
+        )
 
-            seen.add(key)
+        seen.add(key)
 
-    # Keep context manageable
     combined = combined[
         :max(
             TOP_K,
@@ -413,49 +477,19 @@ def search_documents(question):
         ],
         "metadatas": [
             metadatas
-        ]
+        ],
     }
 
 
 # ============================================================
-# EXACT LOGISTICS FIELD EXTRACTION
+# GET DOCUMENT RECORDS
 # ============================================================
 
-def extract_exact_answer(
-    question,
-    results
-):
-    """
-    Deterministic extraction for structured logistics fields.
+def get_document_records():
 
-    IMPORTANT:
-    This searches ALL documents in ChromaDB instead of only
-    the semantic-search results.
-
-    Therefore:
-        "How many pieces were delivered?"
-
-    will still find:
-
-        Number of Pieces Delivered: 48
-
-    even if vector search ranks another document first.
-    """
-
-    question_lower = question.lower()
-
-    # ========================================================
-    # GET ALL INDEXED DOCUMENTS
-    # ========================================================
-
-    all_documents, all_metadatas = get_all_documents()
-
-    if not all_documents:
-        return None
-
-    # ========================================================
-    # BUILD DOCUMENT RECORDS
-    # ========================================================
+    all_documents, all_metadatas = (
+        get_all_documents()
+    )
 
     records = []
 
@@ -464,192 +498,426 @@ def extract_exact_answer(
         all_metadatas
     ):
 
-        normalized = normalize_text(
-            document
-        )
-
-        document_type = get_document_type(
-            metadata,
-            document
-        )
-
-        # Line breaks kept, for fields whose value ends at a newline
-        raw = document.replace(
-            "\r\n",
-            "\n"
-        ).replace(
-            "\r",
-            "\n"
-        )
-
         records.append(
             {
-                "text": normalized,
-                "raw": raw,
+                "document": document,
                 "metadata": metadata,
-                "type": document_type
+                "type": get_document_type(
+                    metadata,
+                    document
+                ),
+                "normalized": normalize_text(
+                    document
+                ),
+                "raw": normalize_raw_text(
+                    document
+                ),
             }
         )
 
-    # ========================================================
-    # DETECT REQUESTED DOCUMENT TYPE
-    # ========================================================
+    return records
 
-    preferred_types = []
 
-    # "delivered" / "delivery" questions are answered by the POD,
-    # not the BOL (BOL holds shipped pieces and expected dates)
-    if (
-        "pod" in question_lower
-        or "proof of delivery" in question_lower
-        or "deliver" in question_lower
-    ):
-        preferred_types.append("pod")
+# ============================================================
+# SHIPMENT ID EXTRACTION
+# ============================================================
 
-    if "invoice" in question_lower:
-        preferred_types.append("invoice")
+def extract_shipment_id(question):
 
-    if (
-        "bol" in question_lower
-        or "bill of lading" in question_lower
-    ):
-        preferred_types.append("bol")
-
-    # ========================================================
-    # SORT DOCUMENTS
-    # ========================================================
-
-    if preferred_types:
-
-        records.sort(
-            key=lambda record:
-            (
-                0
-                if record["type"]
-                in preferred_types
-                else 1
-            )
-        )
-
-    # ========================================================
-    # SHIPMENT ID FROM QUESTION
-    # ========================================================
-
-    shipment_match = re.search(
+    match = re.search(
         r"\bSHJ-\d{4}-\d+\b",
-        question,
+        question or "",
         re.IGNORECASE
     )
 
-    shipment_id = None
+    if not match:
+        return None
 
-    if shipment_match:
+    return (
+        match.group(0)
+        .upper()
+    )
 
-        shipment_id = (
-            shipment_match
-            .group(0)
-            .upper()
+
+# ============================================================
+# FILTER RECORDS BY SHIPMENT
+# ============================================================
+
+def filter_records_by_shipment(
+    records,
+    shipment_id
+):
+
+    if not shipment_id:
+        return records
+
+    filtered = []
+
+    for record in records:
+
+        metadata_shipment = str(
+            record["metadata"].get(
+                "shipment_id",
+                ""
+            )
+        ).upper()
+
+        document_upper = (
+            record["document"]
+            or ""
+        ).upper()
+
+        if (
+            shipment_id
+            == metadata_shipment
+            or shipment_id
+            in document_upper
+        ):
+
+            filtered.append(
+                record
+            )
+
+    if filtered:
+        return filtered
+
+    return records
+
+
+# ============================================================
+# EXTRACT DATE
+# ============================================================
+
+def extract_date(
+    text,
+    patterns
+):
+
+    if not text:
+        return None
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE
         )
 
-    # ========================================================
-    # FILTER BY SHIPMENT ID IF PROVIDED
-    # ========================================================
+        if match:
 
-    if shipment_id:
+            value = (
+                match.group(1)
+                .strip()
+            )
 
-        shipment_records = []
+            try:
 
-        for record in records:
-
-            metadata_shipment = str(
-                record["metadata"].get(
-                    "shipment_id",
-                    ""
-                )
-            ).upper()
-
-            if (
-                shipment_id
-                in record["text"].upper()
-                or shipment_id
-                == metadata_shipment
-            ):
-
-                shipment_records.append(
-                    record
+                parsed = datetime.strptime(
+                    value,
+                    "%B %d, %Y"
                 )
 
-        if shipment_records:
+                return (
+                    parsed,
+                    value
+                )
 
-            records = shipment_records
+            except ValueError:
+                continue
 
-    # ========================================================
-    # 1. NUMBER OF PIECES DELIVERED
-    # ========================================================
+    return None
+
+
+# ============================================================
+# GET EXPECTED DELIVERY DATE
+# ============================================================
+
+def get_expected_delivery_date(
+    records
+):
+
+    patterns = [
+
+        r"Expected\s+Delivery\s+Date\s*:\s*"
+        r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+
+        r"Expected\s+Delivery\s*:\s*"
+        r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+    ]
+
+    for record in records:
+
+        if record["type"] != "bol":
+            continue
+
+        result = extract_date(
+            record["normalized"],
+            patterns
+        )
+
+        if result:
+            return (
+                result[0],
+                result[1],
+                record
+            )
+
+    return None
+
+
+# ============================================================
+# GET ACTUAL DELIVERY DATE
+# ============================================================
+
+def get_actual_delivery_date(
+    records
+):
+
+    patterns = [
+
+        r"Delivery\s+Date\s*:\s*"
+        r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+
+        r"Actual\s+Delivery\s+Date\s*:\s*"
+        r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+    ]
+
+    for record in records:
+
+        if record["type"] != "pod":
+            continue
+
+        result = extract_date(
+            record["normalized"],
+            patterns
+        )
+
+        if result:
+            return (
+                result[0],
+                result[1],
+                record
+            )
+
+    return None
+
+
+# ============================================================
+# EXTRACT EXACT ANSWER
+# ============================================================
+
+def extract_exact_answer(
+    question,
+    results
+):
+
+    question_lower = (
+        question or ""
+    ).lower()
+
+    records = get_document_records()
+
+    if not records:
+        return None
+
+    # --------------------------------------------------------
+    # SHIPMENT FILTER
+    # --------------------------------------------------------
+
+    shipment_id = (
+        extract_shipment_id(
+            question
+        )
+    )
+
+    records = filter_records_by_shipment(
+        records,
+        shipment_id
+    )
+
+    # --------------------------------------------------------
+    # DELIVERY ON TIME
+    # --------------------------------------------------------
+
+    on_time_question = (
+        (
+            "on time"
+            in question_lower
+        )
+        or (
+            "on-time"
+            in question_lower
+        )
+        or (
+            "delivered on time"
+            in question_lower
+        )
+        or (
+            "delivery on time"
+            in question_lower
+        )
+        or (
+            "late"
+            in question_lower
+        )
+    )
+
+    if on_time_question:
+
+        expected = (
+            get_expected_delivery_date(
+                records
+            )
+        )
+
+        actual = (
+            get_actual_delivery_date(
+                records
+            )
+        )
+
+        if expected and actual:
+
+            expected_date = expected[0]
+            expected_text = expected[1]
+
+            actual_date = actual[0]
+            actual_text = actual[1]
+
+            difference = (
+                actual_date
+                - expected_date
+            ).days
+
+            if difference <= 0:
+
+                return (
+                    f"Yes. The shipment was delivered "
+                    f"on {actual_text}, which was on or "
+                    f"before the expected delivery date "
+                    f"of {expected_text}."
+                )
+
+            return (
+                f"No. The shipment was delivered "
+                f"on {actual_text}, which was "
+                f"{difference} days after the expected "
+                f"delivery date of {expected_text}."
+            )
+
+    # --------------------------------------------------------
+    # NUMBER OF PIECES DELIVERED
+    # --------------------------------------------------------
 
     if (
         "piece" in question_lower
         and (
-            "how many" in question_lower
-            or "number" in question_lower
-            or "quantity" in question_lower
+            "how many"
+            in question_lower
+            or "number"
+            in question_lower
+            or "quantity"
+            in question_lower
         )
         and (
-            "deliver" in question_lower
-            or "received" in question_lower
+            "deliver"
+            in question_lower
+            or "received"
+            in question_lower
         )
     ):
 
-        # ----------------------------------------------------
-        # IMPORTANT:
-        # Delivered quantity MUST come from POD.
-        # BOL "Number of Pieces" is the shipped quantity,
-        # not necessarily the delivered quantity.
-        # ----------------------------------------------------
+        patterns = [
 
-        pod_records = [
-            record
-            for record in records
-            if record["type"] == "pod"
+            r"Number\s+of\s+Pieces\s+Delivered"
+            r"\s*:\s*(\d+)",
+
+            r"Pieces\s+Delivered"
+            r"\s*:\s*(\d+)",
+
+            r"Pieces\s+Delivered\s+Count"
+            r"\s*:\s*(\d+)",
+
+            r"Quantity\s+Delivered"
+            r"\s*:\s*(\d+)",
+
+            r"Delivered\s+Pieces"
+            r"\s*:\s*(\d+)",
         ]
 
-        # Search ONLY POD documents.
-        # Do NOT use generic "Number of Pieces" here.
-        delivered_patterns = [
+        for record in records:
 
-            r"Number\s+of\s+Pieces\s+Delivered\s*:\s*(\d+)",
+            if record["type"] != "pod":
+                continue
 
-            r"Pieces\s+Delivered\s*:\s*(\d+)",
-
-            r"Pieces\s+Delivered\s+Count\s*:\s*(\d+)",
-
-            r"Quantity\s+Delivered\s*:\s*(\d+)",
-
-            r"Delivered\s+Pieces\s*:\s*(\d+)"
-        ]
-
-        for record in pod_records:
-
-            text = record["text"]
-
-            for pattern in delivered_patterns:
+            for pattern in patterns:
 
                 match = re.search(
                     pattern,
-                    text,
+                    record["normalized"],
                     re.IGNORECASE
                 )
 
                 if match:
 
-                    number = match.group(1)
+                    number = (
+                        match.group(1)
+                    )
 
                     return (
                         f"{number} pieces were delivered."
                     )
-    # ========================================================
-    # 2. TOTAL INVOICE AMOUNT
-    # ========================================================
+
+    # --------------------------------------------------------
+    # BOL PIECES
+    # --------------------------------------------------------
+
+    if (
+        "piece" in question_lower
+        and (
+            "bol" in question_lower
+            or "bill of lading"
+            in question_lower
+        )
+    ):
+
+        patterns = [
+
+            r"Number\s+of\s+Pieces"
+            r"\s*:\s*(\d+)",
+
+            r"Pieces"
+            r"\s*:\s*(\d+)",
+        ]
+
+        for record in records:
+
+            if record["type"] != "bol":
+                continue
+
+            for pattern in patterns:
+
+                match = re.search(
+                    pattern,
+                    record["normalized"],
+                    re.IGNORECASE
+                )
+
+                if match:
+
+                    number = (
+                        match.group(1)
+                    )
+
+                    return (
+                        f"The BOL lists "
+                        f"{number} pieces."
+                    )
+
+    # --------------------------------------------------------
+    # TOTAL INVOICE AMOUNT
+    # --------------------------------------------------------
 
     if (
         "invoice" in question_lower
@@ -661,89 +929,94 @@ def extract_exact_answer(
 
         patterns = [
 
-            r"Total\s+Invoice\s+Amount\s*:\s*\$?\s*([\d,]+(?:\.\d{2})?)",
+            r"Total\s+Invoice\s+Amount"
+            r"\s*:\s*\$?\s*"
+            r"([\d,]+(?:\.\d{2})?)",
 
-            r"Total\s+Amount\s*:\s*\$?\s*([\d,]+(?:\.\d{2})?)",
+            r"Total\s+Amount"
+            r"\s*:\s*\$?\s*"
+            r"([\d,]+(?:\.\d{2})?)",
 
-            r"Invoice\s+Total\s*:\s*\$?\s*([\d,]+(?:\.\d{2})?)"
+            r"Invoice\s+Total"
+            r"\s*:\s*\$?\s*"
+            r"([\d,]+(?:\.\d{2})?)",
         ]
 
         for record in records:
 
-            text = record["text"]
+            if record["type"] != "invoice":
+                continue
 
             for pattern in patterns:
 
                 match = re.search(
                     pattern,
-                    text,
+                    record["normalized"],
                     re.IGNORECASE
                 )
 
                 if match:
 
-                    amount = match.group(1)
-
-                    return (
-                        f"The total invoice amount is "
-                        f"${amount}."
+                    amount = (
+                        match.group(1)
                     )
 
-    # ========================================================
-    # 3. DELIVERY LOCATION
-    # ========================================================
+                    return (
+                        f"The total invoice amount "
+                        f"is ${amount}."
+                    )
+
+    # --------------------------------------------------------
+    # DELIVERY LOCATION
+    # --------------------------------------------------------
 
     if (
         "where" in question_lower
         and (
-            "delivered" in question_lower
-            or "delivery" in question_lower
+            "delivered"
+            in question_lower
+            or "delivery"
+            in question_lower
         )
     ):
 
-        # Company on the first line, city/state on the next
-        patterns = [
-
+        pattern = (
             r"Delivery\s+Location\s*:\s*"
-            r"([^\n]+?)[ \t]*\n\s*([^\n]+)"
-        ]
+            r"(.+?)(?=\s+Delivery\s+Date\s*:)"
+        )
 
         for record in records:
 
-            text = record["raw"]
+            if record["type"] != "pod":
+                continue
 
-            for pattern in patterns:
+            match = re.search(
+                pattern,
+                record["normalized"],
+                re.IGNORECASE
+            )
 
-                match = re.search(
-                    pattern,
-                    text,
-                    re.IGNORECASE
+            if match:
+
+                location = (
+                    match.group(1)
+                    .strip()
                 )
 
-                if match:
+                return (
+                    f"The shipment was delivered "
+                    f"to {location}."
+                )
 
-                    company = (
-                        match.group(1)
-                        .strip()
-                    )
-
-                    location = (
-                        match.group(2)
-                        .strip()
-                    )
-
-                    return (
-                        f"The shipment was delivered "
-                        f"to {company} in {location}."
-                    )
-
-    # ========================================================
-    # 4. DELIVERY STATUS
-    # ========================================================
+    # --------------------------------------------------------
+    # DELIVERY STATUS
+    # --------------------------------------------------------
 
     if (
-        "delivery status" in question_lower
-        or "status of delivery" in question_lower
+        "delivery status"
+        in question_lower
+        or "status of delivery"
+        in question_lower
         or (
             "what" in question_lower
             and "status" in question_lower
@@ -752,14 +1025,17 @@ def extract_exact_answer(
 
         pattern = (
             r"Delivery\s+Status\s*:\s*"
-            r"([A-Za-z ]+)"
+            r"(.+?)(?=\s+Damage\s+Report\s*:)"
         )
 
         for record in records:
 
+            if record["type"] != "pod":
+                continue
+
             match = re.search(
                 pattern,
-                record["raw"],
+                record["normalized"],
                 re.IGNORECASE
             )
 
@@ -775,65 +1051,117 @@ def extract_exact_answer(
                     f"{status}."
                 )
 
-    # ========================================================
-    # 5. DELIVERY DATE
-    # ========================================================
+    # --------------------------------------------------------
+    # DELIVERY DATE
+    # --------------------------------------------------------
 
     if (
-        "delivery date" in question_lower
-        or "when was it delivered" in question_lower
-        or "when was the shipment delivered" in question_lower
-        or "when was shipment delivered" in question_lower
+        "delivery date"
+        in question_lower
+        or "when was it delivered"
+        in question_lower
+        or "when was the shipment delivered"
+        in question_lower
+        or "when was shipment delivered"
+        in question_lower
     ):
 
-        pattern = (
+        patterns = [
+
             r"Delivery\s+Date\s*:\s*"
-            r"([A-Za-z]+\s+\d{1,2},\s+\d{4})"
-        )
+            r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+
+            r"Actual\s+Delivery\s+Date\s*:\s*"
+            r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+        ]
 
         for record in records:
 
-            match = re.search(
-                pattern,
-                record["text"],
-                re.IGNORECASE
-            )
+            if record["type"] != "pod":
+                continue
 
-            if match:
+            for pattern in patterns:
 
-                date = (
-                    match.group(1)
-                    .strip()
+                match = re.search(
+                    pattern,
+                    record["normalized"],
+                    re.IGNORECASE
                 )
 
-                return (
-                    f"The delivery date was "
-                    f"{date}."
-                )
+                if match:
 
-    # ========================================================
-    # 6. CARRIER
-    # ========================================================
+                    date = (
+                        match.group(1)
+                        .strip()
+                    )
+
+                    return (
+                        f"The delivery date was "
+                        f"{date}."
+                    )
+
+    # --------------------------------------------------------
+    # EXPECTED DELIVERY DATE
+    # --------------------------------------------------------
 
     if (
-        "carrier" in question_lower
-        and (
-            "who" in question_lower
-            or "what" in question_lower
-            or "carrier" in question_lower
-        )
+        "expected delivery"
+        in question_lower
+        or "expected date"
+        in question_lower
     ):
+
+        patterns = [
+
+            r"Expected\s+Delivery\s+Date\s*:\s*"
+            r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+
+            r"Expected\s+Delivery\s*:\s*"
+            r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+        ]
+
+        for record in records:
+
+            if record["type"] != "bol":
+                continue
+
+            for pattern in patterns:
+
+                match = re.search(
+                    pattern,
+                    record["normalized"],
+                    re.IGNORECASE
+                )
+
+                if match:
+
+                    date = (
+                        match.group(1)
+                        .strip()
+                    )
+
+                    return (
+                        f"The expected delivery date "
+                        f"was {date}."
+                    )
+
+    # --------------------------------------------------------
+    # CARRIER
+    # --------------------------------------------------------
+
+    if "carrier" in question_lower:
 
         pattern = (
             r"Carrier\s*:\s*"
-            r"([^\n]+)"
+            r"(.+?)(?=\s+(?:Delivery|Origin|Destination|"
+            r"Expected|Number|Invoice|$))"
         )
 
         for record in records:
 
             match = re.search(
                 pattern,
-                record["raw"],
+                record["normalized"],
                 re.IGNORECASE
             )
 
@@ -849,28 +1177,26 @@ def extract_exact_answer(
                     f"{carrier}."
                 )
 
-    # ========================================================
-    # 7. DAMAGE REPORT
-    # ========================================================
+    # --------------------------------------------------------
+    # DAMAGE REPORT
+    # --------------------------------------------------------
 
-    if (
-        "damage" in question_lower
-        and (
-            "report" in question_lower
-            or "damage" in question_lower
-        )
-    ):
+    if "damage" in question_lower:
 
         pattern = (
             r"Damage\s+Report\s*:\s*"
-            r"(.+?)(?=\s+Receiver\s+Comments|\s+Signature|\s*$)"
+            r"(.+?)(?=\s+Receiver\s+Comments|"
+            r"\s+Signature|$)"
         )
 
         for record in records:
 
+            if record["type"] != "pod":
+                continue
+
             match = re.search(
                 pattern,
-                record["text"],
+                record["normalized"],
                 re.IGNORECASE
             )
 
@@ -882,31 +1208,37 @@ def extract_exact_answer(
                 )
 
                 return (
-                    f"Damage report: {damage}"
+                    f"Damage report: "
+                    f"{damage}"
                 )
 
-    # ========================================================
-    # 8. RECEIVER COMMENTS
-    # ========================================================
+    # --------------------------------------------------------
+    # RECEIVER COMMENTS
+    # --------------------------------------------------------
 
     if (
         "receiver" in question_lower
         and (
-            "comment" in question_lower
-            or "condition" in question_lower
+            "comment"
+            in question_lower
+            or "condition"
+            in question_lower
         )
     ):
 
         pattern = (
             r"Receiver\s+Comments\s*:\s*"
-            r"(.+?)(?=\s+Signature|\s*$)"
+            r"(.+?)(?=\s+Signature|$)"
         )
 
         for record in records:
 
+            if record["type"] != "pod":
+                continue
+
             match = re.search(
                 pattern,
-                record["text"],
+                record["normalized"],
                 re.IGNORECASE
             )
 
@@ -922,9 +1254,9 @@ def extract_exact_answer(
                     f"{comments}"
                 )
 
-    # ========================================================
-    # 9. SIGNATURE
-    # ========================================================
+    # --------------------------------------------------------
+    # SIGNATURE
+    # --------------------------------------------------------
 
     if "signature" in question_lower:
 
@@ -935,9 +1267,12 @@ def extract_exact_answer(
 
         for record in records:
 
+            if record["type"] != "pod":
+                continue
+
             match = re.search(
                 pattern,
-                record["text"],
+                record["normalized"],
                 re.IGNORECASE
             )
 
@@ -953,11 +1288,501 @@ def extract_exact_answer(
                     f"{signature}."
                 )
 
-    # ========================================================
+    # --------------------------------------------------------
     # NO EXACT ANSWER
-    # ========================================================
+    # --------------------------------------------------------
 
     return None
+
+
+# ============================================================
+# SOURCE EVIDENCE
+# ============================================================
+
+def make_evidence(
+    record,
+    evidence_text
+):
+
+    metadata = record["metadata"]
+
+    return create_evidence(
+        source=metadata.get(
+            "source",
+            "Unknown"
+        ),
+        page=metadata.get(
+            "page",
+            "Unknown"
+        ),
+        text=normalize_text(
+            evidence_text
+        ),
+        document_type=metadata.get(
+            "document_type",
+            record["type"]
+        ),
+        shipment_id=metadata.get(
+            "shipment_id"
+        ),
+    )
+
+
+# ============================================================
+# FIND EXACT EVIDENCE
+# ============================================================
+
+def find_exact_evidence(
+    question,
+    answer
+):
+
+    question_lower = (
+        question or ""
+    ).lower()
+
+    records = get_document_records()
+
+    if not records:
+        return None
+
+    shipment_id = (
+        extract_shipment_id(
+            question
+        )
+    )
+
+    records = filter_records_by_shipment(
+        records,
+        shipment_id
+    )
+
+    # --------------------------------------------------------
+    # ON-TIME EVIDENCE
+    # --------------------------------------------------------
+
+    if (
+        "on time" in question_lower
+        or "on-time" in question_lower
+        or "delivered on time"
+        in question_lower
+        or "late" in question_lower
+    ):
+
+        expected = (
+            get_expected_delivery_date(
+                records
+            )
+        )
+
+        actual = (
+            get_actual_delivery_date(
+                records
+            )
+        )
+
+        evidence_items = []
+
+        if expected:
+
+            expected_record = expected[2]
+
+            evidence_items.append(
+                make_evidence(
+                    expected_record,
+                    f"Expected Delivery Date: "
+                    f"{expected[1]}"
+                )
+            )
+
+        if actual:
+
+            actual_record = actual[2]
+
+            evidence_items.append(
+                make_evidence(
+                    actual_record,
+                    f"Delivery Date: "
+                    f"{actual[1]}"
+                )
+            )
+
+        if evidence_items:
+            return evidence_items
+
+    # --------------------------------------------------------
+    # FIELD PATTERNS
+    # --------------------------------------------------------
+
+    field_patterns = []
+
+    # Delivered pieces
+    if (
+        "piece" in question_lower
+        and (
+            "deliver"
+            in question_lower
+            or "received"
+            in question_lower
+        )
+    ):
+
+        field_patterns.append(
+            (
+                "pod",
+                [
+                    r"Number\s+of\s+Pieces\s+Delivered"
+                    r"\s*:\s*\d+",
+
+                    r"Pieces\s+Delivered"
+                    r"\s*:\s*\d+",
+
+                    r"Quantity\s+Delivered"
+                    r"\s*:\s*\d+",
+
+                    r"Delivered\s+Pieces"
+                    r"\s*:\s*\d+",
+                ]
+            )
+        )
+
+    # Invoice total
+    if (
+        "invoice" in question_lower
+        and (
+            "total" in question_lower
+            or "amount"
+            in question_lower
+        )
+    ):
+
+        field_patterns.append(
+            (
+                "invoice",
+                [
+                    r"Total\s+Invoice\s+Amount"
+                    r"\s*:\s*\$?\s*"
+                    r"[\d,]+(?:\.\d{2})?",
+
+                    r"Total\s+Amount"
+                    r"\s*:\s*\$?\s*"
+                    r"[\d,]+(?:\.\d{2})?",
+                ]
+            )
+        )
+
+    # Delivery date
+    if (
+        "delivery date"
+        in question_lower
+        or "when was it delivered"
+        in question_lower
+    ):
+
+        field_patterns.append(
+            (
+                "pod",
+                [
+                    r"Delivery\s+Date\s*:\s*"
+                    r"[A-Za-z]+\s+\d{1,2},\s+\d{4}"
+                ]
+            )
+        )
+
+    # Expected delivery
+    if (
+        "expected delivery"
+        in question_lower
+    ):
+
+        field_patterns.append(
+            (
+                "bol",
+                [
+                    r"Expected\s+Delivery\s+Date"
+                    r"\s*:\s*"
+                    r"[A-Za-z]+\s+\d{1,2},\s+\d{4}"
+                ]
+            )
+        )
+
+    # Delivery status
+    if (
+        "delivery status"
+        in question_lower
+        or "status of delivery"
+        in question_lower
+    ):
+
+        field_patterns.append(
+            (
+                "pod",
+                [
+                    r"Delivery\s+Status\s*:\s*"
+                    r".+?(?=\s+Damage\s+Report|$)"
+                ]
+            )
+        )
+
+    # Carrier
+    if "carrier" in question_lower:
+
+        field_patterns.append(
+            (
+                None,
+                [
+                    r"Carrier\s*:\s*"
+                    r".+?(?=\s+(?:Delivery|Origin|"
+                    r"Destination|Expected|Number|$))"
+                ]
+            )
+        )
+
+    # Damage
+    if "damage" in question_lower:
+
+        field_patterns.append(
+            (
+                "pod",
+                [
+                    r"Damage\s+Report\s*:\s*"
+                    r".+?(?=\s+Receiver\s+Comments|"
+                    r"\s+Signature|$)"
+                ]
+            )
+        )
+
+    # Receiver comments
+    if (
+        "receiver" in question_lower
+        and (
+            "comment"
+            in question_lower
+            or "condition"
+            in question_lower
+        )
+    ):
+
+        field_patterns.append(
+            (
+                "pod",
+                [
+                    r"Receiver\s+Comments\s*:\s*"
+                    r".+?(?=\s+Signature|$)"
+                ]
+            )
+        )
+
+    # Signature
+    if "signature" in question_lower:
+
+        field_patterns.append(
+            (
+                "pod",
+                [
+                    r"Signature\s*:\s*"
+                    r"[A-Za-z .'-]+"
+                ]
+            )
+        )
+
+    # --------------------------------------------------------
+    # SEARCH EXACT SUPPORTING TEXT
+    # --------------------------------------------------------
+
+    for preferred_type, patterns in (
+        field_patterns
+    ):
+
+        candidates = records
+
+        if preferred_type:
+
+            typed = [
+                record
+                for record in records
+                if record["type"]
+                == preferred_type
+            ]
+
+            if typed:
+                candidates = typed
+
+        for record in candidates:
+
+            text = record["normalized"]
+
+            for pattern in patterns:
+
+                match = re.search(
+                    pattern,
+                    text,
+                    re.IGNORECASE
+                )
+
+                if match:
+
+                    evidence_text = (
+                        match.group(0)
+                        .strip()
+                    )
+
+                    return make_evidence(
+                        record,
+                        evidence_text
+                    )
+
+    return None
+
+
+# ============================================================
+# CLEAN RETRIEVED EVIDENCE
+# ============================================================
+
+def build_retrieved_evidence(
+    results,
+    limit=3
+):
+
+    documents = (
+        results.get(
+            "documents",
+            [[]]
+        )[0]
+        or []
+    )
+
+    metadatas = (
+        results.get(
+            "metadatas",
+            [[]]
+        )[0]
+        or []
+    )
+
+    evidence_items = []
+
+    for document, metadata in zip(
+        documents[:limit],
+        metadatas[:limit]
+    ):
+
+        document_type = (
+            metadata.get(
+                "document_type",
+                "Unknown"
+            )
+        )
+
+        normalized = normalize_text(
+            document
+        )
+
+        # ----------------------------------------------------
+        # Instead of displaying the entire PDF chunk,
+        # extract a useful sentence-sized evidence snippet.
+        # ----------------------------------------------------
+
+        evidence_text = normalized
+
+        if len(evidence_text) > 350:
+            evidence_text = (
+                evidence_text[:350]
+                + "..."
+            )
+
+        evidence_items.append(
+            create_evidence(
+                source=metadata.get(
+                    "source",
+                    "Unknown"
+                ),
+                page=metadata.get(
+                    "page",
+                    "Unknown"
+                ),
+                text=evidence_text,
+                document_type=document_type,
+                shipment_id=metadata.get(
+                    "shipment_id"
+                ),
+            )
+        )
+
+    return evidence_items
+
+
+# ============================================================
+# ENSURE PROFESSIONAL ANSWER
+# ============================================================
+
+def ensure_professional_answer(
+    answer,
+    question
+):
+
+    if not answer:
+
+        return (
+            "I could not find enough information "
+            "in the logistics documents to answer "
+            "this question."
+        )
+
+    answer = normalize_text(
+        answer
+    )
+
+    normalized = answer.lower().strip()
+
+    # --------------------------------------------------------
+    # SINGLE-WORD YES
+    # --------------------------------------------------------
+
+    if normalized in {
+        "yes",
+        "yes.",
+        "yes!",
+    }:
+
+        return (
+            "Yes. The available logistics documents "
+            "support the condition described in the "
+            "question."
+        )
+
+    # --------------------------------------------------------
+    # SINGLE-WORD NO
+    # --------------------------------------------------------
+
+    if normalized in {
+        "no",
+        "no.",
+        "no!",
+    }:
+
+        return (
+            "No. The available logistics documents "
+            "do not support the condition described "
+            "in the question."
+        )
+
+    # --------------------------------------------------------
+    # EXTREMELY SHORT ANSWER
+    # --------------------------------------------------------
+
+    words = answer.split()
+
+    if len(words) <= 2:
+
+        return (
+            f"{answer.rstrip('.!?')}. "
+            "The available logistics documents "
+            "provide the supporting information "
+            "for this response."
+        )
+
+    return answer
 
 
 # ============================================================
@@ -986,7 +1811,7 @@ def generate_answer(
     )
 
     # --------------------------------------------------------
-    # NO RETRIEVED DOCUMENTS
+    # NO DOCUMENTS
     # --------------------------------------------------------
 
     if not documents:
@@ -997,20 +1822,29 @@ def generate_answer(
         )
 
     # --------------------------------------------------------
-    # FIRST: EXACT EXTRACTION
+    # EXACT EXTRACTION FIRST
     # --------------------------------------------------------
 
-    exact_answer = extract_exact_answer(
-        question,
-        results
+    exact_answer = (
+        extract_exact_answer(
+            question,
+            results
+        )
     )
 
     if exact_answer:
 
+        results["evidence"] = (
+            find_exact_evidence(
+                question,
+                exact_answer
+            )
+        )
+
         return exact_answer
 
     # --------------------------------------------------------
-    # BUILD LLM CONTEXT
+    # BUILD CONTEXT
     # --------------------------------------------------------
 
     context_parts = []
@@ -1022,11 +1856,10 @@ def generate_answer(
 
         context_parts.append(
             f"""
-SOURCE: {metadata.get('source', 'Unknown')}
-DOCUMENT TYPE: {metadata.get('document_type', 'Unknown')}
-SHIPMENT ID: {metadata.get('shipment_id', 'Unknown')}
-PAGE: {metadata.get('page', 'Unknown')}
-CHUNK: {metadata.get('chunk', 'Unknown')}
+SOURCE: {metadata.get("source", "Unknown")}
+DOCUMENT TYPE: {metadata.get("document_type", "Unknown")}
+SHIPMENT ID: {metadata.get("shipment_id", "Unknown")}
+PAGE: {metadata.get("page", "Unknown")}
 
 DOCUMENT CONTENT:
 {document}
@@ -1042,26 +1875,35 @@ DOCUMENT CONTENT:
     # --------------------------------------------------------
 
     prompt = f"""
-You are LOGIDOC-RAG, a logistics document assistant.
+You are LOGIDOC-RAG, a professional logistics
+document intelligence assistant.
 
-You MUST answer using ONLY the provided logistics document
-context.
+Answer the user's question using ONLY the
+provided logistics documents.
 
 STRICT RULES:
 
-1. Do NOT use outside knowledge.
-2. Do NOT invent information.
-3. Do NOT guess.
-4. Do NOT assume information.
-5. Carefully read all provided context.
-6. If the answer is explicitly present, answer it directly.
-7. If the answer is not present, say exactly:
+1. Do not use outside knowledge.
+2. Do not invent information.
+3. Do not guess.
+4. Do not assume missing information.
+5. Carefully read all document context.
+6. If the answer exists in the documents,
+   answer it directly.
+7. If the answer does not exist, say:
 
-I could not find this information in the logistics documents.
+I could not find this information in the
+logistics documents.
 
-8. Do not calculate or infer a value unless the calculation
-   is directly supported by the provided documents.
-9. Keep the answer concise and professional.
+8. Keep answers concise and professional.
+9. Always provide at least one complete sentence.
+10. NEVER answer only:
+    Yes.
+11. NEVER answer only:
+    No.
+12. For yes/no questions, provide the reason
+    or supporting fact from the documents.
+13. Prefer one or two clear sentences.
 
 LOGISTICS DOCUMENT CONTEXT:
 
@@ -1074,19 +1916,41 @@ USER QUESTION:
 ANSWER:
 """
 
-    response = ollama.chat(
-        model=LLM_MODEL,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+    try:
+
+        response = ollama.chat(
+            model=LLM_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ]
+        )
+
+        answer = (
+            response
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+
+    except Exception:
+
+        answer = (
+            "I could not generate an answer from "
+            "the logistics documents."
+        )
+
+    answer = ensure_professional_answer(
+        answer,
+        question
     )
 
-    answer = (
-        response["message"]["content"]
-        .strip()
+    results["evidence"] = (
+        build_retrieved_evidence(
+            results
+        )
     )
 
     return answer
@@ -1097,6 +1961,21 @@ ANSWER:
 # ============================================================
 
 def ask_question(question):
+
+    question = (
+        question or ""
+    ).strip()
+
+    if not question:
+
+        return (
+            "Please enter a logistics question.",
+            {
+                "documents": [[]],
+                "metadatas": [[]],
+                "evidence": None,
+            }
+        )
 
     results = search_documents(
         question
@@ -1114,14 +1993,26 @@ def ask_question(question):
 
 
 # ============================================================
-# MAIN
+# MAIN CLI
 # ============================================================
 
 def main():
 
-    print("=" * 70)
-    print("LOGIDOC-RAG")
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
+
+    print(
+        "LOGIDOC-RAG"
+    )
+
+    print(
+        "Hybrid Logistics Document Intelligence"
+    )
+
+    print(
+        "=" * 70
+    )
 
     question = input(
         "\nAsk a logistics question: "
@@ -1130,7 +2021,7 @@ def main():
     if not question:
 
         print(
-            "Please enter a question."
+            "\nPlease enter a question."
         )
 
         return
@@ -1139,13 +2030,29 @@ def main():
         "\nSearching logistics documents...\n"
     )
 
-    answer, results = ask_question(
-        question
-    )
+    try:
 
-    # ========================================================
+        answer, results = (
+            ask_question(
+                question
+            )
+        )
+
+    except Exception as error:
+
+        print(
+            "\nERROR:"
+        )
+
+        print(
+            error
+        )
+
+        return
+
+    # --------------------------------------------------------
     # ANSWER
-    # ========================================================
+    # --------------------------------------------------------
 
     print(
         "=" * 70
@@ -1163,9 +2070,58 @@ def main():
         answer
     )
 
-    # ========================================================
+    # --------------------------------------------------------
+    # SOURCE EVIDENCE
+    # --------------------------------------------------------
+
+    evidence = (
+        results.get(
+            "evidence"
+        )
+    )
+
+    if evidence:
+
+        print(
+            "\n" + "=" * 70
+        )
+
+        print(
+            "SOURCE EVIDENCE"
+        )
+
+        print(
+            "=" * 70
+        )
+
+        if isinstance(
+            evidence,
+            list
+        ):
+
+            for item in evidence:
+
+                print(
+                    format_evidence(
+                        item
+                    )
+                )
+
+                print(
+                    "-" * 70
+                )
+
+        else:
+
+            print(
+                format_evidence(
+                    evidence
+                )
+            )
+
+    # --------------------------------------------------------
     # SOURCES
-    # ========================================================
+    # --------------------------------------------------------
 
     print(
         "\n" + "=" * 70
@@ -1212,17 +2168,18 @@ def main():
             document_type
         )
 
-        if key not in seen_sources:
+        if key in seen_sources:
+            continue
 
-            print(
-                f"- {source} "
-                f"(Page {page}, "
-                f"Type: {document_type})"
-            )
+        print(
+            f"- {source} "
+            f"(Page {page}, "
+            f"Type: {document_type})"
+        )
 
-            seen_sources.add(
-                key
-            )
+        seen_sources.add(
+            key
+        )
 
 
 # ============================================================

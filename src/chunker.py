@@ -1,15 +1,15 @@
-from pathlib import Path
-import sys
+"""
+Chunking utilities for logistics documents.
 
-# Add project root to Python path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+Phase 2:
+Preserves source and page-level information so every retrieved
+chunk can be traced back to the original PDF.
+"""
 
-from config import CHUNK_SIZE, CHUNK_OVERLAP
 from document_loader import load_all_documents
 
 
-def split_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
+def create_chunks(text, chunk_size=1000, overlap=200):
     """
     Split text into overlapping chunks.
     """
@@ -20,9 +20,8 @@ def split_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     chunks = []
 
     start = 0
-    text_length = len(text)
 
-    while start < text_length:
+    while start < len(text):
 
         end = start + chunk_size
 
@@ -31,7 +30,7 @@ def split_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
         if chunk:
             chunks.append(chunk)
 
-        if end >= text_length:
+        if end >= len(text):
             break
 
         start = end - overlap
@@ -39,51 +38,34 @@ def split_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     return chunks
 
 
-def create_chunks(document):
+def create_document_chunks(document):
     """
-    Convert a loaded logistics document into RAG chunks.
-
-    All universal logistics identifiers detected from the
-    document content are preserved in chunk metadata.
+    Create chunks for one document while preserving
+    source, page and identifier metadata.
     """
 
-    identifiers = document.get(
-        "identifiers",
-        {}
-    )
+    all_chunks = []
 
-    shipment_id = identifiers.get(
-        "shipment_id"
-    )
+    identifiers = document.get("identifiers", {})
 
-    invoice_number = identifiers.get(
-        "invoice_number"
-    )
+    for page_data in document.get("pages", []):
 
-    chunks = []
+        page_number = page_data.get("page", 1)
+        page_text = page_data.get("text", "")
 
-    for page in document["pages"]:
+        chunks = create_chunks(page_text)
 
-        page_chunks = split_text(
-            page["text"]
-        )
+        for chunk_index, chunk_text in enumerate(chunks):
 
-        for chunk_number, chunk_text in enumerate(
-            page_chunks,
-            start=1
-        ):
-
-            chunk_metadata = {
-                "source": document["filename"],
-                "document_type": document["document_type"],
-
-                # Universal logistics identifiers
-                "shipment_id": shipment_id,
+            metadata = {
+                "source": document.get("filename"),
+                "document_type": document.get("document_type"),
+                "shipment_id": identifiers.get("shipment_id"),
                 "load_id": identifiers.get("load_id"),
                 "bol_number": identifiers.get("bol_number"),
                 "pro_number": identifiers.get("pro_number"),
                 "po_number": identifiers.get("po_number"),
-                "invoice_number": invoice_number,
+                "invoice_number": identifiers.get("invoice_number"),
                 "tracking_number": identifiers.get("tracking_number"),
                 "booking_number": identifiers.get("booking_number"),
                 "reference_number": identifiers.get("reference_number"),
@@ -91,23 +73,25 @@ def create_chunks(document):
                 "waybill_number": identifiers.get("waybill_number"),
                 "carrier_reference": identifiers.get("carrier_reference"),
                 "customer_reference": identifiers.get("customer_reference"),
-
-                # Page/chunk information
-                "page": page["page"],
-                "chunk": chunk_number,
+                "page": page_number,
+                "chunk": chunk_index,
             }
 
-            chunk = {
-                "text": chunk_text,
-                "metadata": chunk_metadata,
-            }
+            all_chunks.append(
+                {
+                    "text": chunk_text,
+                    "metadata": metadata,
+                }
+            )
 
-            chunks.append(chunk)
-
-    return chunks
+    return all_chunks
 
 
 def create_all_chunks():
+    """
+    Load all documents and create chunks with
+    page-level source metadata.
+    """
 
     documents = load_all_documents()
 
@@ -115,93 +99,36 @@ def create_all_chunks():
 
     for document in documents:
 
-        document_chunks = create_chunks(
-            document
-        )
+        document_chunks = create_document_chunks(document)
 
-        all_chunks.extend(
-            document_chunks
-        )
+        all_chunks.extend(document_chunks)
 
     return all_chunks
 
 
-def main():
-
-    print("=" * 70)
-    print("LogiDoc-RAG Universal Chunking Test")
-    print("=" * 70)
+if __name__ == "__main__":
 
     chunks = create_all_chunks()
 
-    print(
-        f"\nTotal chunks created: {len(chunks)}"
-    )
+    print("=" * 70)
+    print("PHASE 2 - PAGE LEVEL SOURCE TEST")
+    print("=" * 70)
 
-    for index, chunk in enumerate(
-        chunks,
-        start=1
-    ):
+    print("Total chunks:", len(chunks))
+
+    for chunk in chunks[:5]:
 
         metadata = chunk["metadata"]
 
-        print("\n" + "-" * 70)
+        print("\nSource:", metadata.get("source"))
+        print("Document Type:", metadata.get("document_type"))
+        print("Shipment ID:", metadata.get("shipment_id"))
+        print("Page:", metadata.get("page"))
+        print("Chunk:", metadata.get("chunk"))
 
-        print(
-            f"Chunk ID        : {index}"
-        )
+        print("Text:")
+        print(chunk["text"][:150])
 
-        print(
-            f"Source          : "
-            f"{metadata['source']}"
-        )
-
-        print(
-            f"Document Type   : "
-            f"{metadata['document_type']}"
-        )
-
-        print(
-            f"Shipment ID     : "
-            f"{metadata['shipment_id']}"
-        )
-
-        print(
-            f"BOL Number      : "
-            f"{metadata['bol_number']}"
-        )
-
-        print(
-            f"Invoice Number  : "
-            f"{metadata['invoice_number']}"
-        )
-
-        print(
-            f"Tracking Number : "
-            f"{metadata['tracking_number']}"
-        )
-
-        print(
-            f"Page            : "
-            f"{metadata['page']}"
-        )
-
-        print(
-            f"Chunk Number    : "
-            f"{metadata['chunk']}"
-        )
-
-        print("\nText:")
-        print(
-            chunk["text"][:500]
-        )
-
-    print("\n" + "=" * 70)
-    print(
-        "Universal chunking completed successfully."
-    )
     print("=" * 70)
-
-
-if __name__ == "__main__":
-    main()
+    print("SOURCE METADATA TEST COMPLETED")
+    print("=" * 70)
