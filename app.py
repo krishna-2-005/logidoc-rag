@@ -969,13 +969,15 @@ def show_exception_details(
 # SHIPMENT INTELLIGENCE UI
 # ============================================================
 
-def show_shipment_intelligence():
+def show_shipment_intelligence(shipment_id=None):
 
     st.subheader("Shipment Intelligence")
 
     try:
 
-        intelligence = analyze_shipment()
+        intelligence = analyze_shipment(
+            shipment_id
+        )
 
     except Exception as error:
 
@@ -1180,6 +1182,161 @@ def show_shipment_intelligence():
     )
 
     return intelligence
+
+
+# ============================================================
+# ALL SHIPMENTS INTELLIGENCE UI
+# ============================================================
+
+def show_all_shipments_intelligence(shipment_ids):
+
+    st.subheader("Shipment Intelligence")
+
+    if not shipment_ids:
+
+        st.info(
+            "No shipments are indexed yet."
+        )
+
+        return []
+
+    # One analysis per shipment, so documents from
+    # different shipments are never combined
+    rows = []
+
+    for shipment_id in shipment_ids:
+
+        try:
+
+            intelligence = analyze_shipment(
+                shipment_id
+            )
+
+        except Exception as error:
+
+            intelligence = {
+                "success": False,
+                "error": str(error),
+            }
+
+        if not intelligence.get(
+            "success",
+            False
+        ):
+
+            rows.append(
+                {
+                    "Shipment": shipment_id,
+                    "Status": "ERROR",
+                    "Exceptions": None,
+                    "Documents": "",
+                    "Completeness": "",
+                    "Quantity": "",
+                    "Delivery": "",
+                    "Invoice Total": str(
+                        intelligence.get(
+                            "error",
+                            "Unknown error"
+                        )
+                    ),
+                }
+            )
+
+            continue
+
+        documents_info = intelligence.get(
+            "documents",
+            {}
+        )
+
+        invoice_total = intelligence.get(
+            "invoice_total"
+        )
+
+        rows.append(
+            {
+                "Shipment": shipment_id,
+                "Status": intelligence.get(
+                    "shipment_status",
+                    "UNKNOWN"
+                ),
+                "Exceptions": intelligence.get(
+                    "exception_count",
+                    0
+                ),
+                "Documents": (
+                    f"{documents_info.get('found', 0)}/"
+                    f"{documents_info.get('expected', 0)}"
+                ),
+                "Completeness": (
+                    f"{documents_info.get('completeness', 0)}%"
+                ),
+                "Quantity": intelligence.get(
+                    "quantity",
+                    {}
+                ).get(
+                    "status",
+                    "UNKNOWN"
+                ),
+                "Delivery": intelligence.get(
+                    "delivery",
+                    {}
+                ).get(
+                    "status",
+                    "UNKNOWN"
+                ),
+                "Invoice Total": (
+                    f"${invoice_total:,.2f}"
+                    if isinstance(
+                        invoice_total,
+                        (int, float)
+                    )
+                    else "N/A"
+                ),
+            }
+        )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.metric(
+            "Shipments Analyzed",
+            len(rows)
+        )
+
+    with col2:
+
+        st.metric(
+            "Shipments With Exceptions",
+            sum(
+                1
+                for row in rows
+                if row["Status"] == "EXCEPTION"
+            )
+        )
+
+    with col3:
+
+        st.metric(
+            "Total Exceptions",
+            sum(
+                row["Exceptions"] or 0
+                for row in rows
+            )
+        )
+
+    st.dataframe(
+        rows,
+        hide_index=True,
+    )
+
+    st.caption(
+        "Select a shipment in the sidebar to see its "
+        "exception details and source evidence."
+    )
+
+    return rows
 
 
 # ============================================================
@@ -1661,7 +1818,11 @@ with tab2:
                 "Reconciling shipment documents..."
             ):
 
-                result = reconcile_shipment()
+                result = reconcile_shipment(
+                    None
+                    if selected_shipment == "All Shipments"
+                    else selected_shipment
+                )
 
             if not isinstance(
                 result,
@@ -2101,7 +2262,17 @@ with tab3:
 
     if run_intelligence:
 
-        show_shipment_intelligence()
+        if selected_shipment == "All Shipments":
+
+            show_all_shipments_intelligence(
+                shipment_ids
+            )
+
+        else:
+
+            show_shipment_intelligence(
+                selected_shipment
+            )
 
 
 # ============================================================
