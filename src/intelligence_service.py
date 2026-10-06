@@ -14,6 +14,7 @@ import re
 
 from reconciliation import reconcile_shipment
 from rag import get_all_documents
+from shipment_identity import normalize_identifier
 
 
 # ============================================================
@@ -70,7 +71,7 @@ def safe_number(value):
 # DOCUMENT COMPLETENESS
 # ============================================================
 
-def calculate_document_completeness():
+def calculate_document_completeness(shipment_id=None):
     """
     Calculate how many core logistics documents are available.
 
@@ -78,6 +79,9 @@ def calculate_document_completeness():
         BOL
         POD
         INVOICE
+
+    When shipment_id is given, only that shipment's
+    documents are counted.
     """
 
     try:
@@ -98,6 +102,15 @@ def calculate_document_completeness():
     for metadata in metadatas or []:
 
         if not isinstance(metadata, dict):
+            continue
+
+        if (
+            shipment_id
+            and normalize_identifier(
+                metadata.get("shipment_id")
+            )
+            != normalize_identifier(shipment_id)
+        ):
             continue
 
         document_type = metadata.get(
@@ -400,15 +413,21 @@ def build_exceptions(
 # MAIN INTELLIGENCE FUNCTION
 # ============================================================
 
-def analyze_shipment():
+def analyze_shipment(shipment_id=None):
     """
     Generate the complete shipment intelligence summary.
+
+    shipment_id limits the analysis to one shipment's
+    documents. Without it, the indexed documents must
+    belong to a single shipment.
     """
 
     try:
 
         reconciliation = (
-            reconcile_shipment()
+            reconcile_shipment(
+                shipment_id
+            )
         )
 
     except Exception as error:
@@ -445,7 +464,9 @@ def analyze_shipment():
         }
 
     completeness = (
-        calculate_document_completeness()
+        calculate_document_completeness(
+            shipment_id
+        )
     )
 
     quantity = (

@@ -10,6 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from chunker import create_all_chunks
+from shipment_identity import normalize_identifier
 
 
 # ============================================================
@@ -118,12 +119,65 @@ def compare_numbers(value1, value2):
 # RECONCILIATION
 # ============================================================
 
-def reconcile_shipment():
+def reconcile_shipment(shipment_id=None):
+    """
+    Reconcile the BOL, Invoice and POD of one shipment.
+
+    shipment_id selects that shipment's documents. Without it,
+    the documents must belong to a single shipment: documents
+    from different shipments are never mixed.
+    """
 
     chunks = create_all_chunks()
 
     if not chunks:
         return None
+
+    # --------------------------------------------------------
+    # Keep only one shipment's documents
+    # --------------------------------------------------------
+
+    if shipment_id:
+
+        requested_shipment = normalize_identifier(
+            shipment_id
+        )
+
+        chunks = [
+            chunk
+            for chunk in chunks
+            if normalize_identifier(
+                chunk["metadata"].get("shipment_id")
+            )
+            == requested_shipment
+        ]
+
+        if not chunks:
+            return {
+                "success": False,
+                "error": (
+                    f"No documents found for shipment "
+                    f"{shipment_id}."
+                )
+            }
+
+    else:
+
+        shipment_ids = {
+            normalize_identifier(
+                chunk["metadata"].get("shipment_id")
+            )
+            for chunk in chunks
+        } - {None}
+
+        if len(shipment_ids) > 1:
+            return {
+                "success": False,
+                "error": (
+                    "Documents from multiple shipments are "
+                    "indexed. Select a shipment to reconcile."
+                )
+            }
 
     documents = extract_document_data(chunks)
 
