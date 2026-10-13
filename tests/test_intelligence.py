@@ -2,11 +2,15 @@
 LogiDoc-RAG Shipment Intelligence Regression Test
 
 Runs the real analyze_shipment() from src/intelligence_service.py
-against the indexed sample shipment SHJ-2026-001 and checks the
-business results shown on the Shipment Intelligence dashboard.
+against the sample shipment SHJ-2026-001 and checks the business
+results shown on the Shipment Intelligence dashboard.
 
-Requires the ChromaDB index to be built first:
-    python src/vector_store.py
+The test is isolated from the live data/raw folder and chroma_db
+index, whose contents change with every upload: the SHJ-2026-001
+samples (tests/fixtures/shipment_SHJ-2026-001) are ingested into a
+temporary folder and index with the real loader and chunker. Ollama
+is not needed: the intelligence reads PDF text and document
+metadata only, so stand-in embeddings are used.
 
 Run from the project root:
     python tests/test_intelligence.py
@@ -22,13 +26,20 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
+TESTS_DIR = PROJECT_ROOT / "tests"
 
-for path in (PROJECT_ROOT, SRC_DIR):
+for path in (PROJECT_ROOT, SRC_DIR, TESTS_DIR):
 
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import config
+from ingestion_manager import ingest_files
 from intelligence_service import analyze_shipment
+from isolation import SAMPLE_SHIPMENT_DIR, sample_workspace
+from test_ingestion_manager import fake_embedding, snapshot
+
+TEMP_PREFIX = "logidoc_intelligencetest_"
 
 
 # ============================================================
@@ -63,6 +74,28 @@ def check(label, actual, expected, display=None):
 
 def test_shipment_intelligence():
 
+    with sample_workspace(TEMP_PREFIX, copy_samples=False) as (
+        raw_dir,
+        chroma_dir,
+    ):
+
+        indexed = ingest_files(
+            sorted(SAMPLE_SHIPMENT_DIR.glob("*.pdf")),
+            raw_dir,
+            chroma_dir,
+            embed_text=fake_embedding
+        )
+
+        assert indexed["files_added"] == 3, (
+            "FAIL: the SHJ-2026-001 samples could not be indexed: "
+            f"{indexed['errors']}"
+        )
+
+        check_shipment_intelligence()
+
+
+def check_shipment_intelligence():
+
     intelligence = analyze_shipment()
 
     assert isinstance(intelligence, dict), (
@@ -71,8 +104,7 @@ def test_shipment_intelligence():
 
     assert intelligence.get("success"), (
         "analyze_shipment() failed: "
-        f"{intelligence.get('error', 'Unknown error')}. "
-        "Is the index built? Run: python src/vector_store.py"
+        f"{intelligence.get('error', 'Unknown error')}"
     )
 
     check(
@@ -240,9 +272,19 @@ if __name__ == "__main__":
     print("INTELLIGENCE REGRESSION TEST")
     print("=" * 70)
 
+    production = [config.RAW_DATA_DIR, config.CHROMA_DIR]
+
+    production_before = snapshot(production)
+
     try:
 
         test_shipment_intelligence()
+
+        check(
+            "data/raw and chroma_db unchanged",
+            snapshot(production) == production_before,
+            True
+        )
 
     except AssertionError as error:
 

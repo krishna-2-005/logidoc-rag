@@ -6,7 +6,8 @@ metrics, exceptions or evidence, both in the intelligence engine and
 in the Streamlit dashboard.
 
 The test builds a temporary, isolated workspace containing:
-    - the SHJ-2026-001 sample PDFs (copied from data/raw)
+    - the SHJ-2026-001 sample PDFs (tests/fixtures/shipment_SHJ-2026-001;
+      the live data/raw folder is never read)
     - the SHJ-2026-002 fixture PDFs (tests/fixtures/shipment_SHJ-2026-002)
 and a temporary ChromaDB index. The production data/raw folder and
 chroma_db index are never written; the test checks this at the end.
@@ -32,8 +33,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
+TESTS_DIR = PROJECT_ROOT / "tests"
 
-for path in (PROJECT_ROOT, SRC_DIR):
+for path in (PROJECT_ROOT, SRC_DIR, TESTS_DIR):
 
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
@@ -45,6 +47,7 @@ import vector_store
 from intelligence_service import analyze_shipment
 from shipment_retriever import get_shipment_documents
 from shipment_selector import get_available_shipments
+from isolation import SAMPLE_SHIPMENT_DIR
 from streamlit.testing.v1 import AppTest
 
 
@@ -170,7 +173,7 @@ def isolated_workspace():
     raw_dir.mkdir()
 
     pdf_files = (
-        sorted(config.RAW_DATA_DIR.glob("*.pdf"))
+        sorted(SAMPLE_SHIPMENT_DIR.glob("*.pdf"))
         + sorted(FIXTURE_DIR.glob("*.pdf"))
     )
 
