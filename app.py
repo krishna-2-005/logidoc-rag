@@ -23,11 +23,19 @@ if str(PROJECT_ROOT) not in sys.path:
 # PROJECT IMPORTS
 # ============================================================
 
-from config import RAW_DATA_DIR
-from vector_store import build_vector_database
+from config import CHROMA_DIR, RAW_DATA_DIR
 from rag import ask_question, get_all_documents
 from reconciliation import reconcile_shipment
 from intelligence_service import analyze_shipment
+from ingestion_manager import (
+    STATUS_ADDED,
+    STATUS_CHANGED,
+    STATUS_DUPLICATE,
+    STATUS_FAILED,
+    STATUS_INCONSISTENT,
+    ingest_uploads,
+)
+from consistency_report import check_destination
 
 
 # ============================================================
@@ -98,6 +106,9 @@ if "documents_processed" not in st.session_state:
 
 if "selected_shipment" not in st.session_state:
     st.session_state.selected_shipment = "All Shipments"
+
+if "ingestion_result" not in st.session_state:
+    st.session_state.ingestion_result = None
 
 
 # ============================================================
@@ -1340,6 +1351,165 @@ def show_all_shipments_intelligence(shipment_ids):
 
 
 # ============================================================
+# UPLOAD RESULT UI
+# ============================================================
+
+INGESTION_STATUS_DISPLAY = {
+    STATUS_ADDED: ("✅", "Added"),
+    STATUS_DUPLICATE: ("⏭️", "Duplicate, skipped"),
+    STATUS_CHANGED: ("⚠️", "Changed, not applied"),
+    STATUS_INCONSISTENT: ("⚠️", "Inconsistent, needs attention"),
+    STATUS_FAILED: ("❌", "Failed"),
+}
+
+
+def show_ingestion_result(result):
+
+    if not result:
+        return
+
+    st.markdown("**Last upload**")
+
+    st.caption(
+        f"Added {result['files_added']} · "
+        f"Duplicates {result['duplicates_skipped']} · "
+        f"Changed {result['changed_detected']} · "
+        f"Inconsistent {result['inconsistent_detected']} · "
+        f"Failed {result['files_failed']}"
+    )
+
+    # Success only for files that were indexed and stored
+    if result["files_added"]:
+
+        st.success(
+            f"{result['files_added']} file(s) indexed and stored."
+        )
+
+    if result["files_failed"]:
+
+        st.error(
+            f"{result['files_failed']} file(s) failed. Nothing was "
+            "stored or indexed for them."
+        )
+
+    attention = (
+        result["changed_detected"]
+        + result["inconsistent_detected"]
+    )
+
+    if attention:
+
+        st.warning(
+            f"{attention} file(s) need attention. Existing "
+            "documents were not changed."
+        )
+
+    for outcome in result["files"]:
+
+        icon, label = INGESTION_STATUS_DISPLAY.get(
+            outcome["status"],
+            ("•", outcome["status"])
+        )
+
+        st.markdown(
+            f"{icon} **{outcome['filename']}**: {label}"
+        )
+
+        detail = outcome["error"] or outcome["message"]
+
+        if detail:
+            st.caption(detail)
+
+        if outcome["action"]:
+            st.caption(f"Next step: {outcome['action']}")
+
+    for error in result["rollback_errors"]:
+        st.error(f"Rollback problem: {error}")
+
+    for warning in result["warnings"]:
+        st.warning(warning)
+
+
+# ============================================================
+# DIAGNOSTICS UI
+# ============================================================
+
+def show_consistency_report(report):
+
+    summary = report["summary"]
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Raw PDFs", summary["raw_pdfs"])
+
+    with col2:
+        st.metric("Verified Documents", summary["verified_documents"])
+
+    with col3:
+        st.metric("Unverified Documents", summary["unverified_documents"])
+
+    with col4:
+        st.metric("Vectors", summary["vectors"])
+
+    st.caption(
+        "Unverified documents were indexed by a full rebuild, which "
+        "records no content hash; they are linked to their PDF by "
+        "filename only."
+    )
+
+    if summary["healthy"]:
+
+        st.success(
+            "No problems found."
+            + (
+                f" {summary['info']} informational note(s) below."
+                if summary["info"]
+                else ""
+            )
+        )
+
+    elif summary["errors"]:
+
+        st.error(
+            f"{summary['errors']} error(s) and {summary['warnings']} "
+            "warning(s) found. Nothing was changed; review each "
+            "issue below."
+        )
+
+    else:
+
+        st.warning(
+            f"{summary['warnings']} warning(s) found. Nothing was "
+            "changed; review each issue below."
+        )
+
+    if not report["issues"]:
+        return
+
+    st.dataframe(
+        [
+            {
+                "Severity": issue["severity"].upper(),
+                "Certainty": issue["certainty"],
+                "Issue": issue["type"].replace("_", " "),
+                "File": issue["file"] or "",
+                "SHA-256": (issue["sha256"] or "")[:12],
+                "Vectors": len(issue["vector_ids"]),
+                "Explanation": issue["explanation"],
+            }
+            for issue in report["issues"]
+        ],
+        hide_index=True,
+    )
+
+    with st.expander(
+        "Issue details (vector IDs, hashes, journal operations)"
+    ):
+        st.json(report["issues"], expanded=False)
+
+
+# ============================================================
 # HEADER
 # ============================================================
 
@@ -1389,56 +1559,42 @@ with st.sidebar:
 
             try:
 
-                RAW_DATA_DIR.mkdir(
-                    parents=True,
-                    exist_ok=True
-                )
-
-                for pdf_file in RAW_DATA_DIR.glob("*.pdf"):
-
-                    try:
-                        pdf_file.unlink()
-                    except Exception:
-                        pass
-
-                for uploaded_file in uploaded_files:
-
-                    destination = (
-                        RAW_DATA_DIR
-                        / Path(
-                            uploaded_file.name
-                        ).name
-                    )
-
-                    with open(
-                        destination,
-                        "wb"
-                    ) as file:
-
-                        file.write(
-                            uploaded_file.getbuffer()
-                        )
-
+                # Incremental and non-destructive: existing PDFs and
+                # vectors are kept. ingest_uploads makes no st.*
+                # calls, so Streamlit cannot stop it half-way; the
+                # result is saved before the next st.* call.
                 with st.spinner(
-                    "Extracting, chunking and indexing documents..."
+                    "Checking, indexing and storing documents..."
                 ):
 
-                    build_vector_database()
+                    st.session_state.ingestion_result = (
+                        ingest_uploads(
+                            uploaded_files,
+                            RAW_DATA_DIR,
+                            CHROMA_DIR
+                        )
+                    )
 
-                st.session_state.documents_processed = True
+                if st.session_state.ingestion_result["files_added"]:
 
-                st.success(
-                    f"{len(uploaded_files)} document(s) "
-                    f"processed successfully."
-                )
+                    st.session_state.documents_processed = True
 
-                st.rerun()
+                    # Reload shipments and documents from the index
+                    st.rerun()
 
             except Exception as error:
 
+                st.session_state.ingestion_result = None
+
                 st.error(
-                    f"Processing failed: {error}"
+                    f"Processing stopped: {error}. Run the "
+                    "consistency check in the Diagnostics tab to "
+                    "review the document store."
                 )
+
+    show_ingestion_result(
+        st.session_state.ingestion_result
+    )
 
 
 # ============================================================
@@ -1593,11 +1749,12 @@ st.divider()
 # MAIN TABS
 # ============================================================
 
-tab1, tab2, tab3 = st.tabs(
+tab1, tab2, tab3, tab4 = st.tabs(
     [
         "💬 Logistics Assistant",
         "📊 Shipment Reconciliation",
         "🧠 Shipment Intelligence",
+        "🩺 Diagnostics",
     ]
 )
 
@@ -2273,6 +2430,54 @@ with tab3:
             show_shipment_intelligence(
                 selected_shipment
             )
+
+
+# ============================================================
+# TAB 4 — DIAGNOSTICS (read-only)
+# ============================================================
+
+with tab4:
+
+    st.markdown(
+        '<div class="section-title">'
+        'Document Store Diagnostics'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.caption(
+        "Read-only check of the raw PDF folder, the vector index "
+        "and the ingestion journal. Nothing is changed, repaired "
+        "or reindexed."
+    )
+
+    run_diagnostics = st.button(
+        "Run Consistency Check",
+        type="primary",
+    )
+
+    if run_diagnostics:
+
+        try:
+
+            with st.spinner(
+                "Checking documents, vectors and journal..."
+            ):
+
+                diagnostics = check_destination(
+                    RAW_DATA_DIR,
+                    CHROMA_DIR
+                )
+
+        except Exception as error:
+
+            st.error(
+                f"Consistency check failed: {error}"
+            )
+
+        else:
+
+            show_consistency_report(diagnostics)
 
 
 # ============================================================
