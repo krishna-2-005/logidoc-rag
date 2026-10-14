@@ -10,16 +10,18 @@ child process (os._exit) that works only on temporary folders.
 Embeddings: the behaviour tests pass a deterministic stand-in for
 the Ollama embedder so they run without Ollama and can simulate
 failures. test_real_embedding runs the real Ollama embedder on the
-SHJ-2026-002 fixture and is skipped when Ollama is not reachable.
+SHJ-2026-002 fixture and is skipped (with the reason) when Ollama or
+the embedding model is unavailable.
 
-data/raw, chroma_db and the fixture PDFs are only read, never
-written; the test checks this at the end.
+data/raw and chroma_db are never used; tests/conftest.py checks they
+are unchanged after the session.
 
 Run from the project root:
-    python tests/test_ingestion_manager.py
+    python -m pytest tests/test_ingestion_manager.py
 """
 
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -47,6 +49,7 @@ for path in (PROJECT_ROOT, SRC_DIR, TESTS_DIR):
 
 import chromadb
 import pymupdf
+import pytest
 from chromadb.api.models.Collection import Collection
 from streamlit.runtime.scriptrunner_utils.exceptions import (
     RerunException,
@@ -71,6 +74,7 @@ from ingestion_manager import (
     ingest_files,
     ingest_uploads,
 )
+from ollama_check import requires_embeddings
 from vector_store import create_embedding
 
 
@@ -521,8 +525,18 @@ def crash_during_ingestion(ws, pdf, point):
     """
     Ingest pdf into the workspace in a child process that is
     terminated with os._exit at the given point, like a hard crash
-    or power loss. Only temporary folders are involved.
+    or power loss. Only temporary folders are involved; the child's
+    own temp folder (where its staging folder is left behind, as
+    with a real crash) is inside the workspace.
     """
+
+    child_temp = ws.raw.parent / "child_temp"
+    child_temp.mkdir(exist_ok=True)
+
+    environment = dict(os.environ)
+
+    for variable in ("TMPDIR", "TEMP", "TMP"):
+        environment[variable] = str(child_temp)
 
     completed = subprocess.run(
         [
@@ -537,6 +551,7 @@ def crash_during_ingestion(ws, pdf, point):
         capture_output=True,
         text=True,
         timeout=300,
+        env=environment,
     )
 
     assert completed.returncode == CRASH_EXIT_CODE, (
@@ -1939,15 +1954,11 @@ def test_concurrent_ingestion():
         )
 
 
+@pytest.mark.ollama
+@requires_embeddings
 def test_real_embedding():
 
     section("Real pipeline with Ollama embeddings")
-
-    try:
-        create_embedding("ping")
-    except Exception as error:
-        print(f"SKIP: Ollama not reachable ({error})")
-        return
 
     fixtures = sorted(FIXTURE_DIR.glob("*.pdf"))
 
@@ -1985,90 +1996,9 @@ def test_real_embedding():
     )
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-
-    print("=" * 70)
-    print("INGESTION MANAGER TEST")
-    print("=" * 70)
-
-    # Remove folders left by earlier runs (ChromaDB can keep
-    # files open on Windows until the process exits)
-    for stale in Path(tempfile.gettempdir()).glob(f"{TEMP_PREFIX}*"):
-        shutil.rmtree(stale, ignore_errors=True)
-
-    production = [config.RAW_DATA_DIR, config.CHROMA_DIR]
-
-    production_before = snapshot(production)
-    staging_before = temp_folders(STAGING_PREFIX)
-
-    test_new_pdf_accepted()
-    test_duplicate_with_different_name()
-    test_existing_unrelated_untouched()
-    test_changed_file_detected()
-    test_failed_file_reported()
-    test_run_twice()
-    test_partial_failure()
-    test_counts_match()
-    test_raw_pdf_without_vectors()
-    test_vectors_without_pdf()
-    test_interruptions_roll_back()
-    test_rollback_failure_reported()
-    test_verification_failures()
-    test_multiple_filenames_same_content()
-    test_uploads()
-    test_concurrent_ingestion()
-    test_real_embedding()
-
-    section("Safety")
-
-    # The crash child in test 10 is killed before its cleanup runs,
-    # exactly like a real crash, so it leaves one staging folder.
-    # Every in-process run must clean up after itself.
-    new_staging = temp_folders(STAGING_PREFIX) - staging_before
-
-    crash_leftovers = {
-        folder
-        for folder in new_staging
-        if any(
-            path.name == "INVOICE_SHJ-2026-901.pdf"
-            for path in folder.rglob("*")
-        )
-    }
-
-    check(
-        "Staging folders cleaned up (only the simulated crash left one)",
-        (len(new_staging), len(crash_leftovers)),
-        (1, 1),
-        display="yes"
-    )
-
-    for folder in crash_leftovers:
-        shutil.rmtree(folder, ignore_errors=True)
-
-    check(
-        "data/raw and chroma_db unchanged",
-        snapshot(production) == production_before,
-        True
-    )
-
+# Staging-folder cleanup and the production-data check run for
+# every session in tests/conftest.py.
 
 if __name__ == "__main__":
 
-    try:
-
-        main()
-
-    except AssertionError as error:
-
-        print(error)
-        print()
-        print("INGESTION MANAGER TEST FAILED")
-
-        sys.exit(1)
-
-    print()
-    print("INGESTION MANAGER TEST PASSED")
+    sys.exit(pytest.main([__file__, "-q"]))

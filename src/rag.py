@@ -1,5 +1,6 @@
 import sys
 import re
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -24,6 +25,45 @@ import ollama
 from source_evidence import (
     create_evidence,
     format_evidence,
+)
+
+from rag_grounding import (
+    ground_answer,
+    is_abstention,
+)
+
+from rag_scope import (
+    SCOPE_ABSTAINED,
+    SCOPE_CLARIFICATION,
+    SCOPE_OK,
+    group_records_by_shipment,
+    records_in_scope,
+    resolve_scope,
+)
+
+from shipment_identity import identifier_key
+
+
+# ============================================================
+# ANSWER STATUS
+# ============================================================
+
+STATUS_ANSWERED = "answered"
+STATUS_ABSTAINED = SCOPE_ABSTAINED
+STATUS_CLARIFICATION = SCOPE_CLARIFICATION
+
+NOT_FOUND_MESSAGE = (
+    "I could not find this information in the logistics documents."
+)
+
+UNVERIFIED_MESSAGE = (
+    "I could not verify an answer to this question in the documents "
+    "in scope, so I am not answering it."
+)
+
+LLM_UNAVAILABLE_MESSAGE = (
+    "I could not generate an answer because the language model is "
+    "not available."
 )
 
 
@@ -62,6 +102,41 @@ def get_collection():
 
     return client.get_collection(
         name=COLLECTION_NAME
+    )
+
+
+# ============================================================
+# MODEL CALLS
+#
+# Kept as separate functions so tests and the offline evaluation
+# can replace them without Ollama.
+# ============================================================
+
+def embed_query(text):
+
+    return ollama.embeddings(
+        model=EMBEDDING_MODEL,
+        prompt=text
+    )["embedding"]
+
+
+def call_llm(prompt):
+
+    response = ollama.chat(
+        model=LLM_MODEL,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ]
+    )
+
+    return (
+        response
+        .get("message", {})
+        .get("content", "")
+        .strip()
     )
 
 
@@ -316,59 +391,92 @@ def keyword_score(
 # HYBRID SEARCH
 # ============================================================
 
-def search_documents(question):
+def search_documents(
+    question,
+    scope=None,
+    records=None
+):
+    """
+    Hybrid keyword + vector search limited to the question's scope.
 
-    collection = get_collection()
+    scope: from rag_scope.resolve_scope(); None searches every chunk.
+    records: the records the scope allows (rag_scope.records_in_scope);
+    loaded unscoped when omitted.
+    """
 
-    # --------------------------------------------------------
-    # VECTOR SEARCH
-    # --------------------------------------------------------
+    started = time.perf_counter()
 
-    embedding_response = ollama.embeddings(
-        model=EMBEDDING_MODEL,
-        prompt=question
-    )
+    if records is None:
+        records = get_document_records()
 
-    vector_results = collection.query(
-        query_embeddings=[
-            embedding_response["embedding"]
-        ],
-        n_results=max(
-            TOP_K,
-            5
-        )
-    )
-
-    vector_documents = (
-        vector_results.get(
-            "documents",
-            [[]]
-        )[0]
-        or []
-    )
-
-    vector_metadatas = (
-        vector_results.get(
-            "metadatas",
-            [[]]
-        )[0]
-        or []
+    allowed_keys = (
+        set(scope["keys"])
+        if scope and scope.get("keys")
+        else None
     )
 
     # --------------------------------------------------------
-    # GET ALL DOCUMENTS
+    # VECTOR SEARCH (metadata filter, then re-checked)
     # --------------------------------------------------------
 
-    all_documents, all_metadatas = (
-        get_all_documents()
-    )
+    vector_documents = []
+    vector_metadatas = []
+
+    if records:
+
+        collection = get_collection()
+
+        query = {
+            "query_embeddings": [
+                embed_query(question)
+            ],
+            "n_results": max(
+                1,
+                min(
+                    max(TOP_K, 5),
+                    collection.count()
+                )
+            ),
+        }
+
+        if allowed_keys:
+
+            query["where"] = {
+                "shipment_id": {
+                    "$in": scope["shipment_ids"]
+                }
+            }
+
+        vector_results = collection.query(**query)
+
+        for document, metadata in zip(
+            (vector_results.get("documents") or [[]])[0] or [],
+            (vector_results.get("metadatas") or [[]])[0] or [],
+        ):
+
+            # Never let a chunk outside the scope through, even
+            # if the metadata filter matched it
+            if (
+                allowed_keys
+                and identifier_key(
+                    (metadata or {}).get("shipment_id")
+                ) not in allowed_keys
+            ):
+                continue
+
+            vector_documents.append(document)
+            vector_metadatas.append(metadata)
+
+    # --------------------------------------------------------
+    # KEYWORD SEARCH (in-scope records only)
+    # --------------------------------------------------------
 
     scored_documents = []
 
-    for document, metadata in zip(
-        all_documents,
-        all_metadatas
-    ):
+    for record in records:
+
+        document = record["document"]
+        metadata = record["metadata"]
 
         score = keyword_score(
             question,
@@ -478,6 +586,10 @@ def search_documents(question):
         "metadatas": [
             metadatas
         ],
+        "retrieval_seconds": (
+            time.perf_counter()
+            - started
+        ),
     }
 
 
@@ -519,69 +631,37 @@ def get_document_records():
 
 
 # ============================================================
-# SHIPMENT ID EXTRACTION
+# SHIPMENT SCOPE
+#
+# Which records a question may use is decided by
+# rag_scope.resolve_scope() before extraction and retrieval.
+# The functions below only ever see in-scope records.
 # ============================================================
 
-def extract_shipment_id(question):
+def is_on_time_question(question_lower):
 
-    match = re.search(
-        r"\bSHJ-\d{4}-\d+\b",
-        question or "",
-        re.IGNORECASE
-    )
-
-    if not match:
-        return None
-
-    return (
-        match.group(0)
-        .upper()
+    return bool(
+        re.search(
+            r"\bon[\s-]time\b|\blate\b",
+            question_lower
+        )
     )
 
 
-# ============================================================
-# FILTER RECORDS BY SHIPMENT
-# ============================================================
+def is_comparison_question(question_lower):
+    """
+    Questions comparing values ("how many were missing between the
+    BOL and the POD", "do the line items add up") are not answered
+    by the single-field extractors below.
+    """
 
-def filter_records_by_shipment(
-    records,
-    shipment_id
-):
-
-    if not shipment_id:
-        return records
-
-    filtered = []
-
-    for record in records:
-
-        metadata_shipment = str(
-            record["metadata"].get(
-                "shipment_id",
-                ""
-            )
-        ).upper()
-
-        document_upper = (
-            record["document"]
-            or ""
-        ).upper()
-
-        if (
-            shipment_id
-            == metadata_shipment
-            or shipment_id
-            in document_upper
-        ):
-
-            filtered.append(
-                record
-            )
-
-    if filtered:
-        return filtered
-
-    return records
+    return bool(
+        re.search(
+            r"\b(?:missing|short(?:age)?|difference|between|compare|"
+            r"add up|sum|match(?:es)?|consistent|all of|all the)\b",
+            question_lower
+        )
+    )
 
 
 # ============================================================
@@ -709,61 +789,31 @@ def get_actual_delivery_date(
 
 def extract_exact_answer(
     question,
-    results
+    results,
+    records=None
 ):
+    """
+    Deterministic answer for supported field questions, from the
+    given records only (the question's scope). Without records,
+    every indexed record is used.
+    """
 
     question_lower = (
         question or ""
     ).lower()
 
-    records = get_document_records()
+    if records is None:
+        records = get_document_records()
 
     if not records:
         return None
 
     # --------------------------------------------------------
-    # SHIPMENT FILTER
-    # --------------------------------------------------------
-
-    shipment_id = (
-        extract_shipment_id(
-            question
-        )
-    )
-
-    records = filter_records_by_shipment(
-        records,
-        shipment_id
-    )
-
-    # --------------------------------------------------------
     # DELIVERY ON TIME
+    # ("late" as a whole word, so "plate" does not match)
     # --------------------------------------------------------
 
-    on_time_question = (
-        (
-            "on time"
-            in question_lower
-        )
-        or (
-            "on-time"
-            in question_lower
-        )
-        or (
-            "delivered on time"
-            in question_lower
-        )
-        or (
-            "delivery on time"
-            in question_lower
-        )
-        or (
-            "late"
-            in question_lower
-        )
-    )
-
-    if on_time_question:
+    if is_on_time_question(question_lower):
 
         expected = (
             get_expected_delivery_date(
@@ -805,6 +855,13 @@ def extract_exact_answer(
                 f"{difference} days after the expected "
                 f"delivery date of {expected_text}."
             )
+
+    # --------------------------------------------------------
+    # COMPARISONS ARE NOT SINGLE-FIELD QUESTIONS
+    # --------------------------------------------------------
+
+    if is_comparison_question(question_lower):
+        return None
 
     # --------------------------------------------------------
     # NUMBER OF PIECES DELIVERED
@@ -1053,17 +1110,21 @@ def extract_exact_answer(
 
     # --------------------------------------------------------
     # DELIVERY DATE
+    # ("expected delivery date" is answered from the BOL below)
     # --------------------------------------------------------
 
     if (
-        "delivery date"
-        in question_lower
-        or "when was it delivered"
-        in question_lower
-        or "when was the shipment delivered"
-        in question_lower
-        or "when was shipment delivered"
-        in question_lower
+        (
+            "delivery date"
+            in question_lower
+            or "when was it delivered"
+            in question_lower
+            or "when was the shipment delivered"
+            in question_lower
+            or "when was shipment delivered"
+            in question_lower
+        )
+        and "expected" not in question_lower
     ):
 
         patterns = [
@@ -1334,40 +1395,29 @@ def make_evidence(
 
 def find_exact_evidence(
     question,
-    answer
+    answer,
+    records=None
 ):
+    """
+    The source text behind a deterministic answer, from the given
+    records only (the question's scope).
+    """
 
     question_lower = (
         question or ""
     ).lower()
 
-    records = get_document_records()
+    if records is None:
+        records = get_document_records()
 
     if not records:
         return None
-
-    shipment_id = (
-        extract_shipment_id(
-            question
-        )
-    )
-
-    records = filter_records_by_shipment(
-        records,
-        shipment_id
-    )
 
     # --------------------------------------------------------
     # ON-TIME EVIDENCE
     # --------------------------------------------------------
 
-    if (
-        "on time" in question_lower
-        or "on-time" in question_lower
-        or "delivered on time"
-        in question_lower
-        or "late" in question_lower
-    ):
+    if is_on_time_question(question_lower):
 
         expected = (
             get_expected_delivery_date(
@@ -1446,6 +1496,47 @@ def find_exact_evidence(
             )
         )
 
+    # BOL pieces
+    if (
+        "piece" in question_lower
+        and (
+            "bol" in question_lower
+            or "bill of lading"
+            in question_lower
+        )
+    ):
+
+        field_patterns.append(
+            (
+                "bol",
+                [
+                    r"Number\s+of\s+Pieces"
+                    r"\s*:\s*\d+",
+                ]
+            )
+        )
+
+    # Delivery location (the POD, not the BOL consignee)
+    if (
+        "where" in question_lower
+        and (
+            "delivered"
+            in question_lower
+            or "delivery"
+            in question_lower
+        )
+    ):
+
+        field_patterns.append(
+            (
+                "pod",
+                [
+                    r"Delivery\s+Location\s*:\s*"
+                    r".+?(?=\s+Delivery\s+Date\s*:)"
+                ]
+            )
+        )
+
     # Invoice total
     if (
         "invoice" in question_lower
@@ -1473,10 +1564,13 @@ def find_exact_evidence(
 
     # Delivery date
     if (
-        "delivery date"
-        in question_lower
-        or "when was it delivered"
-        in question_lower
+        (
+            "delivery date"
+            in question_lower
+            or "when was it delivered"
+            in question_lower
+        )
+        and "expected" not in question_lower
     ):
 
         field_patterns.append(
@@ -1636,54 +1730,27 @@ def find_exact_evidence(
 
 
 # ============================================================
-# CLEAN RETRIEVED EVIDENCE
+# SUPPORTING EVIDENCE
+#
+# Only chunks that support the answer are cited
+# (rag_grounding.ground_answer), never every retrieved chunk.
 # ============================================================
 
-def build_retrieved_evidence(
-    results,
-    limit=3
+def build_supporting_evidence(
+    documents,
+    metadatas,
+    indexes
 ):
-
-    documents = (
-        results.get(
-            "documents",
-            [[]]
-        )[0]
-        or []
-    )
-
-    metadatas = (
-        results.get(
-            "metadatas",
-            [[]]
-        )[0]
-        or []
-    )
 
     evidence_items = []
 
-    for document, metadata in zip(
-        documents[:limit],
-        metadatas[:limit]
-    ):
+    for index in indexes:
 
-        document_type = (
-            metadata.get(
-                "document_type",
-                "Unknown"
-            )
+        metadata = metadatas[index] or {}
+
+        evidence_text = normalize_text(
+            documents[index]
         )
-
-        normalized = normalize_text(
-            document
-        )
-
-        # ----------------------------------------------------
-        # Instead of displaying the entire PDF chunk,
-        # extract a useful sentence-sized evidence snippet.
-        # ----------------------------------------------------
-
-        evidence_text = normalized
 
         if len(evidence_text) > 350:
             evidence_text = (
@@ -1702,7 +1769,10 @@ def build_retrieved_evidence(
                     "Unknown"
                 ),
                 text=evidence_text,
-                document_type=document_type,
+                document_type=metadata.get(
+                    "document_type",
+                    "Unknown"
+                ),
                 shipment_id=metadata.get(
                     "shipment_id"
                 ),
@@ -1710,6 +1780,69 @@ def build_retrieved_evidence(
         )
 
     return evidence_items
+
+
+def scope_shipment_ids(metadatas):
+    """
+    Shipment IDs of the given chunks. Naming them in an answer is not
+    evidence, so grounding ignores them.
+    """
+
+    return sorted({
+        str(metadata.get("shipment_id")).strip()
+        for metadata in metadatas
+        if metadata and metadata.get("shipment_id")
+    })
+
+
+def supported_exact_evidence(
+    question,
+    answer,
+    records
+):
+    """
+    Evidence for a deterministic answer, kept only where it supports
+    the answer; otherwise the in-scope chunks that do.
+    """
+
+    ignore_ids = scope_shipment_ids(
+        [record["metadata"] for record in records]
+    )
+
+    evidence = find_exact_evidence(
+        question,
+        answer,
+        records
+    )
+
+    if evidence and not isinstance(evidence, list):
+        evidence = [evidence]
+
+    if evidence:
+
+        supported, indexes, _ = ground_answer(
+            answer,
+            [item["text"] for item in evidence],
+            ignore_ids
+        )
+
+        if supported:
+            return [evidence[index] for index in indexes]
+
+    supported, indexes, _ = ground_answer(
+        answer,
+        [record["normalized"] for record in records],
+        ignore_ids
+    )
+
+    if not supported:
+        return []
+
+    return build_supporting_evidence(
+        [record["document"] for record in records],
+        [record["metadata"] for record in records],
+        indexes
+    )
 
 
 # ============================================================
@@ -1789,10 +1922,47 @@ def ensure_professional_answer(
 # GENERATE LLM ANSWER
 # ============================================================
 
+def finish_answer(
+    results,
+    answer,
+    status,
+    method=None,
+    evidence=None
+):
+
+    results["status"] = status
+    results["answer_method"] = method
+    results["evidence"] = evidence or []
+
+    return answer
+
+
+def shipment_name(key, records):
+
+    if key is None:
+        return "documents without a shipment ID"
+
+    return str(
+        records[0]["metadata"].get("shipment_id")
+    ).strip()
+
+
 def generate_answer(
     question,
-    results
+    results,
+    records=None,
+    scope=None
 ):
+    """
+    Answer from the in-scope records and retrieved chunks only.
+
+    Sets results["status"] ("answered", "abstained" or
+    "clarification"), results["answer_method"] ("exact" or "llm")
+    and results["evidence"] (only the sources supporting the answer).
+    """
+
+    if records is None:
+        records = get_document_records()
 
     documents = (
         results.get(
@@ -1810,38 +1980,103 @@ def generate_answer(
         or []
     )
 
+    results.setdefault("generation_seconds", None)
+
     # --------------------------------------------------------
     # NO DOCUMENTS
     # --------------------------------------------------------
 
     if not documents:
 
-        return (
-            "I could not find this information "
-            "in the logistics documents."
+        return finish_answer(
+            results,
+            NOT_FOUND_MESSAGE,
+            STATUS_ABSTAINED
         )
 
     # --------------------------------------------------------
-    # EXACT EXTRACTION FIRST
+    # EXACT EXTRACTION FIRST, per shipment, so that values from
+    # different shipments are never mixed
     # --------------------------------------------------------
 
-    exact_answer = (
-        extract_exact_answer(
+    groups = group_records_by_shipment(records)
+
+    exact_answers = {}
+
+    for key, group in groups.items():
+
+        exact_answer = extract_exact_answer(
             question,
-            results
+            results,
+            group
         )
-    )
 
-    if exact_answer:
+        if exact_answer:
+            exact_answers[key] = (exact_answer, group)
 
-        results["evidence"] = (
-            find_exact_evidence(
-                question,
-                exact_answer
+    if exact_answers:
+
+        distinct = {
+            exact_answer
+            for exact_answer, _ in exact_answers.values()
+        }
+
+        if len(distinct) > 1:
+
+            names = ", ".join(
+                shipment_name(key, group)
+                for key, (_, group) in exact_answers.items()
             )
-        )
 
-        return exact_answer
+            return finish_answer(
+                results,
+                "The documents of different shipments give different "
+                f"answers to this question ({names}). Select a shipment "
+                "in the sidebar, or include the shipment ID in the "
+                "question.",
+                STATUS_CLARIFICATION
+            )
+
+        exact_answer = distinct.pop()
+
+        evidence = []
+
+        for _, group in exact_answers.values():
+
+            evidence.extend(
+                supported_exact_evidence(
+                    question,
+                    exact_answer,
+                    group
+                )
+            )
+
+        if not evidence:
+
+            return finish_answer(
+                results,
+                UNVERIFIED_MESSAGE,
+                STATUS_ABSTAINED,
+                "exact"
+            )
+
+        # Unscoped with several shipments: name the one answering
+        if len(groups) > 1 and len(exact_answers) == 1:
+
+            key, (_, group) = next(iter(exact_answers.items()))
+
+            exact_answer = (
+                f"{exact_answer} "
+                f"(Shipment: {shipment_name(key, group)})"
+            )
+
+        return finish_answer(
+            results,
+            exact_answer,
+            STATUS_ANSWERED,
+            "exact",
+            evidence
+        )
 
     # --------------------------------------------------------
     # BUILD CONTEXT
@@ -1868,6 +2103,12 @@ DOCUMENT CONTENT:
 
     context = "\n".join(
         context_parts
+    )
+
+    scope_label = (
+        scope["label"]
+        if scope
+        else "all indexed shipments"
     )
 
     # --------------------------------------------------------
@@ -1901,9 +2142,13 @@ logistics documents.
     Yes.
 11. NEVER answer only:
     No.
-12. For yes/no questions, provide the reason
-    or supporting fact from the documents.
+12. For yes/no questions, start the answer
+    with Yes or No, then give the reason or
+    supporting fact from the documents.
 13. Prefer one or two clear sentences.
+14. The documents come from: {scope_label}.
+    If they belong to more than one shipment,
+    name the shipment for every fact.
 
 LOGISTICS DOCUMENT CONTEXT:
 
@@ -1916,51 +2161,118 @@ USER QUESTION:
 ANSWER:
 """
 
+    started = time.perf_counter()
+
     try:
 
-        response = ollama.chat(
-            model=LLM_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ]
+        answer = call_llm(prompt)
+
+    except Exception as error:
+
+        results["generation_seconds"] = (
+            time.perf_counter()
+            - started
         )
 
-        answer = (
-            response
-            .get("message", {})
-            .get("content", "")
-            .strip()
+        results["generation_error"] = str(error)
+
+        return finish_answer(
+            results,
+            LLM_UNAVAILABLE_MESSAGE,
+            STATUS_ABSTAINED,
+            "llm"
         )
 
-    except Exception:
-
-        answer = (
-            "I could not generate an answer from "
-            "the logistics documents."
-        )
+    results["generation_seconds"] = (
+        time.perf_counter()
+        - started
+    )
 
     answer = ensure_professional_answer(
         answer,
         question
     )
 
-    results["evidence"] = (
-        build_retrieved_evidence(
-            results
+    if is_abstention(answer):
+
+        return finish_answer(
+            results,
+            NOT_FOUND_MESSAGE,
+            STATUS_ABSTAINED,
+            "llm"
         )
+
+    # --------------------------------------------------------
+    # The answer must be supported by the retrieved chunks;
+    # only the supporting ones are cited
+    # --------------------------------------------------------
+
+    supported, indexes, reason = ground_answer(
+        answer,
+        [normalize_text(document) for document in documents],
+        scope_shipment_ids(metadatas)
     )
 
-    return answer
+    results["grounding"] = reason
+
+    if not supported:
+
+        results["unverified_answer"] = answer
+
+        return finish_answer(
+            results,
+            UNVERIFIED_MESSAGE,
+            STATUS_ABSTAINED,
+            "llm"
+        )
+
+    return finish_answer(
+        results,
+        answer,
+        STATUS_ANSWERED,
+        "llm",
+        build_supporting_evidence(
+            documents,
+            metadatas,
+            indexes
+        )
+    )
 
 
 # ============================================================
 # ASK QUESTION
 # ============================================================
 
-def ask_question(question):
+def ask_question(
+    question,
+    shipment_id=None
+):
+    """
+    Answer a question from the indexed documents.
+
+    shipment_id: the shipment selected in the UI. None or
+    "All Shipments" searches every shipment (unscoped), unless the
+    question names a shipment.
+
+    Returns (answer, results):
+        status       "answered", "abstained" or "clarification"
+        scope        what was searched (rag_scope.resolve_scope)
+        evidence     only the sources that support the answer
+        documents,   the searched chunks (search results, not
+        metadatas    citations)
+        retrieval_seconds, generation_seconds
+    """
+
+    results = {
+        "documents": [[]],
+        "metadatas": [[]],
+        "evidence": [],
+        "status": STATUS_ABSTAINED,
+        "answer_method": None,
+        "scope": None,
+        "retrieval_seconds": None,
+        "generation_seconds": None,
+    }
 
     question = (
         question or ""
@@ -1970,20 +2282,53 @@ def ask_question(question):
 
         return (
             "Please enter a logistics question.",
-            {
-                "documents": [[]],
-                "metadatas": [[]],
-                "evidence": None,
-            }
+            results
         )
 
-    results = search_documents(
-        question
+    records = get_document_records()
+
+    scope = resolve_scope(
+        question,
+        shipment_id,
+        records
+    )
+
+    results["scope"] = scope
+
+    if scope["status"] != SCOPE_OK:
+
+        results["status"] = scope["status"]
+
+        return (
+            scope["message"],
+            results
+        )
+
+    scoped_records = records_in_scope(
+        records,
+        scope
+    )
+
+    if not scoped_records:
+
+        return (
+            "No indexed documents are available for this question.",
+            results
+        )
+
+    results.update(
+        search_documents(
+            question,
+            scope,
+            scoped_records
+        )
     )
 
     answer = generate_answer(
         question,
-        results
+        results,
+        scoped_records,
+        scope
     )
 
     return (
@@ -2128,7 +2473,7 @@ def main():
     )
 
     print(
-        "SOURCES"
+        "SEARCHED PASSAGES (search results, not citations)"
     )
 
     print(

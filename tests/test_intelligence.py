@@ -13,7 +13,7 @@ is not needed: the intelligence reads PDF text and document
 metadata only, so stand-in embeddings are used.
 
 Run from the project root:
-    python tests/test_intelligence.py
+    python -m pytest tests/test_intelligence.py
 """
 
 import sys
@@ -33,11 +33,12 @@ for path in (PROJECT_ROOT, SRC_DIR, TESTS_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import config
+import pytest
+
 from ingestion_manager import ingest_files
 from intelligence_service import analyze_shipment
 from isolation import SAMPLE_SHIPMENT_DIR, sample_workspace
-from test_ingestion_manager import fake_embedding, snapshot
+from test_ingestion_manager import fake_embedding
 
 TEMP_PREFIX = "logidoc_intelligencetest_"
 
@@ -266,33 +267,9 @@ def check_shipment_intelligence():
 # MAIN
 # ============================================================
 
+# The production-data check runs for every session in
+# tests/conftest.py.
+
 if __name__ == "__main__":
 
-    print("=" * 70)
-    print("INTELLIGENCE REGRESSION TEST")
-    print("=" * 70)
-
-    production = [config.RAW_DATA_DIR, config.CHROMA_DIR]
-
-    production_before = snapshot(production)
-
-    try:
-
-        test_shipment_intelligence()
-
-        check(
-            "data/raw and chroma_db unchanged",
-            snapshot(production) == production_before,
-            True
-        )
-
-    except AssertionError as error:
-
-        print(error)
-        print()
-        print("INTELLIGENCE REGRESSION TEST FAILED")
-
-        sys.exit(1)
-
-    print()
-    print("INTELLIGENCE REGRESSION TEST PASSED")
+    sys.exit(pytest.main([__file__, "-q"]))

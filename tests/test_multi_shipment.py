@@ -12,11 +12,13 @@ The test builds a temporary, isolated workspace containing:
 and a temporary ChromaDB index. The production data/raw folder and
 chroma_db index are never written; the test checks this at the end.
 
-Requires Ollama running with the embedding model from config.py,
-because the temporary index is built with the real pipeline.
+The temporary index is built with the real full rebuild using
+deterministic stand-in embeddings, so Ollama is not needed: shipment
+detection, isolation and intelligence do not depend on semantic
+ranking.
 
 Run from the project root:
-    python tests/test_multi_shipment.py
+    python -m pytest tests/test_multi_shipment.py
 """
 
 import io
@@ -49,6 +51,9 @@ from shipment_retriever import get_shipment_documents
 from shipment_selector import get_available_shipments
 from isolation import SAMPLE_SHIPMENT_DIR
 from streamlit.testing.v1 import AppTest
+from test_ingestion_manager import fake_embedding, patched
+
+import pytest
 
 
 # ============================================================
@@ -132,22 +137,6 @@ def section(title):
 
     print()
     print(f"--- {title}")
-
-
-def production_snapshot():
-    """
-    File names, sizes and modification times of the production
-    sample PDFs and index, used to prove the test never wrote them.
-    """
-
-    paths = sorted(config.RAW_DATA_DIR.glob("*"))
-    paths += sorted(config.CHROMA_DIR.rglob("*"))
-
-    return {
-        str(path): (path.stat().st_size, path.stat().st_mtime)
-        for path in paths
-        if path.is_file()
-    }
 
 
 @contextmanager
@@ -828,17 +817,13 @@ def test_dashboard():
 # MAIN
 # ============================================================
 
-def main():
-
-    # Windows consoles may not support every character in app text
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="replace")
-
-    print("=" * 70)
-    print("MULTI-SHIPMENT REGRESSION TEST")
-    print("=" * 70)
-
-    before = production_snapshot()
+@pytest.fixture(scope="module", autouse=True)
+def multi_shipment_index():
+    """
+    Both shipments indexed with the real full rebuild in a temporary
+    workspace, shared by the tests in this module. Stand-in
+    embeddings are used: nothing here depends on semantic ranking.
+    """
 
     with isolated_workspace() as (raw_dir, chroma_dir):
 
@@ -847,39 +832,16 @@ def main():
         assert rag.CHROMA_DIR == chroma_dir
         assert document_loader.RAW_DATA_DIR == raw_dir
 
-        print(f"Temporary workspace: {raw_dir.parent}")
+        with patched(vector_store, "create_embedding", fake_embedding):
+            with redirect_stdout(io.StringIO()):
+                vector_store.build_vector_database()
 
-        # Keep the index build output quiet
-        with redirect_stdout(io.StringIO()):
-            vector_store.build_vector_database()
+        yield raw_dir, chroma_dir
 
-        test_shipment_detection()
-        test_retrieval_isolation()
-        test_intelligence_isolation()
-        test_dashboard()
 
-    section("Production data")
-
-    check(
-        "data/raw and chroma_db unchanged",
-        production_snapshot() == before,
-        True
-    )
-
+# The production-data check runs for every session in
+# tests/conftest.py.
 
 if __name__ == "__main__":
 
-    try:
-
-        main()
-
-    except AssertionError as error:
-
-        print(error)
-        print()
-        print("MULTI-SHIPMENT REGRESSION TEST FAILED")
-
-        sys.exit(1)
-
-    print()
-    print("MULTI-SHIPMENT REGRESSION TEST PASSED")
+    sys.exit(pytest.main([__file__, "-q"]))

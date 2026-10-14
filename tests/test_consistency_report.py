@@ -6,22 +6,22 @@ against temporary folders and a real persistent ChromaDB in a
 temporary folder. Hard crashes are simulated by terminating a child
 process (os._exit) that works only on temporary folders.
 
-Full-rebuild scenarios use the real vector_store.build_vector_database()
-pointed at a temporary folder, which needs Ollama; without Ollama they
-fall back to writing equivalent vectors directly and say so.
+Full-rebuild scenarios run twice: once with vectors written the way
+vector_store.build_vector_database() writes them (no Ollama needed),
+and once with the real build_vector_database() pointed at a temporary
+folder (skipped, with the reason, without Ollama).
 
-data/raw and chroma_db are never read or written by these tests; the
-test checks they are unchanged at the end.
+data/raw and chroma_db are never used; tests/conftest.py checks they
+are unchanged after the session.
 
 Run from the project root:
-    python tests/test_consistency_report.py
+    python -m pytest tests/test_consistency_report.py
 """
 
 import io
 import json
 import shutil
 import sys
-import tempfile
 from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 
@@ -37,9 +37,9 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import config
+import pytest
+
 import document_loader
-import ingestion_journal
 import vector_store
 from consistency_report import check_destination
 from ingestion_journal import (
@@ -48,15 +48,13 @@ from ingestion_journal import (
     append_record,
     read_journal,
 )
+from ollama_check import requires_embeddings
 from test_ingestion_manager import (
-    STAGING_PREFIX,
-    TEMP_PREFIX,
     Collection,
     add_legacy_vectors,
     check,
     collection,
     crash_during_ingestion,
-    fake_embedding,
     ingest,
     ingestion_manager,
     make_bol,
@@ -64,8 +62,6 @@ from test_ingestion_manager import (
     make_pod,
     patched,
     section,
-    snapshot,
-    temp_folders,
     workspace,
 )
 
@@ -132,15 +128,6 @@ def destination_state(ws):
 def report(ws):
 
     return check_destination(ws.raw, ws.chroma)
-
-
-def ollama_available():
-
-    try:
-        vector_store.create_embedding("ping")
-        return True
-    except Exception:
-        return False
 
 
 @contextmanager
@@ -475,12 +462,24 @@ def test_index_and_folder_mismatches():
         )
 
 
-def test_full_rebuild_vectors(real):
+def test_full_rebuild_vectors_simulated():
+
+    check_full_rebuild_vectors(real=False)
+
+
+@pytest.mark.ollama
+@requires_embeddings
+def test_full_rebuild_vectors_real():
+
+    check_full_rebuild_vectors(real=True)
+
+
+def check_full_rebuild_vectors(real):
 
     section(
         "5. Vectors from a full rebuild "
         + ("(real build_vector_database)" if real else
-           "(SIMULATED: Ollama not reachable)")
+           "(written the way build_vector_database writes them)")
     )
 
     # Two identical PDFs indexed by a full rebuild
@@ -662,63 +661,10 @@ def test_report_is_read_only():
         )
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-
-    print("=" * 70)
-    print("JOURNAL AND CONSISTENCY REPORT TEST")
-    print("=" * 70)
-
-    for stale in Path(tempfile.gettempdir()).glob(f"{TEMP_PREFIX}*"):
-        shutil.rmtree(stale, ignore_errors=True)
-
-    production = [config.RAW_DATA_DIR, config.CHROMA_DIR]
-
-    production_before = snapshot(production)
-    staging_before = temp_folders(STAGING_PREFIX)
-
-    test_healthy_destination()
-    test_journal_reading()
-    test_interrupted_operations()
-    test_index_and_folder_mismatches()
-    test_full_rebuild_vectors(real=ollama_available())
-    test_failed_rollback_and_missing_index()
-    test_report_is_read_only()
-
-    section("Safety")
-
-    # Crash children (4 here) leave their staging folders behind,
-    # like real crashes; remove them now
-    crash_leftovers = temp_folders(STAGING_PREFIX) - staging_before
-
-    check("Staging folders left by simulated crashes", len(crash_leftovers), 4)
-
-    for folder in crash_leftovers:
-        shutil.rmtree(folder, ignore_errors=True)
-
-    check(
-        "data/raw and chroma_db unchanged",
-        snapshot(production) == production_before,
-        True
-    )
-
+# Staging-folder cleanup (crash children now use a temp folder inside
+# their workspace) and the production-data check run for every
+# session in tests/conftest.py.
 
 if __name__ == "__main__":
 
-    try:
-
-        main()
-
-    except AssertionError as error:
-
-        print(error)
-        print()
-        print("JOURNAL AND CONSISTENCY REPORT TEST FAILED")
-
-        sys.exit(1)
-
-    print()
-    print("JOURNAL AND CONSISTENCY REPORT TEST PASSED")
+    sys.exit(pytest.main([__file__, "-q"]))

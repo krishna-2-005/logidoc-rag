@@ -1010,7 +1010,7 @@ def ingest_files(
     raw_dir,
     chroma_dir,
     collection_name=COLLECTION_NAME,
-    embed_text=create_embedding
+    embed_text=None
 ):
     """
     Safely add input PDFs to the destination.
@@ -1019,7 +1019,8 @@ def ingest_files(
     no default, so tests can never write to production by accident.
     Existing files and vectors are never deleted or overwritten.
 
-    embed_text defaults to vector_store.create_embedding (Ollama).
+    embed_text defaults to vector_store.create_embedding (Ollama),
+    looked up when called so tests can replace it.
 
     An interruption (KeyboardInterrupt, SystemExit, Streamlit
     stop/rerun) is re-raised after the current file is rolled
@@ -1036,7 +1037,7 @@ def ingest_files(
             Path(raw_dir),
             Path(chroma_dir),
             collection_name,
-            embed_text
+            embed_text or create_embedding
         )
 
 
@@ -1142,7 +1143,7 @@ def ingest_uploads(
     raw_dir,
     chroma_dir,
     collection_name=COLLECTION_NAME,
-    embed_text=create_embedding
+    embed_text=None
 ):
     """
     Ingest files uploaded through a UI: objects with .name and

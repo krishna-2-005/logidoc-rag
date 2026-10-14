@@ -65,6 +65,27 @@ def normalize_identifier(value):
     return value
 
 
+def identifier_key(value):
+    """
+    Comparison key that ignores case, spaces, hyphens and other
+    separators, so "SHJ-2026-001", "shj 2026 001" and "SHJ2026001"
+    compare equal. Returns None for an empty identifier.
+    """
+
+    normalized = normalize_identifier(value)
+
+    if not normalized:
+        return None
+
+    key = "".join(
+        character
+        for character in normalized
+        if character.isalnum()
+    )
+
+    return key or None
+
+
 # ============================================================
 # Extract Document Identifiers
 # ============================================================
