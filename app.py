@@ -1774,8 +1774,10 @@ with tab1:
 
     if selected_shipment == "All Shipments":
 
-        st.caption(
-            "Ask questions across all indexed logistics shipments."
+        st.info(
+            "Scope: All Shipments (unscoped). Every indexed shipment "
+            "is searched. Select a shipment in the sidebar to limit "
+            "answers to its documents."
         )
 
     else:
@@ -1785,7 +1787,7 @@ with tab1:
         )
 
         st.caption(
-            "Questions are searched across the indexed documents."
+            "Answers use only the documents of this shipment."
         )
 
     question = st.text_input(
@@ -1818,16 +1820,27 @@ with tab1:
                 ):
 
                     answer, results = ask_question(
-                        question
+                        question,
+                        shipment_id=(
+                            None
+                            if selected_shipment == "All Shipments"
+                            else selected_shipment
+                        )
                     )
 
                 st.subheader("Answer")
 
-                if answer:
+                answered = (
+                    results.get("status") == "answered"
+                )
 
-                    answer_text = str(
-                        answer
-                    ).strip()
+                answer_text = str(
+                    answer or ""
+                ).strip()
+
+                # Abstentions and clarification requests are not
+                # shown as successful answers
+                if answered and answer_text:
 
                     st.success(
                         answer_text
@@ -1836,28 +1849,25 @@ with tab1:
                 else:
 
                     st.warning(
-                        "No answer was generated from the indexed documents."
+                        answer_text
+                        or "No answer was generated from the indexed documents."
                     )
 
-                evidence = {}
+                scope = results.get("scope") or {}
 
-                if isinstance(
-                    results,
-                    dict
-                ):
+                if scope.get("label"):
 
-                    evidence = results.get(
-                        "evidence"
+                    st.caption(
+                        f"Scope: {scope['label']}"
                     )
 
-                show_source_evidence(
-                    evidence,
-                    question
-                )
+                # Citations: only the sources supporting the answer
+                if answered:
 
-                st.subheader(
-                    "Retrieved Sources"
-                )
+                    show_source_evidence(
+                        results.get("evidence"),
+                        question
+                    )
 
                 metadatas_result = []
 
@@ -1898,45 +1908,51 @@ with tab1:
 
                 seen_sources = set()
 
-                for metadata in metadatas_result:
+                # What was searched, kept apart from the citations
+                with st.expander(
+                    "Searched passages (search results, not citations)"
+                ):
 
-                    if not isinstance(
-                        metadata,
-                        dict
-                    ):
-                        continue
+                    for metadata in metadatas_result:
 
-                    source = metadata.get(
-                        "source",
-                        "Unknown"
-                    )
+                        if not isinstance(
+                            metadata,
+                            dict
+                        ):
+                            continue
 
-                    page = metadata.get(
-                        "page",
-                        "Unknown"
-                    )
+                        source = metadata.get(
+                            "source",
+                            "Unknown"
+                        )
 
-                    document_type = metadata.get(
-                        "document_type",
-                        "Unknown"
-                    )
+                        page = metadata.get(
+                            "page",
+                            "Unknown"
+                        )
 
-                    key = (
-                        source,
-                        page,
-                        document_type
-                    )
+                        document_type = metadata.get(
+                            "document_type",
+                            "Unknown"
+                        )
 
-                    if key in seen_sources:
-                        continue
+                        key = (
+                            source,
+                            page,
+                            document_type
+                        )
 
-                    st.write(
-                        f"📄 {source} "
-                        f"(Page {page}, "
-                        f"Type: {document_type})"
-                    )
+                        if key in seen_sources:
+                            continue
 
-                    seen_sources.add(key)
+                        st.write(
+                            f"📄 {source} "
+                            f"(Page {page}, "
+                            f"Type: {document_type}, "
+                            f"Shipment: {metadata.get('shipment_id') or 'none'})"
+                        )
+
+                        seen_sources.add(key)
 
             except Exception as error:
 
