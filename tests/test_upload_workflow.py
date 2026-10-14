@@ -19,10 +19,12 @@ isolated, and that the Diagnostics tab changes nothing.
 Every loaded module is pointed at the temporary folders, and the
 test checks at the end that data/raw and chroma_db are unchanged.
 
-Requires Ollama (the full rebuild and the uploads use real embeddings).
+The workflow runs twice: with deterministic stand-in embeddings (no
+Ollama needed) and with real Ollama embeddings (skipped, with the
+reason, when Ollama or the embedding model is unavailable).
 
 Run from the project root:
-    python tests/test_upload_workflow.py
+    python -m pytest tests/test_upload_workflow.py
 """
 
 import io
@@ -30,7 +32,7 @@ import json
 import shutil
 import sys
 import tempfile
-from contextlib import redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stdout
 from pathlib import Path
 
 
@@ -46,10 +48,12 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
         sys.path.insert(0, str(path))
 
 import chromadb
+import pytest
 from streamlit.testing.v1 import AppTest
 
 import config
 import document_loader
+import ingestion_manager
 import rag
 import vector_store
 from consistency_report import check_destination
@@ -57,7 +61,14 @@ from ingestion_journal import JOURNAL_FILENAME, read_journal
 from ingestion_manager import HASH_METADATA_KEY, calculate_sha256
 from intelligence_service import analyze_shipment
 from isolation import sample_workspace
-from test_ingestion_manager import check, make_bol, section, snapshot
+from ollama_check import requires_embeddings
+from test_ingestion_manager import (
+    check,
+    fake_embedding,
+    make_bol,
+    patched,
+    section,
+)
 
 
 # ============================================================
@@ -219,7 +230,41 @@ def click(at, label):
 # TEST
 # ============================================================
 
-def test_upload_workflow():
+@contextmanager
+def stand_in_embeddings():
+    """
+    Replace the Ollama embedder in the full rebuild and in the
+    ingestion manager (which looks it up when called).
+    """
+
+    with patched(vector_store, "create_embedding", fake_embedding):
+        with patched(ingestion_manager, "create_embedding", fake_embedding):
+            yield
+
+
+@pytest.mark.parametrize(
+    "embeddings",
+    [
+        "stand-in",
+        pytest.param(
+            "ollama",
+            marks=[pytest.mark.ollama, requires_embeddings],
+        ),
+    ],
+)
+def test_upload_workflow(embeddings):
+
+    backend = (
+        stand_in_embeddings()
+        if embeddings == "stand-in"
+        else nullcontext()
+    )
+
+    with backend:
+        run_upload_workflow()
+
+
+def run_upload_workflow():
 
     with sample_workspace(TEMP_PREFIX) as (raw_dir, chroma_dir):
 
@@ -227,7 +272,7 @@ def test_upload_workflow():
         # Production-like start: SHJ-2026-001 from a full rebuild
         # ----------------------------------------------------
 
-        section("Start: SHJ-2026-001 indexed by the real full rebuild")
+        section("Start: SHJ-2026-001 indexed by the full rebuild")
 
         assert vector_store.CHROMA_DIR == chroma_dir
         assert rag.CHROMA_DIR == chroma_dir
@@ -561,55 +606,9 @@ def test_upload_workflow():
         )
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-
-    print("=" * 70)
-    print("STREAMLIT UPLOAD WORKFLOW TEST")
-    print("=" * 70)
-
-    try:
-        vector_store.create_embedding("ping")
-    except Exception as error:
-        raise AssertionError(
-            f"FAIL: this test needs Ollama for real embeddings: {error}"
-        )
-
-    production = [config.RAW_DATA_DIR, config.CHROMA_DIR]
-
-    production_before = snapshot(production)
-
-    test_upload_workflow()
-
-    section("Production data")
-
-    check(
-        "data/raw and chroma_db unchanged",
-        snapshot(production) == production_before,
-        True
-    )
-
+# The production-data check runs for every session in
+# tests/conftest.py.
 
 if __name__ == "__main__":
 
-    # Windows consoles may not support every character in app text
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="replace")
-
-    try:
-
-        main()
-
-    except AssertionError as error:
-
-        print(error)
-        print()
-        print("STREAMLIT UPLOAD WORKFLOW TEST FAILED")
-
-        sys.exit(1)
-
-    print()
-    print("STREAMLIT UPLOAD WORKFLOW TEST PASSED")
+    sys.exit(pytest.main([__file__, "-q"]))
