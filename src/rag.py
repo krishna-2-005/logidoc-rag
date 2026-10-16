@@ -2,7 +2,6 @@ import sys
 import re
 import time
 from pathlib import Path
-from datetime import datetime
 
 
 # ============================================================
@@ -42,6 +41,11 @@ from rag_scope import (
 )
 
 from shipment_identity import identifier_key
+
+from shipment_calculations import (
+    ANSWERED as CALCULATION_ANSWERED,
+    calculate,
+)
 
 
 # ============================================================
@@ -638,153 +642,29 @@ def get_document_records():
 # The functions below only ever see in-scope records.
 # ============================================================
 
-def is_on_time_question(question_lower):
-
-    return bool(
-        re.search(
-            r"\bon[\s-]time\b|\blate\b",
-            question_lower
-        )
-    )
-
-
 def is_comparison_question(question_lower):
     """
     Questions comparing values ("how many were missing between the
-    BOL and the POD", "do the line items add up") are not answered
-    by the single-field extractors below.
+    BOL and the POD", "do the line items add up", "were more than 40
+    pieces delivered") are not answered by the single-field
+    extractors below.
     """
 
     return bool(
         re.search(
             r"\b(?:missing|short(?:age)?|difference|between|compare|"
-            r"add up|sum|match(?:es)?|consistent|all of|all the)\b",
+            r"add up|sum|match(?:es)?|consistent|all of|all the|"
+            r"more|fewer|less|than|exceeds?|exceeded|at least|at most)\b",
             question_lower
         )
     )
 
 
 # ============================================================
-# EXTRACT DATE
-# ============================================================
-
-def extract_date(
-    text,
-    patterns
-):
-
-    if not text:
-        return None
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
-
-        if match:
-
-            value = (
-                match.group(1)
-                .strip()
-            )
-
-            try:
-
-                parsed = datetime.strptime(
-                    value,
-                    "%B %d, %Y"
-                )
-
-                return (
-                    parsed,
-                    value
-                )
-
-            except ValueError:
-                continue
-
-    return None
-
-
-# ============================================================
-# GET EXPECTED DELIVERY DATE
-# ============================================================
-
-def get_expected_delivery_date(
-    records
-):
-
-    patterns = [
-
-        r"Expected\s+Delivery\s+Date\s*:\s*"
-        r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
-
-        r"Expected\s+Delivery\s*:\s*"
-        r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
-    ]
-
-    for record in records:
-
-        if record["type"] != "bol":
-            continue
-
-        result = extract_date(
-            record["normalized"],
-            patterns
-        )
-
-        if result:
-            return (
-                result[0],
-                result[1],
-                record
-            )
-
-    return None
-
-
-# ============================================================
-# GET ACTUAL DELIVERY DATE
-# ============================================================
-
-def get_actual_delivery_date(
-    records
-):
-
-    patterns = [
-
-        r"Delivery\s+Date\s*:\s*"
-        r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
-
-        r"Actual\s+Delivery\s+Date\s*:\s*"
-        r"([A-Za-z]+\s+\d{1,2},\s+\d{4})",
-    ]
-
-    for record in records:
-
-        if record["type"] != "pod":
-            continue
-
-        result = extract_date(
-            record["normalized"],
-            patterns
-        )
-
-        if result:
-            return (
-                result[0],
-                result[1],
-                record
-            )
-
-    return None
-
-
-# ============================================================
 # EXTRACT EXACT ANSWER
+#
+# Calculations (delivery timing, quantity differences, invoice
+# totals) are answered by shipment_calculations before this runs.
 # ============================================================
 
 def extract_exact_answer(
@@ -807,54 +687,6 @@ def extract_exact_answer(
 
     if not records:
         return None
-
-    # --------------------------------------------------------
-    # DELIVERY ON TIME
-    # ("late" as a whole word, so "plate" does not match)
-    # --------------------------------------------------------
-
-    if is_on_time_question(question_lower):
-
-        expected = (
-            get_expected_delivery_date(
-                records
-            )
-        )
-
-        actual = (
-            get_actual_delivery_date(
-                records
-            )
-        )
-
-        if expected and actual:
-
-            expected_date = expected[0]
-            expected_text = expected[1]
-
-            actual_date = actual[0]
-            actual_text = actual[1]
-
-            difference = (
-                actual_date
-                - expected_date
-            ).days
-
-            if difference <= 0:
-
-                return (
-                    f"Yes. The shipment was delivered "
-                    f"on {actual_text}, which was on or "
-                    f"before the expected delivery date "
-                    f"of {expected_text}."
-                )
-
-            return (
-                f"No. The shipment was delivered "
-                f"on {actual_text}, which was "
-                f"{difference} days after the expected "
-                f"delivery date of {expected_text}."
-            )
 
     # --------------------------------------------------------
     # COMPARISONS ARE NOT SINGLE-FIELD QUESTIONS
@@ -1414,54 +1246,9 @@ def find_exact_evidence(
         return None
 
     # --------------------------------------------------------
-    # ON-TIME EVIDENCE
-    # --------------------------------------------------------
-
-    if is_on_time_question(question_lower):
-
-        expected = (
-            get_expected_delivery_date(
-                records
-            )
-        )
-
-        actual = (
-            get_actual_delivery_date(
-                records
-            )
-        )
-
-        evidence_items = []
-
-        if expected:
-
-            expected_record = expected[2]
-
-            evidence_items.append(
-                make_evidence(
-                    expected_record,
-                    f"Expected Delivery Date: "
-                    f"{expected[1]}"
-                )
-            )
-
-        if actual:
-
-            actual_record = actual[2]
-
-            evidence_items.append(
-                make_evidence(
-                    actual_record,
-                    f"Delivery Date: "
-                    f"{actual[1]}"
-                )
-            )
-
-        if evidence_items:
-            return evidence_items
-
-    # --------------------------------------------------------
     # FIELD PATTERNS
+    # (calculations cite their own fields; see
+    # shipment_calculations)
     # --------------------------------------------------------
 
     field_patterns = []
@@ -1937,6 +1724,129 @@ def finish_answer(
     return answer
 
 
+def finish_calculation(
+    results,
+    calculations
+):
+    """
+    Answer from shipment_calculations results, one per shipment in
+    scope. Several shipments must agree exactly, otherwise the user
+    is asked to choose one; an abstention says why the calculation
+    could not be done. A shipment that cannot be calculated is
+    reported as such, not as a disagreement.
+    """
+
+    if len(calculations) > 1:
+
+        unable = [
+            f"{shipment_name(key, group)}: "
+            f"{calculation.reason or calculation.answer}"
+            for key, (calculation, group) in calculations.items()
+            if calculation.status != CALCULATION_ANSWERED
+        ]
+
+        able = [
+            shipment_name(key, group)
+            for key, (calculation, group) in calculations.items()
+            if calculation.status == CALCULATION_ANSWERED
+        ]
+
+        if unable and not able:
+
+            return finish_answer(
+                results,
+                "I cannot calculate this for any shipment in scope ("
+                + "; ".join(unable) + ").",
+                STATUS_ABSTAINED,
+                "exact"
+            )
+
+        if unable:
+
+            return finish_answer(
+                results,
+                f"This can be calculated for {', '.join(able)}, but not "
+                f"for {'; '.join(unable)}. Select a shipment in the "
+                "sidebar, or include the shipment ID in the question.",
+                STATUS_CLARIFICATION
+            )
+
+        answers = {
+            calculation.answer
+            for calculation, _ in calculations.values()
+        }
+
+        if len(answers) > 1:
+
+            names = ", ".join(
+                shipment_name(key, group)
+                for key, (_, group) in calculations.items()
+            )
+
+            return finish_answer(
+                results,
+                "The documents of different shipments give different "
+                f"answers to this question ({names}). Select a shipment "
+                "in the sidebar, or include the shipment ID in the "
+                "question.",
+                STATUS_CLARIFICATION
+            )
+
+    calculation, _ = next(iter(calculations.values()))
+
+    if calculation.status != CALCULATION_ANSWERED:
+
+        return finish_answer(
+            results,
+            calculation.answer,
+            STATUS_ABSTAINED,
+            "exact"
+        )
+
+    # One evidence item per document, listing the fields used
+    by_record = {}
+
+    for calculation_result, _ in calculations.values():
+
+        for item in calculation_result.evidence:
+
+            by_record.setdefault(
+                id(item.record),
+                (item.record, [])
+            )[1].append(item.text)
+
+    evidence = [
+        make_evidence(record, " | ".join(dict.fromkeys(texts)))
+        for record, texts in by_record.values()
+    ]
+
+    # The cited field texts must contain the facts the answer states
+    supported, _, _ = ground_answer(
+        calculation.answer,
+        [item["text"] for item in evidence],
+        scope_shipment_ids(
+            [record["metadata"] for record, _ in by_record.values()]
+        )
+    )
+
+    if not supported:
+
+        return finish_answer(
+            results,
+            UNVERIFIED_MESSAGE,
+            STATUS_ABSTAINED,
+            "exact"
+        )
+
+    return finish_answer(
+        results,
+        calculation.answer,
+        STATUS_ANSWERED,
+        "exact",
+        evidence
+    )
+
+
 def shipment_name(key, records):
 
     if key is None:
@@ -1994,12 +1904,37 @@ def generate_answer(
             STATUS_ABSTAINED
         )
 
+    groups = group_records_by_shipment(records)
+
     # --------------------------------------------------------
-    # EXACT EXTRACTION FIRST, per shipment, so that values from
-    # different shipments are never mixed
+    # CALCULATIONS FIRST (delivery timing, quantity differences,
+    # invoice totals), per shipment; the arithmetic is never left
+    # to the language model
     # --------------------------------------------------------
 
-    groups = group_records_by_shipment(records)
+    calculations = {}
+
+    for key, group in groups.items():
+
+        calculation = calculate(
+            question,
+            group
+        )
+
+        if calculation:
+            calculations[key] = (calculation, group)
+
+    if calculations:
+
+        return finish_calculation(
+            results,
+            calculations
+        )
+
+    # --------------------------------------------------------
+    # EXACT EXTRACTION, per shipment, so that values from
+    # different shipments are never mixed
+    # --------------------------------------------------------
 
     exact_answers = {}
 

@@ -36,6 +36,7 @@ from ingestion_manager import (
     ingest_uploads,
 )
 from consistency_report import check_destination
+from display_text import cited_fields, escape_markdown_dollars
 
 
 # ============================================================
@@ -234,6 +235,14 @@ def extract_precise_evidence(text, question=""):
 
     if not clean:
         return ""
+
+    # Evidence that already lists the exact fields an answer used
+    # (a calculation's line items, counts and dates) is shown in
+    # full, one field per line
+    fields = cited_fields(clean)
+
+    if fields:
+        return "\n".join(fields)
 
     question_lower = question.lower()
 
@@ -475,7 +484,11 @@ def show_source_evidence(
             st.caption("EVIDENCE")
 
             st.markdown(
-                f"**{precise_text}**"
+                "  \n".join(
+                    f"**{escape_markdown_dollars(line)}**"
+                    for line in precise_text.splitlines()
+                    if line.strip()
+                )
             )
 
             pdf_path = (
@@ -1843,13 +1856,13 @@ with tab1:
                 if answered and answer_text:
 
                     st.success(
-                        answer_text
+                        escape_markdown_dollars(answer_text)
                     )
 
                 else:
 
                     st.warning(
-                        answer_text
+                        escape_markdown_dollars(answer_text)
                         or "No answer was generated from the indexed documents."
                     )
 
@@ -1859,6 +1872,23 @@ with tab1:
 
                     st.caption(
                         f"Scope: {scope['label']}"
+                    )
+
+                # How the answer was produced, as rag reports it
+                answer_method = results.get("answer_method")
+
+                if answer_method == "exact":
+
+                    st.caption(
+                        "Method: deterministic (read or calculated from "
+                        "document fields, without the language model)"
+                    )
+
+                elif answer_method == "llm":
+
+                    st.caption(
+                        "Method: language model (generated from the "
+                        "retrieved passages)"
                     )
 
                 # Citations: only the sources supporting the answer
