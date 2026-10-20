@@ -89,8 +89,11 @@ EXPECTED = {
         "delay_days": 2,
         "delivery_status": "DELAYED",
         "invoice_total": 1550.00,
-        "exception_categories": ["Delivery", "Quantity"],
+        # the invoice line items ($1,430.00) do not add up to the
+        # Total Invoice Amount ($1,550.00)
+        "exception_categories": ["Delivery", "Invoice", "Quantity"],
         "shipment_status": "EXCEPTION",
+        "invoice_check": "MISMATCH",
     },
 
     SHIPMENT_B: {
@@ -110,6 +113,7 @@ EXPECTED = {
         "invoice_total": 2875.50,
         "exception_categories": [],
         "shipment_status": "CLEAR",
+        "invoice_check": "MATCH",
     },
 }
 
@@ -242,9 +246,9 @@ def ui_snapshot(at):
     ]
 
     evidence_sources = {
-        text.replace("**", "").replace("📄", "").strip()
+        text.replace("**", "").replace("≡ƒôä", "").strip()
         for text in markdown
-        if text.startswith("**📄 ")
+        if text.startswith("**≡ƒôä ")
     }
 
     return {
@@ -537,10 +541,10 @@ def test_intelligence_isolation():
         f"B {b['delivery']['expected']} -> {b['delivery']['actual']})"
     )
 
-    assert a["exception_count"] == 2 and b["exception_count"] == 0
+    assert a["exception_count"] == 3 and b["exception_count"] == 0
     print(
         "PASS: Exceptions belong to the correct shipment "
-        "(A 2, B 0)"
+        "(A 3, B 0)"
     )
 
     section("Mixed-shipment safety")
@@ -689,6 +693,12 @@ def test_dashboard():
             expected["delivery_status"]
         )
 
+        check(
+            "Invoice Check",
+            metrics.get("Invoice Check"),
+            expected["invoice_check"]
+        )
+
         delay_warnings = [
             text
             for text in ui["warnings"]
@@ -708,12 +718,12 @@ def test_dashboard():
 
         if expected["exception_categories"]:
 
+            # the quantity and delivery cards cite the BOL and POD,
+            # the invoice card cites the invoice
             check(
                 "Evidence files",
                 ui["evidence_sources"],
-                expected["sources"] - {
-                    f"INVOICE_{shipment_id}.pdf"
-                },
+                expected["sources"],
                 display=", ".join(sorted(ui["evidence_sources"]))
             )
 
@@ -796,6 +806,36 @@ def test_dashboard():
             ui["evidence_sources"],
             EXPECTED[shipment_id]["sources"],
             display=", ".join(sorted(ui["evidence_sources"]))
+        )
+
+        # Streamlit gets "\$" for each "$" (display_text)
+        shown = [
+            text.replace("\\$", "$")
+            for text in (ui["errors"] + ui["warnings"] + ui["success"])
+        ]
+
+        invoice_message = (
+            "Invoice line items (Base Freight $1,200.00 + Fuel Surcharge "
+            "$180.00 + Detention Charge $0.00 + Other Accessorial Charges "
+            "$50.00) add up to $1,430.00, but the Total Invoice Amount is "
+            "$1,550.00, a difference of $120.00."
+        )
+
+        check(
+            f"{shipment_id} reconciliation invoice check",
+            (
+                any(invoice_message in text for text in shown),
+                any("DISCREPANCIES DETECTED" in text for text in shown),
+                any("early" in text for text in ui["success"]),
+            ),
+            (True, True, False)
+            if shipment_id == SHIPMENT_A
+            else (False, False, True),
+            display=(
+                "A: invoice mismatch, discrepancies"
+                if shipment_id == SHIPMENT_A
+                else "B: early delivery, no discrepancy"
+            )
         )
 
     ui = ui_snapshot(

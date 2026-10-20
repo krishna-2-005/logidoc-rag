@@ -10,7 +10,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from chunker import create_all_chunks
-from shipment_identity import normalize_identifier
+from shipment_identity import identifier_key
+from shipment_calculations import (
+    DELIVERY_DELAYED,
+    NEEDS_REVIEW,
+    QUANTITY_MATCH,
+    INVOICE_MISMATCH,
+    audit_delivery,
+    audit_invoice,
+    audit_quantity,
+)
 
 
 # ============================================================
@@ -116,6 +125,52 @@ def compare_numbers(value1, value2):
 
 
 # ============================================================
+# AUDITS (shared with the chat calculations)
+# ============================================================
+
+def audit_records(chunks):
+    """
+    The chunks in the record format of shipment_calculations
+    (rag.get_document_records): quantities, delivery dates and the
+    invoice are read and calculated by the same code as the chat
+    answers.
+    """
+
+    return [
+        {
+            "document": chunk["text"],
+            "metadata": chunk["metadata"],
+            "type": str(chunk["metadata"].get("document_type") or "").lower(),
+            "normalized": " ".join(str(chunk["text"]).split()),
+            "raw": chunk["text"],
+        }
+        for chunk in chunks
+    ]
+
+
+def evidence_entries(audit):
+    """
+    The fields an audit read, with source file, page and shipment.
+    """
+
+    entries = []
+
+    for item in audit.evidence:
+
+        metadata = item.record["metadata"]
+
+        entries.append({
+            "source": metadata.get("source"),
+            "page": metadata.get("page"),
+            "document_type": metadata.get("document_type"),
+            "shipment_id": metadata.get("shipment_id"),
+            "text": item.text,
+        })
+
+    return entries
+
+
+# ============================================================
 # RECONCILIATION
 # ============================================================
 
@@ -137,16 +192,28 @@ def reconcile_shipment(shipment_id=None):
     # Keep only one shipment's documents
     # --------------------------------------------------------
 
+    # IDs are compared like the chat scope does (identifier_key: case,
+    # spaces and hyphens do not matter). A document without a shipment
+    # ID cannot be attributed to a shipment and is never used.
+    excluded_unidentified = 0
+
     if shipment_id:
 
-        requested_shipment = normalize_identifier(
+        requested_shipment = identifier_key(
             shipment_id
+        )
+
+        excluded_unidentified = sum(
+            1
+            for chunk in chunks
+            if not identifier_key(chunk["metadata"].get("shipment_id"))
         )
 
         chunks = [
             chunk
             for chunk in chunks
-            if normalize_identifier(
+            if requested_shipment
+            and identifier_key(
                 chunk["metadata"].get("shipment_id")
             )
             == requested_shipment
@@ -164,7 +231,7 @@ def reconcile_shipment(shipment_id=None):
     else:
 
         shipment_ids = {
-            normalize_identifier(
+            identifier_key(
                 chunk["metadata"].get("shipment_id")
             )
             for chunk in chunks
@@ -178,6 +245,20 @@ def reconcile_shipment(shipment_id=None):
                     "indexed. Select a shipment to reconcile."
                 )
             }
+
+        # One identified shipment: documents without an ID are left
+        # out instead of being merged into it
+        if shipment_ids:
+
+            identified = [
+                chunk
+                for chunk in chunks
+                if identifier_key(chunk["metadata"].get("shipment_id"))
+            ]
+
+            excluded_unidentified = len(chunks) - len(identified)
+
+            chunks = identified
 
     documents = extract_document_data(chunks)
 
@@ -276,88 +357,52 @@ def reconcile_shipment(shipment_id=None):
     # Quantity
     # --------------------------------------------------------
 
-    bol_pieces_raw = extract_field(
-        bol_text,
-        "Number of Pieces"
-    )
+    # Quantities, delivery dates and the invoice are read and
+    # calculated by shipment_calculations, like the chat answers
+    records = audit_records(chunks)
 
-    pod_pieces_raw = extract_field(
-        pod_text,
-        "Number of Pieces Delivered"
-    )
+    quantity_audit = audit_quantity(records)
 
-    try:
-        bol_pieces = int(bol_pieces_raw)
-    except (TypeError, ValueError):
-        bol_pieces = None
+    bol_pieces = quantity_audit.values["expected"]
+    pod_pieces = quantity_audit.values["delivered"]
 
-    try:
-        pod_pieces = int(pod_pieces_raw)
-    except (TypeError, ValueError):
-        pod_pieces = None
-
-    pieces_status = compare_numbers(
-        bol_pieces,
-        pod_pieces
-    )
-
-    if (
-        bol_pieces is not None
-        and pod_pieces is not None
-    ):
-        pieces_difference = (
-            bol_pieces - pod_pieces
-        )
-    else:
+    if quantity_audit.status == NEEDS_REVIEW:
+        pieces_status = NEEDS_REVIEW
         pieces_difference = None
+    else:
+        pieces_status = (
+            "MATCH"
+            if quantity_audit.status == QUANTITY_MATCH
+            else "MISMATCH"
+        )
+        pieces_difference = quantity_audit.values["shortage"]
 
     # --------------------------------------------------------
     # Delivery dates
     # --------------------------------------------------------
 
-    expected_delivery = extract_field(
-        bol_text,
-        "Expected Delivery Date"
-    )
+    # ON TIME, EARLY or DELAYED; an early delivery is not a discrepancy
+    delivery_audit = audit_delivery(records)
 
-    actual_delivery = extract_field(
-        pod_text,
-        "Delivery Date"
-    )
+    expected_delivery = delivery_audit.values["expected"]
+    actual_delivery = delivery_audit.values["actual"]
 
-    delivery_status = compare_values(
-        expected_delivery,
-        actual_delivery
-    )
+    delivery_status = delivery_audit.status
 
     # --------------------------------------------------------
     # Invoice
     # --------------------------------------------------------
 
-    base_freight = extract_amount(
-        invoice_text,
-        "Base Freight"
-    )
+    invoice_audit = audit_invoice(records)
 
-    fuel_surcharge = extract_amount(
-        invoice_text,
-        "Fuel Surcharge"
-    )
+    line_items = dict(invoice_audit.values["line_items"])
 
-    detention_charge = extract_amount(
-        invoice_text,
-        "Detention Charge"
-    )
+    base_freight = line_items["Base Freight"]
+    fuel_surcharge = line_items["Fuel Surcharge"]
+    detention_charge = line_items["Detention Charge"]
+    other_charges = line_items["Other Accessorial Charges"]
 
-    other_charges = extract_amount(
-        invoice_text,
-        "Other Accessorial Charges"
-    )
-
-    total_invoice = extract_amount(
-        invoice_text,
-        "Total Invoice Amount"
-    )
+    total_invoice = invoice_audit.values["total"]
 
     # --------------------------------------------------------
     # Discrepancies
@@ -376,14 +421,33 @@ def reconcile_shipment(shipment_id=None):
             "difference": pieces_difference
         })
 
-    if delivery_status == "MISMATCH":
+    if delivery_status == DELIVERY_DELAYED:
+
+        late = delivery_audit.values["days_late"]
 
         discrepancies.append({
             "category": "Delivery Date",
             "description": (
                 f"Expected delivery was {expected_delivery}, "
-                f"but actual delivery was {actual_delivery}."
-            )
+                f"but actual delivery was {actual_delivery} "
+                f"({late} day{'' if late == 1 else 's'} late)."
+            ),
+            "days_late": late
+        })
+
+    if invoice_audit.status == INVOICE_MISMATCH:
+
+        values = invoice_audit.values
+
+        discrepancies.append({
+            "category": "Invoice",
+            "description": (
+                f"Invoice line items ({values['breakdown']}) add up to "
+                f"${values['line_sum']:,.2f}, but the Total Invoice "
+                f"Amount is ${values['total']:,.2f}, a difference of "
+                f"${abs(values['difference']):,.2f}."
+            ),
+            "difference": values["difference"]
         })
 
     if carrier_bol_invoice == "MISMATCH":
@@ -426,11 +490,24 @@ def reconcile_shipment(shipment_id=None):
     # Final status
     # --------------------------------------------------------
 
-    final_status = (
-        "DISCREPANCIES DETECTED"
-        if discrepancies
-        else "NO DISCREPANCIES"
-    )
+    # Essential data that is missing, unreadable or conflicting is
+    # never reported as a match
+    review_items = [
+        {"category": category, "reason": audit.reason}
+        for category, audit in (
+            ("Quantity", quantity_audit),
+            ("Delivery", delivery_audit),
+            ("Invoice", invoice_audit),
+        )
+        if audit.status == NEEDS_REVIEW
+    ]
+
+    if discrepancies:
+        final_status = "DISCREPANCIES DETECTED"
+    elif review_items:
+        final_status = "NEEDS REVIEW"
+    else:
+        final_status = "NO DISCREPANCIES"
 
     # --------------------------------------------------------
     # Structured result
@@ -459,28 +536,51 @@ def reconcile_shipment(shipment_id=None):
             "destination_status": destination_status
         },
 
+        # status: MATCH, MISMATCH or NEEDS REVIEW; difference is
+        # BOL - POD (negative for an over-delivery)
         "quantity": {
             "bol": bol_pieces,
             "pod": pod_pieces,
             "difference": pieces_difference,
-            "status": pieces_status
+            "status": pieces_status,
+            "reason": quantity_audit.reason,
+            "evidence": evidence_entries(quantity_audit)
         },
 
+        # status: ON TIME, EARLY, DELAYED or NEEDS REVIEW; days_late
+        # is negative for an early delivery
         "delivery": {
             "expected": expected_delivery,
             "actual": actual_delivery,
-            "status": delivery_status
+            "status": delivery_status,
+            "days_late": delivery_audit.values["days_late"],
+            "reason": delivery_audit.reason,
+            "evidence": evidence_entries(delivery_audit)
         },
 
+        # status: MATCH, MISMATCH or NEEDS REVIEW; line_items lists
+        # every line item (amount None when unknown), breakdown is
+        # the sum as text, difference is total - line_item_sum
         "invoice": {
             "base_freight": base_freight,
             "fuel_surcharge": fuel_surcharge,
             "detention_charge": detention_charge,
             "other_charges": other_charges,
-            "total": total_invoice
+            "total": total_invoice,
+            "line_items": invoice_audit.values["line_items"],
+            "line_item_sum": invoice_audit.values["line_sum"],
+            "difference": invoice_audit.values["difference"],
+            "breakdown": invoice_audit.values["breakdown"],
+            "status": invoice_audit.status,
+            "reason": invoice_audit.reason,
+            "evidence": evidence_entries(invoice_audit)
         },
 
         "discrepancies": discrepancies,
+
+        "review_items": review_items,
+
+        "excluded_unidentified": excluded_unidentified,
 
         "final_status": final_status
     }
@@ -555,9 +655,20 @@ if __name__ == "__main__":
     print("\nINVOICE")
     print("-" * 70)
 
+    invoice_total = result["invoice"]["total"]
+
     print(
-        f"Total: "
-        f"${result['invoice']['total']:,.2f}"
+        "Total: "
+        + (
+            f"${invoice_total:,.2f}"
+            if invoice_total is not None
+            else "N/A"
+        )
+    )
+
+    print(
+        f"Status: "
+        f"{result['invoice']['status']}"
     )
 
     print("\nFINAL STATUS")
@@ -573,4 +684,14 @@ if __name__ == "__main__":
             print(
                 f"- {item['category']}: "
                 f"{item['description']}"
+            )
+
+    if result["review_items"]:
+
+        print("\nNEEDS REVIEW:")
+
+        for item in result["review_items"]:
+            print(
+                f"- {item['category']}: "
+                f"{item['reason']}"
             )

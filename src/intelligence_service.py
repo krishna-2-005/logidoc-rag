@@ -14,7 +14,9 @@ import re
 
 from reconciliation import reconcile_shipment
 from rag import get_all_documents
-from shipment_identity import normalize_identifier
+from shipment_identity import identifier_key
+
+NEEDS_REVIEW = "NEEDS REVIEW"
 
 
 # ============================================================
@@ -106,10 +108,10 @@ def calculate_document_completeness(shipment_id=None):
 
         if (
             shipment_id
-            and normalize_identifier(
+            and identifier_key(
                 metadata.get("shipment_id")
             )
-            != normalize_identifier(shipment_id)
+            != identifier_key(shipment_id)
         ):
             continue
 
@@ -174,6 +176,35 @@ def calculate_delivery_intelligence(
         "actual"
     )
 
+    # The reconciliation already calculated the delivery timing with
+    # the same code as the chat answers; use it as it is
+    if delivery.get("status") == NEEDS_REVIEW:
+
+        return {
+            "status": NEEDS_REVIEW,
+            "delay_days": 0,
+            "expected": expected,
+            "actual": actual,
+            "reason": delivery.get("reason", ""),
+        }
+
+    days_late = delivery.get("days_late")
+
+    if days_late is not None:
+
+        return {
+            "status": (
+                "DELAYED" if days_late > 0
+                else "EARLY" if days_late < 0
+                else "ON TIME"
+            ),
+            "delay_days": max(days_late, 0),
+            "days_late": days_late,
+            "expected": expected,
+            "actual": actual,
+        }
+
+    # Reconciliation results without days_late
     expected_date = parse_date(
         expected
     )
@@ -185,7 +216,7 @@ def calculate_delivery_intelligence(
     if not expected_date or not actual_date:
 
         return {
-            "status": "NOT AVAILABLE",
+            "status": NEEDS_REVIEW,
             "delay_days": 0,
             "expected": expected,
             "actual": actual,
@@ -289,7 +320,12 @@ def calculate_quantity_intelligence(
 
     else:
 
-        status = "NOT AVAILABLE"
+        status = NEEDS_REVIEW
+
+    # A count that is missing, unreadable or conflicting is never
+    # shown as a match or as a difference of 0
+    if quantity.get("status") == NEEDS_REVIEW:
+        status = NEEDS_REVIEW
 
     return {
         "bol_pieces": (
@@ -302,8 +338,13 @@ def calculate_quantity_intelligence(
             if pod is not None
             else None
         ),
-        "difference": difference,
+        "difference": (
+            None
+            if status == NEEDS_REVIEW
+            else difference
+        ),
         "status": status,
+        "reason": quantity.get("reason", ""),
     }
 
 
@@ -364,6 +405,43 @@ def build_exceptions(
             }
         )
 
+    invoice = reconciliation.get(
+        "invoice",
+        {}
+    ) or {}
+
+    if invoice.get("status") == "MISMATCH":
+
+        exceptions.append(
+            {
+                "category": "Invoice",
+                "severity": "HIGH",
+                "message": (
+                    f"Invoice line items ({invoice.get('breakdown')}) "
+                    f"add up to ${invoice.get('line_item_sum'):,.2f}, "
+                    "but the Total Invoice Amount is "
+                    f"${invoice.get('total'):,.2f}, a difference of "
+                    f"${abs(invoice.get('difference')):,.2f}."
+                ),
+            }
+        )
+
+    # Essential data that could not be verified is reported, never
+    # treated as a match
+    for item in reconciliation.get("review_items", []) or []:
+
+        exceptions.append(
+            {
+                "category": "Data Review",
+                "severity": "MEDIUM",
+                "message": (
+                    f"{item.get('category')} could not be verified: "
+                    f"{item.get('reason')}."
+                ),
+                "reviewed_category": item.get("category"),
+            }
+        )
+
     discrepancies = reconciliation.get(
         "discrepancies",
         []
@@ -389,6 +467,7 @@ def build_exceptions(
         if category in {
             "Quantity",
             "Delivery Date",
+            "Invoice",
         }:
             continue
 
@@ -498,9 +577,18 @@ def analyze_shipment(shipment_id=None):
         invoice.get("total")
     )
 
-    if exceptions:
+    # A real discrepancy outranks data that could not be verified;
+    # CLEAR only when nothing is wrong and nothing is unverified
+    if any(
+        exception["category"] != "Data Review"
+        for exception in exceptions
+    ):
 
         shipment_status = "EXCEPTION"
+
+    elif exceptions:
+
+        shipment_status = NEEDS_REVIEW
 
     else:
 
@@ -542,6 +630,16 @@ def analyze_shipment(shipment_id=None):
         "delivery": delivery,
 
         "invoice_total": invoice_total,
+
+        "invoice": {
+            "status": invoice.get("status", NEEDS_REVIEW),
+            "total": invoice_total,
+            "line_item_sum": invoice.get("line_item_sum"),
+            "difference": invoice.get("difference"),
+            "line_items": invoice.get("line_items", []),
+            "breakdown": invoice.get("breakdown"),
+            "reason": invoice.get("reason", ""),
+        },
 
         "carrier": reconciliation.get(
             "carrier",
