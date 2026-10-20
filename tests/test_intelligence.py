@@ -225,10 +225,13 @@ def check_shipment_intelligence():
 
     exceptions = intelligence["exceptions"]
 
+    # SHJ-2026-001 also has an invoice whose line items ($1,430.00)
+    # do not add up to the Total Invoice Amount ($1,550.00): the same
+    # arithmetic as the chat answer, now an exception of its own
     check(
         "Exceptions",
         len(exceptions),
-        2
+        3
     )
 
     check(
@@ -254,6 +257,23 @@ def check_shipment_intelligence():
         "Delivery delay exceptions",
         categories.count("Delivery"),
         1
+    )
+
+    check(
+        "Invoice mismatch exceptions",
+        categories.count("Invoice"),
+        1
+    )
+
+    invoice = intelligence["invoice"]
+
+    check("Invoice check", invoice["status"], "MISMATCH")
+
+    check(
+        "Invoice line-item sum",
+        (invoice["line_item_sum"], invoice["difference"]),
+        (1430.00, 120.00),
+        display=f"${invoice['line_item_sum']:,.2f}"
     )
 
     check(

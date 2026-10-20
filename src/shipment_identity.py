@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import sys
 
 # Add project root to Python path
@@ -84,6 +85,35 @@ def identifier_key(value):
     )
 
     return key or None
+
+
+def belongs_to_shipment(metadata, text, shipment_id):
+    """
+    Whether a chunk belongs to a shipment. A chunk with a shipment_id
+    in its metadata belongs to that shipment only (case, spaces and
+    hyphens ignored); naming another shipment's ID in its text does
+    not make it part of this one. Only a chunk without a shipment_id
+    in its metadata is judged by its text, which must contain the ID
+    as a whole identifier. Without a shipment_id every chunk belongs.
+    """
+
+    requested = identifier_key(shipment_id)
+
+    if not requested:
+        return True
+
+    own = identifier_key((metadata or {}).get("shipment_id"))
+
+    if own:
+        return own == requested
+
+    pattern = (
+        r"(?<![A-Za-z0-9])"
+        + r"[\W_]{0,3}".join(re.escape(character) for character in requested)
+        + r"(?![A-Za-z0-9])"
+    )
+
+    return bool(re.search(pattern, str(text or ""), re.IGNORECASE))
 
 
 # ============================================================
