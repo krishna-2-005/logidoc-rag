@@ -36,6 +36,8 @@ from ingestion_manager import (
     ingest_uploads,
 )
 from consistency_report import check_destination
+from display_text import cited_fields, escape_markdown_dollars, money_text
+from shipment_identity import belongs_to_shipment
 
 
 # ============================================================
@@ -44,7 +46,7 @@ from consistency_report import check_destination
 
 st.set_page_config(
     page_title="LogiDoc-RAG",
-    page_icon="📦",
+    page_icon="≡ƒôª",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -234,6 +236,14 @@ def extract_precise_evidence(text, question=""):
 
     if not clean:
         return ""
+
+    # Evidence that already lists the exact fields an answer used
+    # (a calculation's line items, counts and dates) is shown in
+    # full, one field per line
+    fields = cited_fields(clean)
+
+    if fields:
+        return "\n".join(fields)
 
     question_lower = question.lower()
 
@@ -475,7 +485,11 @@ def show_source_evidence(
             st.caption("EVIDENCE")
 
             st.markdown(
-                f"**{precise_text}**"
+                "  \n".join(
+                    f"**{escape_markdown_dollars(line)}**"
+                    for line in precise_text.splitlines()
+                    if line.strip()
+                )
             )
 
             pdf_path = (
@@ -486,7 +500,7 @@ def show_source_evidence(
             if pdf_path.exists():
 
                 with st.expander(
-                    "📄 View Original PDF"
+                    "≡ƒôä View Original PDF"
                 ):
 
                     try:
@@ -506,6 +520,36 @@ def show_source_evidence(
 # ============================================================
 # RECONCILIATION EVIDENCE
 # ============================================================
+
+# The invoice fields the invoice check adds up
+INVOICE_LINE_LABELS = [
+    "Base Freight",
+    "Fuel Surcharge",
+    "Detention Charge",
+    "Other Accessorial Charges",
+]
+
+# Evidence labels (build_reconciliation_evidence) behind each
+# exception category
+EVIDENCE_LABELS = {
+    "Quantity": ["BOL Pieces", "Delivered Pieces"],
+    "Delivery": ["Expected Delivery", "Actual Delivery"],
+    "Invoice": INVOICE_LINE_LABELS + ["Invoice Total"],
+}
+
+
+def line_item_pattern(label):
+
+    return (
+        r"\s+".join(label.split())
+        + r"\s*:\s*(\$?\s*[\d,]+(?:\.\d{2})?)"
+    )
+
+
+def display_value(value):
+
+    return "N/A" if value is None else value
+
 
 def build_reconciliation_evidence(result):
 
@@ -610,6 +654,21 @@ def build_reconciliation_evidence(result):
             ],
             "Invoice Total",
         ),
+
+        # The line items the invoice check adds up
+        *[
+            (
+                "INVOICE",
+                [
+                    (
+                        line_item_pattern(label),
+                        label
+                    ),
+                ],
+                label,
+            )
+            for label in INVOICE_LINE_LABELS
+        ],
     ]
 
     seen = set()
@@ -622,22 +681,14 @@ def build_reconciliation_evidence(result):
         if not isinstance(metadata, dict):
             continue
 
-        metadata_shipment = str(
-            metadata.get(
-                "shipment_id",
-                ""
-            )
-        ).upper()
-
-        if shipment_id:
-
-            if (
-                shipment_id not in str(
-                    document
-                ).upper()
-                and shipment_id != metadata_shipment
-            ):
-                continue
+        # A chunk belongs to the shipment named in its metadata; the
+        # text decides only when the metadata has no shipment ID
+        if not belongs_to_shipment(
+            metadata,
+            document,
+            shipment_id
+        ):
+            continue
 
         document_type = str(
             metadata.get(
@@ -766,13 +817,13 @@ def show_reconciliation_evidence(
         with st.container(border=True):
 
             st.markdown(
-                f"**📄 {source}**"
+                f"**≡ƒôä {source}**"
             )
 
             st.caption(
                 f"Document Type: "
                 f"{first.get('document_type', 'Unknown')}"
-                f"  •  Shipment: "
+                f"  ΓÇó  Shipment: "
                 f"{first.get('shipment_id', 'Unknown')}"
             )
 
@@ -795,7 +846,7 @@ def show_reconciliation_evidence(
             if pdf_path.exists():
 
                 with st.expander(
-                    "📄 View Original PDF"
+                    "≡ƒôä View Original PDF"
                 ):
 
                     try:
@@ -852,6 +903,11 @@ def show_exception_details(
         {}
     )
 
+    invoice = intelligence.get(
+        "invoice",
+        {}
+    )
+
     # Per exception category: card title, the evidence labels
     # produced by build_reconciliation_evidence(), and the
     # calculation values from the intelligence result
@@ -888,6 +944,25 @@ def show_exception_details(
                 ),
             ],
         },
+
+        "Invoice": {
+            "title": "Invoice Total Mismatch",
+            "labels": EVIDENCE_LABELS["Invoice"],
+            "calculation": [
+                (
+                    "Line Item Sum",
+                    money_text(invoice.get("line_item_sum"))
+                ),
+                (
+                    "Invoice Total",
+                    money_text(invoice.get("total"))
+                ),
+                (
+                    "Difference",
+                    money_text(invoice.get("difference"))
+                ),
+            ],
+        },
     }
 
     evidence = build_reconciliation_evidence(
@@ -915,17 +990,32 @@ def show_exception_details(
             {}
         )
 
+        # Data that could not be verified shows the evidence it was
+        # read from
+        if category == "Data Review":
+
+            detail = {
+                "title": (
+                    f"{exception.get('reviewed_category', 'Data')} "
+                    "Needs Review"
+                ),
+                "labels": EVIDENCE_LABELS.get(
+                    exception.get("reviewed_category"),
+                    []
+                ),
+            }
+
         icon = (
-            "🔴"
+            "≡ƒö┤"
             if severity == "HIGH"
-            else "🟠"
+            else "≡ƒƒá"
         )
 
         with st.container(border=True):
 
             st.markdown(
                 f"**{icon} {detail.get('title', category)}**"
-                f"  •  Severity: {severity}"
+                f"  ΓÇó  Severity: {severity}"
             )
 
             st.write(
@@ -1060,9 +1150,18 @@ def show_shipment_intelligence(shipment_id=None):
         "UNKNOWN"
     )
 
-    quantity_difference = quantity.get(
-        "difference",
-        0
+    quantity_difference = display_value(
+        quantity.get(
+            "difference",
+            0
+        )
+    )
+
+    invoice_check = (
+        intelligence.get("invoice") or {}
+    ).get(
+        "status",
+        "UNKNOWN"
     )
 
     delivery = intelligence.get(
@@ -1095,7 +1194,14 @@ def show_shipment_intelligence(shipment_id=None):
     if str(shipment_status).upper() == "EXCEPTION":
 
         st.error(
-            f"⚠️ Shipment Status: {shipment_status}"
+            f"ΓÜá∩╕Å Shipment Status: {shipment_status}"
+        )
+
+    elif str(shipment_status).upper() == "NEEDS REVIEW":
+
+        st.warning(
+            f"ΓÜá∩╕Å Shipment Status: {shipment_status}. Some values "
+            "could not be verified; see the details below."
         )
 
     else:
@@ -1151,7 +1257,14 @@ def show_shipment_intelligence(shipment_id=None):
 
     st.markdown("#### Operational Status")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col4:
+
+        st.metric(
+            "Invoice Check",
+            invoice_check
+        )
 
     with col1:
 
@@ -1355,11 +1468,11 @@ def show_all_shipments_intelligence(shipment_ids):
 # ============================================================
 
 INGESTION_STATUS_DISPLAY = {
-    STATUS_ADDED: ("✅", "Added"),
-    STATUS_DUPLICATE: ("⏭️", "Duplicate, skipped"),
-    STATUS_CHANGED: ("⚠️", "Changed, not applied"),
-    STATUS_INCONSISTENT: ("⚠️", "Inconsistent, needs attention"),
-    STATUS_FAILED: ("❌", "Failed"),
+    STATUS_ADDED: ("Γ£à", "Added"),
+    STATUS_DUPLICATE: ("ΓÅ¡∩╕Å", "Duplicate, skipped"),
+    STATUS_CHANGED: ("ΓÜá∩╕Å", "Changed, not applied"),
+    STATUS_INCONSISTENT: ("ΓÜá∩╕Å", "Inconsistent, needs attention"),
+    STATUS_FAILED: ("Γ¥î", "Failed"),
 }
 
 
@@ -1371,10 +1484,10 @@ def show_ingestion_result(result):
     st.markdown("**Last upload**")
 
     st.caption(
-        f"Added {result['files_added']} · "
-        f"Duplicates {result['duplicates_skipped']} · "
-        f"Changed {result['changed_detected']} · "
-        f"Inconsistent {result['inconsistent_detected']} · "
+        f"Added {result['files_added']} ┬╖ "
+        f"Duplicates {result['duplicates_skipped']} ┬╖ "
+        f"Changed {result['changed_detected']} ┬╖ "
+        f"Inconsistent {result['inconsistent_detected']} ┬╖ "
         f"Failed {result['files_failed']}"
     )
 
@@ -1408,7 +1521,7 @@ def show_ingestion_result(result):
 
         icon, label = INGESTION_STATUS_DISPLAY.get(
             outcome["status"],
-            ("•", outcome["status"])
+            ("ΓÇó", outcome["status"])
         )
 
         st.markdown(
@@ -1514,7 +1627,7 @@ def show_consistency_report(report):
 # ============================================================
 
 st.markdown(
-    '<div class="main-title">📦 LogiDoc-RAG</div>',
+    '<div class="main-title">≡ƒôª LogiDoc-RAG</div>',
     unsafe_allow_html=True,
 )
 
@@ -1751,16 +1864,16 @@ st.divider()
 
 tab1, tab2, tab3, tab4 = st.tabs(
     [
-        "💬 Logistics Assistant",
-        "📊 Shipment Reconciliation",
-        "🧠 Shipment Intelligence",
-        "🩺 Diagnostics",
+        "≡ƒÆ¼ Logistics Assistant",
+        "≡ƒôè Shipment Reconciliation",
+        "≡ƒºá Shipment Intelligence",
+        "≡ƒ⌐║ Diagnostics",
     ]
 )
 
 
 # ============================================================
-# TAB 1 — LOGISTICS ASSISTANT
+# TAB 1 ΓÇö LOGISTICS ASSISTANT
 # ============================================================
 
 with tab1:
@@ -1843,13 +1956,13 @@ with tab1:
                 if answered and answer_text:
 
                     st.success(
-                        answer_text
+                        escape_markdown_dollars(answer_text)
                     )
 
                 else:
 
                     st.warning(
-                        answer_text
+                        escape_markdown_dollars(answer_text)
                         or "No answer was generated from the indexed documents."
                     )
 
@@ -1859,6 +1972,23 @@ with tab1:
 
                     st.caption(
                         f"Scope: {scope['label']}"
+                    )
+
+                # How the answer was produced, as rag reports it
+                answer_method = results.get("answer_method")
+
+                if answer_method == "exact":
+
+                    st.caption(
+                        "Method: deterministic (read or calculated from "
+                        "document fields, without the language model)"
+                    )
+
+                elif answer_method == "llm":
+
+                    st.caption(
+                        "Method: language model (generated from the "
+                        "retrieved passages)"
                     )
 
                 # Citations: only the sources supporting the answer
@@ -1946,7 +2076,7 @@ with tab1:
                             continue
 
                         st.write(
-                            f"📄 {source} "
+                            f"≡ƒôä {source} "
                             f"(Page {page}, "
                             f"Type: {document_type}, "
                             f"Shipment: {metadata.get('shipment_id') or 'none'})"
@@ -1962,7 +2092,7 @@ with tab1:
 
 
 # ============================================================
-# TAB 2 — SHIPMENT RECONCILIATION
+# TAB 2 ΓÇö SHIPMENT RECONCILIATION
 # ============================================================
 
 with tab2:
@@ -2056,45 +2186,55 @@ with tab2:
 
                     st.metric(
                         "BOL Pieces",
-                        quantity.get(
-                            "bol",
-                            "N/A"
-                        )
+                        display_value(quantity.get("bol"))
                     )
 
                 with col2:
 
                     st.metric(
                         "Delivered Pieces",
-                        quantity.get(
-                            "pod",
-                            "N/A"
-                        )
+                        display_value(quantity.get("pod"))
                     )
 
                 with col3:
 
                     st.metric(
                         "Difference",
-                        quantity.get(
-                            "difference",
-                            "N/A"
-                        )
+                        display_value(quantity.get("difference"))
                     )
 
                 if quantity.get(
                     "status"
                 ) == "MISMATCH":
 
+                    difference = quantity.get("difference", 0)
+
                     st.error(
-                        "⚠️ Quantity discrepancy: "
-                        f"{quantity.get('difference', 0)} pieces."
+                        "ΓÜá∩╕Å Quantity discrepancy: "
+                        f"{abs(difference)} pieces "
+                        + (
+                            "(shortage)."
+                            if difference > 0
+                            else "(over-delivery)."
+                        )
+                    )
+
+                elif quantity.get(
+                    "status"
+                ) == "MATCH":
+
+                    st.success(
+                        "Quantity matches."
                     )
 
                 else:
 
-                    st.success(
-                        "Quantity matches."
+                    st.warning(
+                        "Quantity needs review: "
+                        + escape_markdown_dollars(
+                            quantity.get("reason")
+                            or "a piece count could not be verified"
+                        )
                     )
 
                 # ------------------------------------------------
@@ -2122,34 +2262,48 @@ with tab2:
 
                     st.metric(
                         "Expected Delivery",
-                        delivery.get(
-                            "expected",
-                            "N/A"
-                        )
+                        display_value(delivery.get("expected"))
                     )
 
                 with col2:
 
                     st.metric(
                         "Actual Delivery",
-                        delivery.get(
-                            "actual",
-                            "N/A"
-                        )
+                        display_value(delivery.get("actual"))
                     )
 
-                if delivery.get(
-                    "status"
-                ) == "MISMATCH":
+                delivery_status = delivery.get("status")
+                days_late = delivery.get("days_late")
+
+                if delivery_status == "DELAYED":
 
                     st.warning(
-                        "⚠️ Delivery date discrepancy detected."
+                        "ΓÜá∩╕Å Delivery date discrepancy: delivered "
+                        f"{days_late} day(s) after the expected "
+                        "delivery date."
+                    )
+
+                elif delivery_status == "EARLY":
+
+                    st.success(
+                        f"Delivered {abs(days_late)} day(s) early. "
+                        "An early delivery is not a discrepancy."
+                    )
+
+                elif delivery_status == "ON TIME":
+
+                    st.success(
+                        "Delivered on the expected delivery date."
                     )
 
                 else:
 
-                    st.success(
-                        "Delivery date matches."
+                    st.warning(
+                        "Delivery timing needs review: "
+                        + escape_markdown_dollars(
+                            delivery.get("reason")
+                            or "a delivery date could not be verified"
+                        )
                     )
 
                 # ------------------------------------------------
@@ -2268,77 +2422,81 @@ with tab2:
                 ):
                     invoice = {}
 
+                # Every line item the invoice check adds up, then the
+                # sum, the stated total and the difference
                 col1, col2, col3, col4 = st.columns(4)
+
+                for column, label, key in (
+                    (col1, "Base Freight", "base_freight"),
+                    (col2, "Fuel Surcharge", "fuel_surcharge"),
+                    (col3, "Detention Charge", "detention_charge"),
+                    (col4, "Other Charges", "other_charges"),
+                ):
+
+                    with column:
+
+                        st.metric(
+                            label,
+                            money_text(invoice.get(key))
+                        )
+
+                col1, col2, col3 = st.columns(3)
 
                 with col1:
 
-                    value = invoice.get(
-                        "base_freight"
-                    )
-
                     st.metric(
-                        "Base Freight",
-                        (
-                            f"${value:,.2f}"
-                            if isinstance(
-                                value,
-                                (int, float)
-                            )
-                            else "N/A"
-                        )
+                        "Line Item Sum",
+                        money_text(invoice.get("line_item_sum"))
                     )
 
                 with col2:
 
-                    value = invoice.get(
-                        "fuel_surcharge"
-                    )
-
                     st.metric(
-                        "Fuel Surcharge",
-                        (
-                            f"${value:,.2f}"
-                            if isinstance(
-                                value,
-                                (int, float)
-                            )
-                            else "N/A"
-                        )
+                        "Invoice Total",
+                        money_text(invoice.get("total"))
                     )
 
                 with col3:
 
-                    value = invoice.get(
-                        "other_charges"
+                    st.metric(
+                        "Difference",
+                        money_text(invoice.get("difference"))
                     )
 
-                    st.metric(
-                        "Other Charges",
-                        (
-                            f"${value:,.2f}"
-                            if isinstance(
-                                value,
-                                (int, float)
-                            )
-                            else "N/A"
+                invoice_status = invoice.get("status")
+
+                if invoice_status == "MATCH":
+
+                    st.success(
+                        escape_markdown_dollars(
+                            "Invoice line items "
+                            f"({invoice.get('breakdown')}) add up to "
+                            f"${invoice.get('line_item_sum'):,.2f}, "
+                            "which equals the Total Invoice Amount."
                         )
                     )
 
-                with col4:
+                elif invoice_status == "MISMATCH":
 
-                    value = invoice.get(
-                        "total"
+                    st.error(
+                        escape_markdown_dollars(
+                            "ΓÜá∩╕Å Invoice line items "
+                            f"({invoice.get('breakdown')}) add up to "
+                            f"${invoice.get('line_item_sum'):,.2f}, but "
+                            "the Total Invoice Amount is "
+                            f"${invoice.get('total'):,.2f}, a "
+                            "difference of "
+                            f"${abs(invoice.get('difference')):,.2f}."
+                        )
                     )
 
-                    st.metric(
-                        "Invoice Total",
-                        (
-                            f"${value:,.2f}"
-                            if isinstance(
-                                value,
-                                (int, float)
-                            )
-                            else "N/A"
+                else:
+
+                    st.warning(
+                        "Invoice needs review: "
+                        + escape_markdown_dollars(
+                            invoice.get("reason")
+                            or "the invoice could not be verified"
                         )
                     )
 
@@ -2372,7 +2530,7 @@ with tab2:
                 if discrepancies:
 
                     st.error(
-                        "⚠️ DISCREPANCIES DETECTED"
+                        "ΓÜá∩╕Å DISCREPANCIES DETECTED"
                     )
 
                     for discrepancy in discrepancies:
@@ -2394,14 +2552,42 @@ with tab2:
                         )
 
                         st.warning(
-                            f"**{category}** — "
+                            f"**{category}** ΓÇö "
                             f"{description}"
                         )
 
-                else:
+                review_items = result.get(
+                    "review_items",
+                    []
+                )
+
+                if review_items and not discrepancies:
+
+                    st.warning(
+                        "ΓÜá∩╕Å NEEDS REVIEW: some values could not be "
+                        "verified."
+                    )
+
+                for item in review_items:
+
+                    st.warning(
+                        f"**{item.get('category')}** ΓÇö needs review: "
+                        + escape_markdown_dollars(
+                            str(item.get("reason", ""))
+                        )
+                    )
+
+                if not discrepancies and not review_items:
 
                     st.success(
-                        "✅ NO DISCREPANCIES"
+                        "Γ£à NO DISCREPANCIES"
+                    )
+
+                if result.get("excluded_unidentified"):
+
+                    st.caption(
+                        f"{result['excluded_unidentified']} document "
+                        "chunk(s) without a shipment ID were not used."
                     )
 
         except Exception as error:
@@ -2412,7 +2598,7 @@ with tab2:
 
 
 # ============================================================
-# TAB 3 — SHIPMENT INTELLIGENCE
+# TAB 3 ΓÇö SHIPMENT INTELLIGENCE
 # ============================================================
 
 with tab3:
@@ -2449,7 +2635,7 @@ with tab3:
 
 
 # ============================================================
-# TAB 4 — DIAGNOSTICS (read-only)
+# TAB 4 ΓÇö DIAGNOSTICS (read-only)
 # ============================================================
 
 with tab4:
@@ -2503,5 +2689,5 @@ with tab4:
 st.divider()
 
 st.caption(
-    "LogiDoc-RAG • Logistics Document Intelligence"
+    "LogiDoc-RAG ΓÇó Logistics Document Intelligence"
 )
