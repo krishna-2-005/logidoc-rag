@@ -505,7 +505,7 @@ def read_notes(records, labels):
 
 YES_NO_WORDS = {"was", "were", "is", "are", "did", "do", "does", "has", "have", "had"}
 
-NEGATION = re.compile(r"\bnot\b|n['ΓÇÖ]t\b|\bnever\b")
+NEGATION = re.compile(r"\bnot\b|n['’]t\b|\bnever\b")
 
 
 def is_yes_no(question_lower):
@@ -568,7 +568,7 @@ OVER_WORDS = (
 
 # "not delivered", "weren't delivered", "didn't arrive", "never arrived"
 NOT_DELIVERED = (
-    r"(?:\b(?:not|never)|n['ΓÇÖ]t) (?:been )?"
+    r"(?:\b(?:not|never)|n['’]t) (?:been )?"
     r"(?:deliver(?:ed)?|receive[ds]?|arrive[ds]?)\b"
 )
 
@@ -1208,7 +1208,7 @@ def combined_answer(quantity, timing, records, prefix=False):
 # INVOICE LINE ITEMS VS TOTAL
 # ============================================================
 
-CURRENCY = r"(?:US\$|USD|CAD|EUR|GBP|\$|Γé¼|┬ú)"
+CURRENCY = r"(?:US\$|USD|CAD|EUR|GBP|\$|€|£)"
 
 AMOUNT = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
 
