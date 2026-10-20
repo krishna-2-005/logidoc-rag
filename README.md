@@ -14,26 +14,26 @@ answer.
 ## How it works
 
 ```
-PDF upload ΓöÇΓöÇΓû║ ingestion_manager ΓöÇΓöÇΓû║ data/raw/*.pdf  +  chroma_db (vectors)
-                 Γöé  SHA-256 duplicate checks, journal, rollback
-                 Γû╝
+PDF upload ──► ingestion_manager ──► data/raw/*.pdf  +  chroma_db (vectors)
+                 │  SHA-256 duplicate checks, journal, rollback
+                 ▼
              document_loader (PyMuPDF text, document type, shipment ID)
-             chunker ΓåÆ vector_store.create_embedding (Ollama)
+             chunker → vector_store.create_embedding (Ollama)
 
 Question + selected shipment
-   Γöé
-   Γû╝
+   │
+   ▼
 rag_scope.resolve_scope      which chunks may be used (never guesses)
-   Γöé
-   Γû╝
+   │
+   ▼
 rag.search_documents         keyword + vector search, filtered by shipment
-   Γöé
-   Γö£ΓöÇΓû║ shipment_calculations (per shipment): quantities, delivery dates,
-   Γöé   invoice totals, calculated in Python
-   Γö£ΓöÇΓû║ deterministic field extraction (per shipment)
-   ΓööΓöÇΓû║ LLM answer (Ollama) from the scoped chunks
-   Γöé
-   Γû╝
+   │
+   ├─► shipment_calculations (per shipment): quantities, delivery dates,
+   │   invoice totals, calculated in Python
+   ├─► deterministic field extraction (per shipment)
+   └─► LLM answer (Ollama) from the scoped chunks
+   │
+   ▼
 rag_grounding.ground_answer  cite only chunks that support the answer;
                              abstain when nothing does
 ```
@@ -67,9 +67,9 @@ language model, citing the exact fields used:
 
 | Question type | Fields (document) | Convention |
 |---|---|---|
-| Pieces expected / delivered / missing / over-delivered / difference; comparisons ("consistent with the BOL?", "how many more were expected than delivered?", "is there a discrepancy?"); "were all pieces delivered?" | `Number of Pieces` (BOL), `Number of Pieces Delivered` (POD) | shortage = expected ΓêÆ delivered; over-delivery = delivered ΓêÆ expected |
-| Days late / early, on time, "on time or early", "late or on time" | `Expected Delivery Date` (BOL), `Delivery Date` (POD) | actual ΓêÆ expected in calendar days: positive = late, 0 = on time, negative = early. Delivered early counts as on time, so "on time or early" is answered like "on time"; either-or and negated questions get the result without a Yes/No |
-| Days between pickup and delivery | `Pickup Date` (BOL), `Delivery Date` (POD) | actual ΓêÆ pickup in calendar days; a delivery before pickup is not calculated |
+| Pieces expected / delivered / missing / over-delivered / difference; comparisons ("consistent with the BOL?", "how many more were expected than delivered?", "is there a discrepancy?"); "were all pieces delivered?" | `Number of Pieces` (BOL), `Number of Pieces Delivered` (POD) | shortage = expected − delivered; over-delivery = delivered − expected |
+| Days late / early, on time, "on time or early", "late or on time" | `Expected Delivery Date` (BOL), `Delivery Date` (POD) | actual − expected in calendar days: positive = late, 0 = on time, negative = early. Delivered early counts as on time, so "on time or early" is answered like "on time"; either-or and negated questions get the result without a Yes/No |
+| Days between pickup and delivery | `Pickup Date` (BOL), `Delivery Date` (POD) | actual − pickup in calendar days; a delivery before pickup is not calculated |
 | Pieces and timing together ("Were all pieces delivered on time?") | all four fields above | both parts are calculated; Yes only if all pieces were delivered and the delivery was not late |
 | Damaged, refused, rejected or returned pieces | a count field such as `Damaged Pieces` (POD) | never the delivered count; without a count field the answer says so (quoting the POD `Damage Report`, if any) |
 | Do the invoice line items add up? | `Base Freight`, `Fuel Surcharge`, `Detention Charge`, `Other Accessorial Charges`, `Total Invoice Amount` (invoice) | sum of the four line items compared with the total |
@@ -169,14 +169,14 @@ Results measured on 2026-10-15 (this machine, 40 questions, final code):
 | Metric | Offline | Ollama | Target |
 |---|---|---|---|
 | Cross-shipment leakage | 0.00 (n=39) | 0.00 (n=39) | 0 |
-| Retrieval recall@5 | 1.00 (n=32) | 1.00 (n=32) | ΓëÑ 0.90 |
-| Citation precision | 1.00 (29 citations) | 1.00 (38 citations) | ΓëÑ 0.90 |
-| Abstention accuracy | 1.00 (n=27) | 1.00 (n=40) | ΓëÑ 0.75 |
-| Answer match | 1.00 (n=23) | 1.00 (n=32) | ΓÇö |
-| Retrieval latency, mean / p95 | 5 / 7 ms | 68 / 354 ms | ΓÇö |
-| Generation latency, mean / p95 | not measured | 3.4 / 11.4 s (n=13) | ΓÇö |
+| Retrieval recall@5 | 1.00 (n=32) | 1.00 (n=32) | ≥ 0.90 |
+| Citation precision | 1.00 (29 citations) | 1.00 (38 citations) | ≥ 0.90 |
+| Abstention accuracy | 1.00 (n=27) | 1.00 (n=40) | ≥ 0.75 |
+| Answer match | 1.00 (n=23) | 1.00 (n=32) | — |
+| Retrieval latency, mean / p95 | 5 / 7 ms | 68 / 354 ms | — |
+| Generation latency, mean / p95 | not measured | 3.4 / 11.4 s (n=13) | — |
 
-All eight reasoning questions (R01ΓÇôR08) are answered by the
+All eight reasoning questions (R01–R08) are answered by the
 calculations, so their results do not depend on the model. The other
 13 questions do: in another Ollama run of the same code that day, the
 Ollama server failed on three of them ("CUDA error", "model runner has
@@ -194,8 +194,8 @@ on real documents.
 
 | | SHJ-2026-001 | SHJ-2026-002 |
 |---|---|---|
-| Pieces (BOL / POD) | 48 / 45 ΓåÆ **SHORTAGE** of 3 | 60 / 60 ΓåÆ **MATCH** |
-| Delivery (expected / actual) | Oct 3 / Oct 5, 2026 ΓåÆ **DELAYED** 2 days | Oct 9 / Oct 8, 2026 ΓåÆ **EARLY** |
+| Pieces (BOL / POD) | 48 / 45 → **SHORTAGE** of 3 | 60 / 60 → **MATCH** |
+| Delivery (expected / actual) | Oct 3 / Oct 5, 2026 → **DELAYED** 2 days | Oct 9 / Oct 8, 2026 → **EARLY** |
 | Invoice total | $1,550.00 (line items add up to $1,430.00) | $2,875.50 (line items match) |
 | Shipment status | **EXCEPTION** (3 exceptions: quantity, delivery, invoice) | **CLEAR** (0 exceptions) |
 

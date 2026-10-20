@@ -46,7 +46,7 @@ from shipment_identity import belongs_to_shipment
 
 st.set_page_config(
     page_title="LogiDoc-RAG",
-    page_icon="≡ƒôª",
+    page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -500,7 +500,7 @@ def show_source_evidence(
             if pdf_path.exists():
 
                 with st.expander(
-                    "≡ƒôä View Original PDF"
+                    "📄 View Original PDF"
                 ):
 
                     try:
@@ -817,13 +817,13 @@ def show_reconciliation_evidence(
         with st.container(border=True):
 
             st.markdown(
-                f"**≡ƒôä {source}**"
+                f"**📄 {source}**"
             )
 
             st.caption(
                 f"Document Type: "
                 f"{first.get('document_type', 'Unknown')}"
-                f"  ΓÇó  Shipment: "
+                f"  •  Shipment: "
                 f"{first.get('shipment_id', 'Unknown')}"
             )
 
@@ -846,7 +846,7 @@ def show_reconciliation_evidence(
             if pdf_path.exists():
 
                 with st.expander(
-                    "≡ƒôä View Original PDF"
+                    "📄 View Original PDF"
                 ):
 
                     try:
@@ -1006,16 +1006,16 @@ def show_exception_details(
             }
 
         icon = (
-            "≡ƒö┤"
+            "🔴"
             if severity == "HIGH"
-            else "≡ƒƒá"
+            else "🟠"
         )
 
         with st.container(border=True):
 
             st.markdown(
                 f"**{icon} {detail.get('title', category)}**"
-                f"  ΓÇó  Severity: {severity}"
+                f"  •  Severity: {severity}"
             )
 
             st.write(
@@ -1194,13 +1194,13 @@ def show_shipment_intelligence(shipment_id=None):
     if str(shipment_status).upper() == "EXCEPTION":
 
         st.error(
-            f"ΓÜá∩╕Å Shipment Status: {shipment_status}"
+            f"⚠️ Shipment Status: {shipment_status}"
         )
 
     elif str(shipment_status).upper() == "NEEDS REVIEW":
 
         st.warning(
-            f"ΓÜá∩╕Å Shipment Status: {shipment_status}. Some values "
+            f"⚠️ Shipment Status: {shipment_status}. Some values "
             "could not be verified; see the details below."
         )
 
@@ -1468,11 +1468,11 @@ def show_all_shipments_intelligence(shipment_ids):
 # ============================================================
 
 INGESTION_STATUS_DISPLAY = {
-    STATUS_ADDED: ("Γ£à", "Added"),
-    STATUS_DUPLICATE: ("ΓÅ¡∩╕Å", "Duplicate, skipped"),
-    STATUS_CHANGED: ("ΓÜá∩╕Å", "Changed, not applied"),
-    STATUS_INCONSISTENT: ("ΓÜá∩╕Å", "Inconsistent, needs attention"),
-    STATUS_FAILED: ("Γ¥î", "Failed"),
+    STATUS_ADDED: ("✅", "Added"),
+    STATUS_DUPLICATE: ("⏭️", "Duplicate, skipped"),
+    STATUS_CHANGED: ("⚠️", "Changed, not applied"),
+    STATUS_INCONSISTENT: ("⚠️", "Inconsistent, needs attention"),
+    STATUS_FAILED: ("❌", "Failed"),
 }
 
 
@@ -1484,10 +1484,10 @@ def show_ingestion_result(result):
     st.markdown("**Last upload**")
 
     st.caption(
-        f"Added {result['files_added']} ┬╖ "
-        f"Duplicates {result['duplicates_skipped']} ┬╖ "
-        f"Changed {result['changed_detected']} ┬╖ "
-        f"Inconsistent {result['inconsistent_detected']} ┬╖ "
+        f"Added {result['files_added']} · "
+        f"Duplicates {result['duplicates_skipped']} · "
+        f"Changed {result['changed_detected']} · "
+        f"Inconsistent {result['inconsistent_detected']} · "
         f"Failed {result['files_failed']}"
     )
 
@@ -1521,7 +1521,7 @@ def show_ingestion_result(result):
 
         icon, label = INGESTION_STATUS_DISPLAY.get(
             outcome["status"],
-            ("ΓÇó", outcome["status"])
+            ("•", outcome["status"])
         )
 
         st.markdown(
@@ -1627,7 +1627,7 @@ def show_consistency_report(report):
 # ============================================================
 
 st.markdown(
-    '<div class="main-title">≡ƒôª LogiDoc-RAG</div>',
+    '<div class="main-title">📦 LogiDoc-RAG</div>',
     unsafe_allow_html=True,
 )
 
@@ -1864,16 +1864,16 @@ st.divider()
 
 tab1, tab2, tab3, tab4 = st.tabs(
     [
-        "≡ƒÆ¼ Logistics Assistant",
-        "≡ƒôè Shipment Reconciliation",
-        "≡ƒºá Shipment Intelligence",
-        "≡ƒ⌐║ Diagnostics",
+        "💬 Logistics Assistant",
+        "📊 Shipment Reconciliation",
+        "🧠 Shipment Intelligence",
+        "🩺 Diagnostics",
     ]
 )
 
 
 # ============================================================
-# TAB 1 ΓÇö LOGISTICS ASSISTANT
+# TAB 1 — LOGISTICS ASSISTANT
 # ============================================================
 
 with tab1:
@@ -2076,7 +2076,7 @@ with tab1:
                             continue
 
                         st.write(
-                            f"≡ƒôä {source} "
+                            f"📄 {source} "
                             f"(Page {page}, "
                             f"Type: {document_type}, "
                             f"Shipment: {metadata.get('shipment_id') or 'none'})"
@@ -2092,7 +2092,7 @@ with tab1:
 
 
 # ============================================================
-# TAB 2 ΓÇö SHIPMENT RECONCILIATION
+# TAB 2 — SHIPMENT RECONCILIATION
 # ============================================================
 
 with tab2:
@@ -2210,7 +2210,7 @@ with tab2:
                     difference = quantity.get("difference", 0)
 
                     st.error(
-                        "ΓÜá∩╕Å Quantity discrepancy: "
+                        "⚠️ Quantity discrepancy: "
                         f"{abs(difference)} pieces "
                         + (
                             "(shortage)."
@@ -2278,7 +2278,7 @@ with tab2:
                 if delivery_status == "DELAYED":
 
                     st.warning(
-                        "ΓÜá∩╕Å Delivery date discrepancy: delivered "
+                        "⚠️ Delivery date discrepancy: delivered "
                         f"{days_late} day(s) after the expected "
                         "delivery date."
                     )
@@ -2480,7 +2480,7 @@ with tab2:
 
                     st.error(
                         escape_markdown_dollars(
-                            "ΓÜá∩╕Å Invoice line items "
+                            "⚠️ Invoice line items "
                             f"({invoice.get('breakdown')}) add up to "
                             f"${invoice.get('line_item_sum'):,.2f}, but "
                             "the Total Invoice Amount is "
@@ -2530,7 +2530,7 @@ with tab2:
                 if discrepancies:
 
                     st.error(
-                        "ΓÜá∩╕Å DISCREPANCIES DETECTED"
+                        "⚠️ DISCREPANCIES DETECTED"
                     )
 
                     for discrepancy in discrepancies:
@@ -2552,7 +2552,7 @@ with tab2:
                         )
 
                         st.warning(
-                            f"**{category}** ΓÇö "
+                            f"**{category}** — "
                             f"{description}"
                         )
 
@@ -2564,14 +2564,14 @@ with tab2:
                 if review_items and not discrepancies:
 
                     st.warning(
-                        "ΓÜá∩╕Å NEEDS REVIEW: some values could not be "
+                        "⚠️ NEEDS REVIEW: some values could not be "
                         "verified."
                     )
 
                 for item in review_items:
 
                     st.warning(
-                        f"**{item.get('category')}** ΓÇö needs review: "
+                        f"**{item.get('category')}** — needs review: "
                         + escape_markdown_dollars(
                             str(item.get("reason", ""))
                         )
@@ -2580,7 +2580,7 @@ with tab2:
                 if not discrepancies and not review_items:
 
                     st.success(
-                        "Γ£à NO DISCREPANCIES"
+                        "✅ NO DISCREPANCIES"
                     )
 
                 if result.get("excluded_unidentified"):
@@ -2598,7 +2598,7 @@ with tab2:
 
 
 # ============================================================
-# TAB 3 ΓÇö SHIPMENT INTELLIGENCE
+# TAB 3 — SHIPMENT INTELLIGENCE
 # ============================================================
 
 with tab3:
@@ -2635,7 +2635,7 @@ with tab3:
 
 
 # ============================================================
-# TAB 4 ΓÇö DIAGNOSTICS (read-only)
+# TAB 4 — DIAGNOSTICS (read-only)
 # ============================================================
 
 with tab4:
@@ -2689,5 +2689,5 @@ with tab4:
 st.divider()
 
 st.caption(
-    "LogiDoc-RAG ΓÇó Logistics Document Intelligence"
+    "LogiDoc-RAG • Logistics Document Intelligence"
 )

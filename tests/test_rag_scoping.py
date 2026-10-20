@@ -453,12 +453,12 @@ def test_deterministic_answer_cites_its_source(llm):
     [
         # The model names the shipment (with U+2011 dashes, as the
         # real model does); that must not make every chunk "support"
-        ("The fuel surcharge on the invoice for Shipment SHJΓÇæ2026ΓÇæ001 "
+        ("The fuel surcharge on the invoice for Shipment SHJ\u20112026\u2011001 "
          "was $180.00.", "INVOICE_SHJ-2026-001.pdf"),
         ("The SHJ-2026-001 shipment had a total weight of 12,500 lbs.",
          "BOL_SHJ-2026-001.pdf"),
-        ("The equipment used for shipment SHJΓÇæ2026ΓÇæ001 was a "
-         "53ΓÇæfoot dryΓÇævan.", "BOL_SHJ-2026-001.pdf"),
+        ("The equipment used for shipment SHJ\u20112026\u2011001 was a "
+         "53\u2011foot dry\u2011van.", "BOL_SHJ-2026-001.pdf"),
         ("The invoice number is INV-SHJ-2026-001, shown on the invoice "
          "for shipment SHJ-2026-001.", "INVOICE_SHJ-2026-001.pdf"),
     ],
@@ -475,11 +475,11 @@ def test_naming_the_shipment_is_not_evidence(llm, reply, expected_source):
 
 def test_unicode_dashes_in_question_ids(llm):
 
-    answer, results = ask("How many pieces were delivered for SHJΓÇæ2026ΓÇæ001?")
+    answer, results = ask("How many pieces were delivered for SHJ\u20112026\u2011001?")
 
     assert answer == "45 pieces were delivered."
 
-    answer, results = ask("How many pieces were delivered for SHJΓÇæ2026ΓÇæ002?", A)
+    answer, results = ask("How many pieces were delivered for SHJ\u20112026\u2011002?", A)
 
     assert results["status"] == "clarification"
 

@@ -246,9 +246,9 @@ def ui_snapshot(at):
     ]
 
     evidence_sources = {
-        text.replace("**", "").replace("≡ƒôä", "").strip()
+        text.replace("**", "").replace("📄", "").strip()
         for text in markdown
-        if text.startswith("**≡ƒôä ")
+        if text.startswith("**📄 ")
     }
 
     return {
