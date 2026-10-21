@@ -174,16 +174,20 @@ def evidence_entries(audit):
 # RECONCILIATION
 # ============================================================
 
-def reconcile_shipment(shipment_id=None):
+def reconcile_shipment(shipment_id=None, chunks=None):
     """
     Reconcile the BOL, Invoice and POD of one shipment.
 
     shipment_id selects that shipment's documents. Without it,
     the documents must belong to a single shipment: documents
     from different shipments are never mixed.
+
+    chunks: document chunks already loaded with create_all_chunks(),
+    so that several shipments can be reconciled from one reading of
+    the PDFs; they are read from the raw folder when omitted.
     """
 
-    chunks = create_all_chunks()
+    chunks = create_all_chunks() if chunks is None else list(chunks)
 
     if not chunks:
         return None

@@ -52,6 +52,16 @@ def production_snapshot():
                     path.stat().st_mtime,
                 )
 
+    # The exception review database (and its journal files) must not
+    # be created or changed by the tests either
+    for suffix in ("", "-journal", "-wal", "-shm"):
+
+        path = Path(f"{config.REVIEW_DB_PATH}{suffix}")
+
+        state[str(path)] = (
+            (path.stat().st_size, path.stat().st_mtime) if path.exists() else None
+        )
+
     return state
 
 
@@ -84,7 +94,8 @@ def protect_production_data():
         shutil.rmtree(folder, ignore_errors=True)
 
     assert production_snapshot() == production_before, (
-        "Production data/raw or chroma_db changed during the tests"
+        "Production data/raw, chroma_db or the review database changed "
+        "during the tests"
     )
 
     assert not leftovers, (
