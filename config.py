@@ -25,6 +25,13 @@ REVIEW_DB_PATH = Path(
     os.environ.get("LOGIDOC_REVIEW_DB") or DATA_DIR / "audit_reviews.sqlite3"
 )
 
+# Audit history (snapshots of audit results: statuses, amounts and
+# finding summaries; never document text). Set LOGIDOC_HISTORY_DB to
+# keep it elsewhere.
+HISTORY_DB_PATH = Path(
+    os.environ.get("LOGIDOC_HISTORY_DB") or DATA_DIR / "audit_history.sqlite3"
+)
+
 # Ollama models
 LLM_MODEL = "nemotron-3-nano:4b"
 EMBEDDING_MODEL = "nomic-embed-text"

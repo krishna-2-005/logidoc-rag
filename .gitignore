@@ -16,6 +16,7 @@ data/raw/*.pdf
 
 # Exception review database (local review state)
 data/audit_reviews.sqlite3*
+data/audit_history.sqlite3*
 
 # Backups and logs
 *_backup.py

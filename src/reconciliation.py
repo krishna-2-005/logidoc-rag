@@ -9,7 +9,7 @@ import re
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from chunker import create_all_chunks
+from chunker import describe_problems, read_chunks
 from shipment_identity import identifier_key
 from shipment_calculations import (
     DELIVERY_DELAYED,
@@ -174,7 +174,30 @@ def evidence_entries(audit):
 # RECONCILIATION
 # ============================================================
 
-def reconcile_shipment(shipment_id=None, chunks=None):
+def load_document_chunks():
+    """
+    The chunks of the raw document folder and the files that gave
+    none (chunker.read_chunks). reconcile_shipment reads the PDFs
+    through this function when it is not given chunks.
+    """
+
+    return read_chunks()
+
+
+def unreadable_message(problems):
+    """
+    Why the audit cannot rule out that unreadable files matter.
+    """
+
+    return (
+        f"{len(problems)} file(s) in the document folder could not be used "
+        f"({describe_problems(problems)}). Their shipment cannot be "
+        "established, so the audit cannot rule out that they hold a BOL, "
+        "invoice or POD of this shipment."
+    )
+
+
+def reconcile_shipment(shipment_id=None, chunks=None, unreadable_files=None):
     """
     Reconcile the BOL, Invoice and POD of one shipment.
 
@@ -182,14 +205,46 @@ def reconcile_shipment(shipment_id=None, chunks=None):
     the documents must belong to a single shipment: documents
     from different shipments are never mixed.
 
-    chunks: document chunks already loaded with create_all_chunks(),
-    so that several shipments can be reconciled from one reading of
-    the PDFs; they are read from the raw folder when omitted.
+    chunks: document chunks already loaded (chunker.read_chunks), so
+    that several shipments can be reconciled from one reading of the
+    PDFs; they are read from the raw folder when omitted.
+
+    unreadable_files: the files that gave no chunks, as
+    chunker.read_chunks reports them ({"filename", "status",
+    "error"}); read together with the chunks when those are omitted.
+    Such a file has no shipment ID we can trust, so it is never
+    attributed to a shipment, and never treated as an empty or verified
+    document either: a result is never "NO DISCREPANCIES" while a file
+    that might belong to the shipment could not be read (it becomes
+    NEEDS REVIEW with a "Documents" review item), and when a required
+    document is missing the error names the unreadable files.
     """
 
-    chunks = create_all_chunks() if chunks is None else list(chunks)
+    if chunks is None:
+        chunks, unreadable_files = load_document_chunks()
+    else:
+        chunks = list(chunks)
+
+    unreadable_files = list(unreadable_files or [])
+
+    unreadable_note = (
+        " These files could not be used and cannot be assigned to any "
+        f"shipment: {describe_problems(unreadable_files)}."
+        if unreadable_files else ""
+    )
 
     if not chunks:
+
+        if unreadable_files:
+            return {
+                "success": False,
+                "error": (
+                    "No document could be read."
+                    + unreadable_note
+                ),
+                "unreadable_files": [item["filename"] for item in unreadable_files],
+            }
+
         return None
 
     # --------------------------------------------------------
@@ -229,6 +284,7 @@ def reconcile_shipment(shipment_id=None, chunks=None):
                 "error": (
                     f"No documents found for shipment "
                     f"{shipment_id}."
+                    + unreadable_note
                 )
             }
 
@@ -277,7 +333,7 @@ def reconcile_shipment(shipment_id=None, chunks=None):
     if not bol or not invoice or not pod:
         return {
             "success": False,
-            "error": "Reconciliation requires BOL, Invoice and POD."
+            "error": "Reconciliation requires BOL, Invoice and POD." + unreadable_note
         }
 
     bol_text = bol["text"]
@@ -506,6 +562,15 @@ def reconcile_shipment(shipment_id=None, chunks=None):
         if audit.status == NEEDS_REVIEW
     ]
 
+    # A file that could not be read might hold a document of this
+    # shipment: the result cannot be called clean (and the files stay
+    # visible), whatever else was found
+    if unreadable_files:
+        review_items.append({
+            "category": "Documents",
+            "reason": unreadable_message(unreadable_files),
+        })
+
     if discrepancies:
         final_status = "DISCREPANCIES DETECTED"
     elif review_items:
@@ -585,6 +650,9 @@ def reconcile_shipment(shipment_id=None, chunks=None):
         "review_items": review_items,
 
         "excluded_unidentified": excluded_unidentified,
+
+        # Files that could not be used: never part of a shipment
+        "unreadable_files": [item["filename"] for item in unreadable_files],
 
         "final_status": final_status
     }

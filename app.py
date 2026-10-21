@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # ============================================================
 
 from config import CHROMA_DIR, RAW_DATA_DIR
-from rag import ask_question, get_all_documents
+from rag import ask_question, call_llm, get_all_documents
 from reconciliation import reconcile_shipment
 from intelligence_service import analyze_shipment
 from ingestion_manager import (
@@ -41,7 +41,10 @@ from display_text import cited_fields, escape_markdown_dollars, money_text
 from audit_export import NOT_AVAILABLE, ExportError, audit_csv, export_filename
 from audit_pdf_export import audit_pdf, pdf_filename
 import config
-from chunker import create_all_chunks
+import audit_workflow_ui
+from audit_history import HistoryStore
+from chunker import describe_problems, read_chunks
+from document_completeness import scan_folder
 from audit_analytics import (
     DISCREPANCY,
     METRICS,
@@ -1901,7 +1904,22 @@ def load_audit_snapshot(raw_dir, fingerprint):
     so it is recomputed as soon as a document changes.
     """
 
-    return build_snapshot(create_all_chunks(), reconcile_shipment)
+    # A PDF that cannot be used does not stop every audit: it is
+    # reported, and every shipment's result knows about it (it cannot
+    # be clean while an unreadable file might belong to it)
+    chunks, problems = read_chunks(raw_dir)
+
+    return build_snapshot(chunks, reconcile_shipment, unreadable_files=problems)
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def load_document_scan(raw_dir, fingerprint):
+    """
+    Every PDF of the raw folder scanned for the completeness register,
+    cached per folder and fingerprint like the audit snapshot.
+    """
+
+    return scan_folder(raw_dir)
 
 
 def amount(value):
@@ -2117,9 +2135,11 @@ def show_shipment_audit(row, result, shipment_options):
             st.caption("This shipment is not in the search index, so it cannot be selected in the sidebar.")
 
 
-def show_exception_review(store, exceptions):
+def show_exception_review(store, exceptions, prefix="an"):
     """
     Review state, history and the form to change it, for one exception.
+    prefix keeps the widget keys apart when the widget is shown in
+    more than one tab.
     """
 
     labels = {
@@ -2127,7 +2147,7 @@ def show_exception_review(store, exceptions):
         for item in exceptions
     }
 
-    choice = st.selectbox("Exception", list(labels), key="an_exception")
+    choice = st.selectbox("Exception", list(labels), key=f"{prefix}_exception")
     exception = labels[choice]
 
     st.markdown(escape_markdown_dollars(exception["description"]))
@@ -2145,7 +2165,7 @@ def show_exception_review(store, exceptions):
         st.info("The review database is unavailable; review changes cannot be saved.")
         return
 
-    with st.form("an_review_form", clear_on_submit=True):
+    with st.form(f"{prefix}_review_form", clear_on_submit=True):
 
         status = st.selectbox(
             "Review state",
@@ -2166,13 +2186,13 @@ def show_exception_review(store, exceptions):
         except ReviewError as error:
             st.error(str(error))
         else:
-            st.session_state["an_review_saved"] = (
+            st.session_state[f"{prefix}_review_saved"] = (
                 f"{choice}: {STATUS_LABELS[status]}"
             )
             st.rerun()
 
-    if st.session_state.get("an_review_saved"):
-        st.success(f"Saved: {st.session_state.pop('an_review_saved')}")
+    if st.session_state.get(f"{prefix}_review_saved"):
+        st.success(f"Saved: {st.session_state.pop(f'{prefix}_review_saved')}")
 
     history = store.history(exception["exception_key"])
 
@@ -2209,6 +2229,13 @@ def show_audit_analytics(shipment_options):
             f"{len(snapshot['unidentified_sources'])} document(s) have no shipment "
             "ID and are not included in any shipment: "
             + ", ".join(snapshot["unidentified_sources"])
+        )
+
+    if snapshot["unreadable_files"]:
+        st.warning(
+            f"{len(snapshot['unreadable_files'])} file(s) could not be used and belong to "
+            "no shipment: " + describe_problems(snapshot["unreadable_files"])
+            + ". No shipment is shown as clean while they cannot be ruled out."
         )
 
     if not rows:
@@ -2438,17 +2465,66 @@ def show_audit_analytics(shipment_options):
         st.info("No exceptions match these filters.")
 
 
+def show_audit_operations():
+    """
+    The Audit Operations tab: the business modules do the work (see
+    src/audit_workflow_ui.py); this only loads their inputs.
+    """
+
+    fingerprint = source_fingerprint(RAW_DATA_DIR)
+
+    if not fingerprint:
+        st.info("No PDFs in the document folder yet. Upload documents in the sidebar.")
+        return
+
+    try:
+        with st.spinner("Reading and reconciling every shipment..."):
+            snapshot = load_audit_snapshot(str(RAW_DATA_DIR), fingerprint)
+            files = load_document_scan(str(RAW_DATA_DIR), fingerprint)
+    except Exception as error:
+        st.error(f"Audit operations could not be loaded: {error}")
+        return
+
+    # The search index, when it can be read: which files chat can see
+    _, metadatas = get_indexed_data()
+
+    indexed_sources = {
+        str(metadata.get("source"))
+        for metadata in metadatas
+        if isinstance(metadata, dict) and metadata.get("source")
+    } or None
+
+    review_store = history = review_error = history_error = None
+
+    try:
+        review_store = ReviewStore(config.REVIEW_DB_PATH)
+    except Exception as error:
+        review_error = str(error)
+
+    try:
+        history = HistoryStore(config.HISTORY_DB_PATH)
+    except Exception as error:
+        history_error = str(error)
+
+    audit_workflow_ui.render(
+        snapshot, files, indexed_sources, review_store, history,
+        show_exception_review, llm=call_llm,
+        review_error=review_error, history_error=history_error,
+    )
+
+
 # ============================================================
 # MAIN TABS
 # ============================================================
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "💬 Logistics Assistant",
         "📊 Shipment Reconciliation",
         "🧠 Shipment Intelligence",
         "🩺 Diagnostics",
         "📈 Audit Analytics",
+        "🧭 Audit Operations",
     ]
 )
 
@@ -3171,6 +3247,14 @@ with tab2:
                         "chunk(s) without a shipment ID were not used."
                     )
 
+                if result.get("unreadable_files"):
+
+                    st.warning(
+                        f"{len(result['unreadable_files'])} file(s) in the document folder "
+                        "could not be used and belong to no shipment: "
+                        + ", ".join(result["unreadable_files"])
+                    )
+
                 # ------------------------------------------------
                 # Audit export (the selected shipment only)
                 # ------------------------------------------------
@@ -3351,6 +3435,36 @@ with tab5:
         st.info(
             "Load the analytics to reconcile every shipment in the "
             "document folder. Results are reused until a document changes."
+        )
+
+
+# ============================================================
+# TAB 6 — AUDIT OPERATIONS
+# ============================================================
+
+with tab6:
+
+    st.markdown(
+        '<div class="section-title">'
+        'Audit Operations'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.caption(
+        "Document readiness, financial exposure, evidence-backed "
+        "findings, review, audit history and reports for each shipment."
+    )
+
+    if st.button("Load audit operations", type="primary"):
+        st.session_state["operations_loaded"] = True
+
+    if st.session_state.get("operations_loaded"):
+        show_audit_operations()
+    else:
+        st.info(
+            "Load the operations view to read every document and reconcile "
+            "every shipment. Results are reused until a document changes."
         )
 
 

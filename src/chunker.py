@@ -6,6 +6,9 @@ Preserves source and page-level information so every retrieved
 chunk can be traced back to the original PDF.
 """
 
+from pathlib import Path
+
+import document_loader
 from document_loader import load_all_documents
 
 
@@ -104,6 +107,71 @@ def create_all_chunks():
         all_chunks.extend(document_chunks)
 
     return all_chunks
+
+
+UNREADABLE = "unreadable"
+NO_TEXT = "no_text"
+
+
+def read_chunks(raw_dir=None, loader=None):
+    """
+    Like create_all_chunks(), but a PDF that cannot be used does not
+    stop the others, and is not lost silently either. Returns
+    (chunks, problems); problems lists every file that gave no chunks:
+
+        {"filename", "status", "error"}
+
+    status "unreadable": the PDF could not be opened or analysed (the
+    error is kept); "no_text": it opened but no page has extractable
+    text (an image-only scan; there is no OCR).
+
+    With no problems the chunks are exactly create_all_chunks()'s.
+    raw_dir defaults to the project's document folder; a missing
+    folder gives no chunks and no problems.
+    """
+
+    raw_dir = Path(raw_dir) if raw_dir is not None else Path(document_loader.RAW_DATA_DIR)
+    load = loader or document_loader.load_document
+
+    chunks, problems = [], []
+
+    if not raw_dir.exists():
+        return chunks, problems
+
+    for path in sorted(raw_dir.glob("*.pdf")):
+
+        try:
+            document = load(path)
+        except Exception as error:
+            problems.append({
+                "filename": path.name,
+                "status": UNREADABLE,
+                "error": f"{type(error).__name__}: {error}"[:200],
+            })
+            continue
+
+        document_chunks = create_document_chunks(document)
+
+        if not document_chunks:
+            problems.append({"filename": path.name, "status": NO_TEXT, "error": None})
+            continue
+
+        chunks.extend(document_chunks)
+
+    return chunks, problems
+
+
+def describe_problems(problems):
+    """
+    The problem files as one line of text.
+    """
+
+    labels = {UNREADABLE: "unreadable", NO_TEXT: "no extractable text"}
+
+    return ", ".join(
+        f"{item['filename']} ({labels.get(item['status'], item['status'])})"
+        for item in problems
+    )
 
 
 if __name__ == "__main__":
