@@ -37,6 +37,8 @@ from ingestion_manager import (
 )
 from consistency_report import check_destination
 from display_text import cited_fields, escape_markdown_dollars, money_text
+from audit_export import ExportError, audit_csv, export_filename
+from audit_pdf_export import audit_pdf, pdf_filename
 from shipment_identity import belongs_to_shipment
 
 
@@ -2589,6 +2591,66 @@ with tab2:
                         f"{result['excluded_unidentified']} document "
                         "chunk(s) without a shipment ID were not used."
                     )
+
+                # ------------------------------------------------
+                # Audit export (the selected shipment only)
+                # ------------------------------------------------
+
+                if selected_shipment == "All Shipments":
+
+                    st.caption(
+                        "Select a shipment in the sidebar to export "
+                        "its freight audit as CSV or PDF."
+                    )
+
+                else:
+
+                    csv_column, pdf_column = st.columns(2)
+
+                    with csv_column:
+
+                        try:
+
+                            st.download_button(
+                                "Download freight audit (CSV)",
+                                data=audit_csv(result, selected_shipment),
+                                file_name=export_filename(result),
+                                mime="text/csv",
+                                # Downloading must not rerun the app: that
+                                # would clear this result and the PDF button
+                                on_click="ignore",
+                            )
+
+                        except ExportError as export_error:
+
+                            st.caption(
+                                f"Audit export unavailable: {export_error}"
+                            )
+
+                    # The same reconciliation result as the CSV
+                    with pdf_column:
+
+                        try:
+
+                            st.download_button(
+                                "Download freight audit (PDF)",
+                                data=audit_pdf(result, selected_shipment),
+                                file_name=pdf_filename(result),
+                                mime="application/pdf",
+                                on_click="ignore",
+                            )
+
+                        except ExportError as export_error:
+
+                            st.caption(
+                                f"PDF report unavailable: {export_error}"
+                            )
+
+                        except Exception as pdf_error:
+
+                            st.caption(
+                                f"PDF report could not be created: {pdf_error}"
+                            )
 
         except Exception as error:
 
