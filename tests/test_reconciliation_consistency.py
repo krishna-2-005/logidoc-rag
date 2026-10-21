@@ -2,7 +2,7 @@
 Reconciliation, Shipment Intelligence and chat must agree.
 
 reconcile_shipment() and analyze_shipment() are run on synthetic
-document chunks (reconciliation.create_all_chunks and the index read
+document chunks (reconciliation.load_document_chunks and the index read
 in intelligence_service are replaced), and the chat calculation
 (shipment_calculations.calculate) on the same text. No PDFs, no index,
 no Ollama and no files are involved.
@@ -156,7 +156,7 @@ def index(monkeypatch):
     def install(chunks):
 
         monkeypatch.setattr(
-            reconciliation, "create_all_chunks", lambda: list(chunks)
+            reconciliation, "load_document_chunks", lambda: (list(chunks), [])
         )
 
         monkeypatch.setattr(

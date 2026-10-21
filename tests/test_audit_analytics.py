@@ -170,7 +170,7 @@ def test_empty_dataset():
 
     empty = snapshot([])
 
-    assert empty == {"shipments": [], "unidentified_sources": []}
+    assert empty == {"shipments": [], "unidentified_sources": [], "unreadable_files": []}
     assert analytics.register_rows(empty) == []
     assert analytics.build_exceptions(empty) == []
 
@@ -254,7 +254,7 @@ def test_documents_are_read_once(monkeypatch):
         return reconciliation.reconcile_shipment(shipment_id, chunks=chunks)
 
     # The snapshot must never go back to the PDFs
-    monkeypatch.setattr(reconciliation, "create_all_chunks", lambda: pytest.fail("read again"))
+    monkeypatch.setattr(reconciliation, "load_document_chunks", lambda: pytest.fail("read again"))
 
     chunks = documents(shipment=A) + clean(B)
 

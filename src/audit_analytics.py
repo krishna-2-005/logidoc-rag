@@ -95,21 +95,53 @@ def source_fingerprint(raw_dir):
     )
 
 
-def build_snapshot(chunks, reconcile):
+def shipment_fingerprint(chunks):
+    """
+    A hash of what a shipment was audited from: each chunk's source
+    file, page, position and a hash of its text (the text itself is not
+    kept). It changes when a document of the shipment is added,
+    removed or replaced, and does not depend on file times.
+    """
+
+    parts = sorted(
+        (
+            str((chunk.get("metadata") or {}).get("source")),
+            str((chunk.get("metadata") or {}).get("page")),
+            str((chunk.get("metadata") or {}).get("chunk")),
+            hashlib.sha256(str(chunk.get("text") or "").encode("utf-8")).hexdigest(),
+        )
+        for chunk in chunks
+    )
+
+    return hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
+
+
+def build_snapshot(chunks, reconcile, unreadable_files=None):
     """
     Every identified shipment reconciled from the same chunks.
 
     reconcile: reconciliation.reconcile_shipment (passed in so the
     caller decides which documents are read).
 
-    Returns {"shipments": [{shipment_id, shipment_key, result}],
-    "unidentified_sources": [...]}; result is the reconciliation
-    result, or {"success": False, "error": ...}.
+    unreadable_files: the files that gave no chunks (chunker.read_chunks
+    problems). They belong to no shipment; every shipment is
+    reconciled knowing about them (its result cannot be clean while they
+    might hold one of its documents), and they are listed in the
+    snapshot.
+
+    Returns {"shipments": [{shipment_id, shipment_key, result,
+    input_fingerprint}], "unidentified_sources": [...],
+    "unreadable_files": [...]}; result is the reconciliation result, or
+    {"success": False, "error": ...}.
+    input_fingerprint identifies the documents the shipment was
+    audited from (see shipment_fingerprint).
     """
 
     chunks = list(chunks or [])
+    unreadable_files = list(unreadable_files or [])
 
     names = {}
+    by_shipment = {}
     unidentified = set()
 
     for chunk in chunks:
@@ -120,6 +152,7 @@ def build_snapshot(chunks, reconcile):
 
         if key:
             names.setdefault(key, set()).add(str(shipment_id).strip())
+            by_shipment.setdefault(key, []).append(chunk)
         else:
             unidentified.add(str(metadata.get("source") or "unknown source"))
 
@@ -132,7 +165,10 @@ def build_snapshot(chunks, reconcile):
         shipment_id = sorted(names[key], key=lambda name: (len(name), name))[0]
 
         try:
-            result = reconcile(shipment_id, chunks=chunks)
+            if unreadable_files:
+                result = reconcile(shipment_id, chunks=chunks, unreadable_files=unreadable_files)
+            else:
+                result = reconcile(shipment_id, chunks=chunks)
         except Exception as error:
             result = {"success": False, "error": f"Reconciliation failed: {error}"}
 
@@ -151,11 +187,13 @@ def build_snapshot(chunks, reconcile):
             "shipment_id": shipment_id,
             "shipment_key": key,
             "result": result,
+            "input_fingerprint": shipment_fingerprint(by_shipment[key]),
         })
 
     return {
         "shipments": shipments,
         "unidentified_sources": sorted(unidentified),
+        "unreadable_files": unreadable_files,
     }
 
 

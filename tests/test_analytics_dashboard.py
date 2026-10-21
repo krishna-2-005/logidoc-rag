@@ -101,6 +101,7 @@ def test_existing_tabs_are_kept_and_analytics_loads_on_request(dashboard):
         "🧠 Shipment Intelligence",
         "🩺 Diagnostics",
         "📈 Audit Analytics",
+        "🧭 Audit Operations",
     ]
 
     # Nothing is reconciled until asked for
