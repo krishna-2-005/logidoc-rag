@@ -99,6 +99,74 @@ calculations: they go to field extraction or to the language model,
 which can then state a calculation itself that nothing checks (see
 [Limitations](#limitations)).
 
+## Audit Analytics and exception review
+
+The **Audit Analytics** tab reconciles every identified shipment with
+the same `reconcile_shipment()` as the Reconciliation tab
+(`src/audit_analytics.py` only counts and adds up its results; nothing
+is recalculated) and shows:
+
+- **KPI cards**, each with its definition in the card's help text;
+- two charts: final audit status, and unresolved exceptions by category;
+- a **shipment audit register** (carrier, route, quantity, delivery and
+  invoice status, final status, invoice total and difference, counts)
+  with filters for shipment ID (case, spaces and dashes ignored),
+  carrier, final status, discrepancy category, invoice mismatch,
+  delayed delivery and needs review, and a **Reset filters** button;
+- a **shipment drill-down**: quantity, dates, invoice line items,
+  discrepancies, review reasons and evidence (source file, page,
+  document type, shipment ID, field text), the per-shipment CSV and PDF
+  downloads, and a button that selects the shipment in the sidebar for
+  the Reconciliation workflow;
+- an **exception register** with a review workflow, and CSV downloads of
+  the filtered register and exceptions.
+
+Click **Load audit analytics** to start: the PDFs are read once and the
+result is cached until a PDF in the document folder is added, removed
+or replaced.
+
+| Metric | Definition |
+|---|---|
+| Identified shipments | distinct shipment IDs in the documents; documents without an ID are listed as a warning and never attributed to a shipment |
+| Reconciled | identified shipments with a BOL, invoice and POD that could be reconciled |
+| With discrepancies | reconciled, final status `DISCREPANCIES DETECTED` |
+| Need manual review | not reconciled, or with at least one value that could not be verified |
+| No discrepancies | reconciled, `NO DISCREPANCIES` and nothing to review |
+| Total invoice amount | sum of the stated totals that were read; the help text says how many shipments it covers |
+| Invoice variance | sum of \|total − line items\| where both are known (net signed value in the help text) |
+| % with discrepancies | with discrepancies ÷ reconciled shipments |
+
+A metric that cannot be calculated shows `NOT AVAILABLE`; a missing
+value is never counted as 0 or as clean.
+
+**Exceptions.** Each detected discrepancy (quantity shortage or overage,
+delivery delay, invoice mismatch, carrier or route inconsistency) and
+each value that needs review (including a shipment that could not be
+reconciled) is one row, marked *Discrepancy* or *Needs review*.
+Severity follows the rules of Shipment Intelligence: HIGH for a
+shortage, a delay, an invoice mismatch and an incomplete reconciliation;
+MEDIUM for an overage, a carrier or route inconsistency and a value that
+needs review.
+
+**Review states** are `open` (every new exception), `in_review`,
+`resolved` and `dismissed` (a reason is required). They are stored
+apart from the audit, in a SQLite file that holds only the exception
+key, shipment, category, a signature of the audited values, the state,
+reviewer, note and timestamps (no document text), with an event history:
+
+- `data/audit_reviews.sqlite3` (git-ignored); set `LOGIDOC_REVIEW_DB`
+  to use another file;
+- every change is one transaction, with parameterised SQL and database
+  checks (a dismissal without a reason is rejected by the database too);
+- the audit is re-run each time: a resolved or dismissed exception whose
+  audited values changed, or that comes back after no longer being
+  detected, is **reopened** and marked as needing a recheck; an
+  exception that is no longer detected keeps its state (it is not
+  resolved by disappearing); showing an exception never resolves it.
+
+The review state does not change any audit result, document or KPI
+(the KPIs count audit results, not review states).
+
 ## Setup (Windows, PowerShell)
 
 Requires Python 3.10 and [Ollama](https://ollama.com/download).
@@ -143,8 +211,8 @@ address: `$env:OLLAMA_HOST = "http://127.0.0.1:9"; python -m pytest -q`.
 Three tests need Ollama (real embeddings in ingestion, the full rebuild
 and the upload workflow); everything else, including all RAG scoping,
 grounding and calculation tests, runs offline with deterministic stand-in
-embeddings and a fake language model. Results on 2026-10-16: 278 passed
-with Ollama; 275 passed and 3 skipped with Ollama unreachable.
+embeddings and a fake language model. Results on 2026-10-21: 461 passed
+with Ollama; 458 passed and 3 skipped with Ollama unreachable.
 
 ## Evaluation
 
@@ -211,6 +279,13 @@ The PDFs are in `tests/fixtures/`; SHJ-2026-001 is also the sample in
   The calculations listed above are therefore done in Python; any other
   calculation, including a calculation question worded in a way the
   router does not recognise, is left to the model.
+- **Audit Analytics** covers the PDFs in the document folder, like the
+  Reconciliation tab (not the chat index); there is no history, so no
+  trends are shown. The review database is local, single-user and has no
+  authentication: the reviewer name is typed in. The analytics CSVs
+  cover the filtered shipments and exceptions only; there is no
+  analytics-level PDF. Reconciling many shipments reads every PDF once
+  and may take a while.
 - **Calculations and deterministic answers** depend on the field labels
   used by the sample documents (e.g. `Number of Pieces Delivered`,
   `Expected Delivery Date`) and are triggered by the question's wording;

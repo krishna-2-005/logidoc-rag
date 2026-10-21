@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 # ============================================================
@@ -17,6 +18,12 @@ CHROMA_DIR = BASE_DIR / "chroma_db"
 
 # Application logs
 LOG_DIR = BASE_DIR / "logs"
+
+# Exception review metadata (status, reviewer, notes; never document
+# text). Set LOGIDOC_REVIEW_DB to keep it elsewhere.
+REVIEW_DB_PATH = Path(
+    os.environ.get("LOGIDOC_REVIEW_DB") or DATA_DIR / "audit_reviews.sqlite3"
+)
 
 # Ollama models
 LLM_MODEL = "nemotron-3-nano:4b"

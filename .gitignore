@@ -14,6 +14,9 @@ data/raw/*.pdf
 .ingestion_journal.jsonl
 .*.part
 
+# Exception review database (local review state)
+data/audit_reviews.sqlite3*
+
 # Backups and logs
 *_backup.py
 logs/

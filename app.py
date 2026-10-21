@@ -2,6 +2,7 @@ import sys
 import re
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 
@@ -37,9 +38,32 @@ from ingestion_manager import (
 )
 from consistency_report import check_destination
 from display_text import cited_fields, escape_markdown_dollars, money_text
-from audit_export import ExportError, audit_csv, export_filename
+from audit_export import NOT_AVAILABLE, ExportError, audit_csv, export_filename
 from audit_pdf_export import audit_pdf, pdf_filename
-from shipment_identity import belongs_to_shipment
+import config
+from chunker import create_all_chunks
+from audit_analytics import (
+    DISCREPANCY,
+    METRICS,
+    REVIEW,
+    build_exceptions,
+    build_snapshot,
+    exceptions_csv,
+    filter_rows,
+    kpis,
+    register_csv,
+    register_rows,
+    source_fingerprint,
+    with_reviews,
+)
+from review_store import (
+    DISMISSED,
+    STATUS_LABELS,
+    STATUSES,
+    ReviewError,
+    ReviewStore,
+)
+from shipment_identity import belongs_to_shipment, identifier_key
 
 
 # ============================================================
@@ -1740,10 +1764,15 @@ with st.sidebar:
         + shipment_ids
     )
 
+    # A shipment chosen elsewhere (Audit Analytics) that is no longer
+    # indexed falls back to All Shipments
+    if st.session_state.get("shipment_selector") not in shipment_options:
+        st.session_state.pop("shipment_selector", None)
+
     selected_shipment = st.selectbox(
         "Select shipment",
         shipment_options,
-        index=0,
+        key="shipment_selector",
     )
 
     st.session_state.selected_shipment = (
@@ -1861,15 +1890,565 @@ st.divider()
 
 
 # ============================================================
+# AUDIT ANALYTICS
+# ============================================================
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def load_audit_snapshot(raw_dir, fingerprint):
+    """
+    Every shipment reconciled from one reading of the raw PDFs.
+    Cached per folder and fingerprint (file names, sizes and times),
+    so it is recomputed as soon as a document changes.
+    """
+
+    return build_snapshot(create_all_chunks(), reconcile_shipment)
+
+
+def amount(value):
+
+    return NOT_AVAILABLE if value is None else money_text(value)
+
+
+def shown_value(value):
+
+    return NOT_AVAILABLE if value is None else str(value)
+
+
+def open_in_reconciliation(shipment_option):
+
+    st.session_state["shipment_selector"] = shipment_option
+
+
+def reset_analytics_filters():
+
+    for key in (
+        "an_search", "an_carriers", "an_statuses", "an_categories",
+        "an_invoice", "an_delay", "an_review",
+        "an_kinds", "an_severities", "an_review_statuses",
+    ):
+        st.session_state.pop(key, None)
+
+
+def show_analytics_kpis(metrics):
+
+    columns = st.columns(4)
+
+    columns[0].metric("Identified shipments", metrics["identified"], help=METRICS["identified"])
+    columns[1].metric("Reconciled", metrics["reconciled"], help=METRICS["reconciled"])
+    columns[2].metric("With discrepancies", metrics["with_discrepancies"], help=METRICS["with_discrepancies"])
+    columns[3].metric("Need manual review", metrics["needs_review"], help=METRICS["needs_review"])
+
+    columns = st.columns(4)
+
+    columns[0].metric("No discrepancies", metrics["no_discrepancies"], help=METRICS["no_discrepancies"])
+
+    columns[1].metric(
+        "Total invoice amount",
+        amount(metrics["invoice_total"]),
+        help=(
+            f"{METRICS['invoice_total']} Covers {metrics['invoice_total_covered']} "
+            f"of {metrics['reconciled']} reconciled shipment(s)."
+        ),
+    )
+
+    columns[2].metric(
+        "Invoice variance",
+        amount(metrics["invoice_variance"]),
+        help=(
+            f"{METRICS['invoice_variance']} Net (signed): "
+            f"{amount(metrics['invoice_variance_net'])}. Covers "
+            f"{metrics['invoice_variance_covered']} of {metrics['reconciled']} "
+            "reconciled shipment(s)."
+        ),
+    )
+
+    columns[3].metric(
+        "% reconciled with discrepancies",
+        NOT_AVAILABLE if metrics["discrepancy_rate"] is None else f"{metrics['discrepancy_rate']}%",
+        help=METRICS["discrepancy_rate"],
+    )
+
+
+def show_shipment_audit(row, result, shipment_options):
+    """
+    One shipment's reconciliation, from the analytics snapshot.
+    """
+
+    shipment_id = row["shipment_id"]
+
+    if not row["reconciled"]:
+        st.error(f"{shipment_id} could not be reconciled: {row['error']}")
+        return
+
+    status = row["final_status"]
+
+    if status == "DISCREPANCIES DETECTED":
+        st.error(f"{shipment_id}: {status}")
+    elif status == "NEEDS REVIEW":
+        st.warning(f"{shipment_id}: {status} (some values could not be verified)")
+    else:
+        st.success(f"{shipment_id}: {status}")
+
+    quantity = result.get("quantity") or {}
+    delivery = result.get("delivery") or {}
+    invoice = result.get("invoice") or {}
+
+    columns = st.columns(2)
+
+    with columns[0]:
+
+        st.markdown("**Quantity**")
+        st.table(pd.DataFrame(
+            [
+                ["BOL expected", shown_value(quantity.get("bol"))],
+                ["POD delivered", shown_value(quantity.get("pod"))],
+                ["Difference (BOL - POD)", shown_value(quantity.get("difference"))],
+                ["Status", shown_value(quantity.get("status"))],
+            ],
+            columns=["Field", "Value"],
+        ))
+
+    with columns[1]:
+
+        st.markdown("**Delivery**")
+        st.table(pd.DataFrame(
+            [
+                ["Expected", shown_value(delivery.get("expected"))],
+                ["Actual", shown_value(delivery.get("actual"))],
+                ["Days late (+) / early (-)", shown_value(delivery.get("days_late"))],
+                ["Status", shown_value(delivery.get("status"))],
+            ],
+            columns=["Field", "Value"],
+        ))
+
+    st.markdown("**Invoice**")
+
+    st.table(pd.DataFrame(
+        [[label, amount(value)] for label, value in invoice.get("line_items") or []]
+        + [
+            ["Line-item sum", amount(invoice.get("line_item_sum"))],
+            ["Stated invoice total", amount(invoice.get("total"))],
+            ["Difference (total - line items)", amount(invoice.get("difference"))],
+            ["Status", shown_value(invoice.get("status"))],
+        ],
+        columns=["Item", "Amount"],
+    ))
+
+    for item in result.get("discrepancies") or []:
+        st.warning(
+            f"**{item.get('category')}**: "
+            + escape_markdown_dollars(str(item.get("description") or ""))
+        )
+
+    for item in result.get("review_items") or []:
+        st.warning(
+            f"**{item.get('category')}** needs review: "
+            + escape_markdown_dollars(str(item.get("reason") or ""))
+        )
+
+    evidence = [
+        {
+            "Audit": category,
+            "Source": item.get("source"),
+            "Page": shown_value(item.get("page")),
+            "Type": item.get("document_type"),
+            "Shipment": item.get("shipment_id"),
+            "Field text": item.get("text"),
+        }
+        for category in ("Quantity", "Delivery", "Invoice")
+        for item in (result.get(category.lower()) or {}).get("evidence") or []
+    ]
+
+    st.markdown("**Evidence**")
+
+    if evidence:
+        st.dataframe(pd.DataFrame(evidence), hide_index=True, use_container_width=True)
+    else:
+        st.caption("No evidence was cited.")
+
+    csv_column, pdf_column, navigation_column = st.columns(3)
+
+    try:
+
+        with csv_column:
+            st.download_button(
+                "Shipment audit (CSV)",
+                data=audit_csv(result, shipment_id),
+                file_name=export_filename(result),
+                mime="text/csv",
+                on_click="ignore",
+                key="an_shipment_csv",
+            )
+
+        with pdf_column:
+            st.download_button(
+                "Shipment audit (PDF)",
+                data=audit_pdf(result, shipment_id),
+                file_name=pdf_filename(result),
+                mime="application/pdf",
+                on_click="ignore",
+                key="an_shipment_pdf",
+            )
+
+    except ExportError as export_error:
+        st.caption(f"Export unavailable: {export_error}")
+
+    # The sidebar lists the shipments of the search index
+    option = next(
+        (
+            option for option in shipment_options
+            if option != "All Shipments"
+            and identifier_key(option) == row["shipment_key"]
+        ),
+        None,
+    )
+
+    with navigation_column:
+
+        if option:
+            st.button(
+                "Select for Reconciliation",
+                on_click=open_in_reconciliation,
+                args=(option,),
+                key="an_open_reconciliation",
+                help="Selects this shipment in the sidebar; then open the Shipment Reconciliation tab.",
+            )
+        else:
+            st.caption("This shipment is not in the search index, so it cannot be selected in the sidebar.")
+
+
+def show_exception_review(store, exceptions):
+    """
+    Review state, history and the form to change it, for one exception.
+    """
+
+    labels = {
+        f"{item['shipment_id']} · {item['category']} ({item['kind']})": item
+        for item in exceptions
+    }
+
+    choice = st.selectbox("Exception", list(labels), key="an_exception")
+    exception = labels[choice]
+
+    st.markdown(escape_markdown_dollars(exception["description"]))
+
+    if exception["needs_recheck"]:
+        st.warning(
+            "Reopened: the audited values changed, or the exception came "
+            "back, after it had been resolved or dismissed."
+        )
+
+    for reference in exception["evidence"]:
+        st.caption(escape_markdown_dollars(reference))
+
+    if store is None:
+        st.info("The review database is unavailable; review changes cannot be saved.")
+        return
+
+    with st.form("an_review_form", clear_on_submit=True):
+
+        status = st.selectbox(
+            "Review state",
+            STATUSES,
+            index=STATUSES.index(exception["review_status"]),
+            format_func=lambda value: STATUS_LABELS[value],
+        )
+
+        reviewer = st.text_input("Reviewer (optional)")
+        note = st.text_area("Note (required to dismiss)")
+
+        submitted = st.form_submit_button("Save review state")
+
+    if submitted:
+
+        try:
+            store.set_status(exception, status, reviewer=reviewer, note=note)
+        except ReviewError as error:
+            st.error(str(error))
+        else:
+            st.session_state["an_review_saved"] = (
+                f"{choice}: {STATUS_LABELS[status]}"
+            )
+            st.rerun()
+
+    if st.session_state.get("an_review_saved"):
+        st.success(f"Saved: {st.session_state.pop('an_review_saved')}")
+
+    history = store.history(exception["exception_key"])
+
+    if history:
+        with st.expander(f"Review history ({len(history)})"):
+            st.dataframe(
+                pd.DataFrame(history)[
+                    ["created_at", "from_status", "to_status", "reviewer", "note"]
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+
+
+def show_audit_analytics(shipment_options):
+
+    fingerprint = source_fingerprint(RAW_DATA_DIR)
+
+    if not fingerprint:
+        st.info("No PDFs in the document folder yet. Upload documents in the sidebar.")
+        return
+
+    try:
+        with st.spinner("Reconciling every shipment..."):
+            snapshot = load_audit_snapshot(str(RAW_DATA_DIR), fingerprint)
+    except Exception as error:
+        st.error(f"Audit analytics could not be computed: {error}")
+        return
+
+    rows = register_rows(snapshot)
+
+    if snapshot["unidentified_sources"]:
+        st.warning(
+            f"{len(snapshot['unidentified_sources'])} document(s) have no shipment "
+            "ID and are not included in any shipment: "
+            + ", ".join(snapshot["unidentified_sources"])
+        )
+
+    if not rows:
+        st.info("No documents with a shipment ID were found.")
+        return
+
+    exceptions = build_exceptions(snapshot)
+
+    try:
+        store = ReviewStore(config.REVIEW_DB_PATH)
+        reviews = store.sync(exceptions)
+    except Exception as error:
+        store, reviews = None, {}
+        st.warning(
+            f"Review database unavailable ({error}). Exceptions are shown as "
+            "open and review changes cannot be saved."
+        )
+
+    exceptions = with_reviews(exceptions, reviews)
+    results = {item["shipment_key"]: item["result"] for item in snapshot["shipments"]}
+
+    st.caption(
+        "Source: the PDFs in the document folder, reconciled like the "
+        "Shipment Reconciliation tab. Missing or unverifiable values are "
+        "never counted as 0 or as clean."
+    )
+
+    show_analytics_kpis(kpis(rows))
+
+    # --------------------------------------------------------
+    # Charts
+    # --------------------------------------------------------
+
+    open_exceptions = [
+        item for item in exceptions
+        if item["review_status"] not in ("resolved", "dismissed")
+    ]
+
+    chart_status, chart_exceptions = st.columns(2)
+
+    with chart_status:
+        st.markdown("**Final audit status**")
+        st.bar_chart(pd.Series([row["final_status"] for row in rows]).value_counts())
+
+    with chart_exceptions:
+        st.markdown("**Unresolved exceptions by category**")
+        if open_exceptions:
+            st.bar_chart(pd.Series([item["category"] for item in open_exceptions]).value_counts())
+        else:
+            st.caption("No unresolved exceptions.")
+
+    # --------------------------------------------------------
+    # Shipment audit register
+    # --------------------------------------------------------
+
+    st.subheader("Shipment audit register")
+
+    filter_columns = st.columns(4)
+
+    search = filter_columns[0].text_input("Shipment ID", key="an_search")
+    carriers = filter_columns[1].multiselect(
+        "Carrier",
+        sorted({row["carrier"] or NOT_AVAILABLE for row in rows}),
+        key="an_carriers",
+    )
+    statuses = filter_columns[2].multiselect(
+        "Final status",
+        sorted({row["final_status"] for row in rows}),
+        key="an_statuses",
+    )
+    categories = filter_columns[3].multiselect(
+        "Discrepancy category",
+        sorted({category for row in rows for category in row["discrepancy_categories"]}),
+        key="an_categories",
+    )
+
+    flag_columns = st.columns(4)
+
+    invoice_mismatch = flag_columns[0].checkbox("Invoice mismatch", key="an_invoice")
+    delivery_delayed = flag_columns[1].checkbox("Delivery delayed", key="an_delay")
+    needs_review = flag_columns[2].checkbox("Needs review", key="an_review")
+    flag_columns[3].button("Reset filters", on_click=reset_analytics_filters)
+
+    filtered = filter_rows(
+        rows, search, carriers, statuses, categories,
+        invoice_mismatch, delivery_delayed, needs_review,
+    )
+
+    st.caption(
+        f"{len(filtered)} of {len(rows)} shipment(s). A blank amount is NOT "
+        "AVAILABLE, not 0."
+    )
+
+    if filtered:
+
+        st.dataframe(
+            pd.DataFrame([
+                {
+                    "Shipment": row["shipment_id"],
+                    "Carrier": shown_value(row["carrier"]),
+                    "Origin": shown_value(row["origin"]),
+                    "Destination": shown_value(row["destination"]),
+                    "Quantity": shown_value(row["quantity_status"]),
+                    "Delivery": shown_value(row["delivery_status"]),
+                    "Invoice": shown_value(row["invoice_status"]),
+                    "Final status": row["final_status"],
+                    "Invoice total": row["invoice_total"],
+                    "Invoice difference": row["invoice_difference"],
+                    "Discrepancies": row["discrepancy_count"],
+                    "Review items": row["review_count"],
+                }
+                for row in filtered
+            ]),
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Invoice total": st.column_config.NumberColumn(format="dollar"),
+                "Invoice difference": st.column_config.NumberColumn(format="dollar"),
+            },
+        )
+
+        st.download_button(
+            "Download register (CSV)",
+            data=register_csv(filtered),
+            file_name="freight_audit_register.csv",
+            mime="text/csv",
+            on_click="ignore",
+            key="an_register_csv",
+        )
+
+    else:
+        st.info("No shipments match these filters.")
+
+    # --------------------------------------------------------
+    # Drill-down
+    # --------------------------------------------------------
+
+    st.subheader("Shipment details")
+
+    if filtered:
+
+        detail = st.selectbox(
+            "Shipment",
+            [row["shipment_id"] for row in filtered],
+            key="an_detail",
+        )
+
+        row = next(item for item in filtered if item["shipment_id"] == detail)
+
+        show_shipment_audit(row, results[row["shipment_key"]], shipment_options)
+
+    # --------------------------------------------------------
+    # Exception register (shipments of the filtered register)
+    # --------------------------------------------------------
+
+    st.subheader("Exception register")
+
+    st.caption(
+        "Detected discrepancies and values that need review, for the "
+        "shipments listed above. A review state records what was done; "
+        "it does not change the audit. Showing an exception does not "
+        "resolve it."
+    )
+
+    keys = {row["shipment_key"] for row in filtered}
+    scoped = [item for item in exceptions if item["shipment_key"] in keys]
+
+    exception_filters = st.columns(3)
+
+    kinds = exception_filters[0].multiselect("Type", [DISCREPANCY, REVIEW], key="an_kinds")
+    severities = exception_filters[1].multiselect("Severity", ["HIGH", "MEDIUM"], key="an_severities")
+    review_statuses = exception_filters[2].multiselect(
+        "Review state", list(STATUSES),
+        format_func=lambda value: STATUS_LABELS[value],
+        key="an_review_statuses",
+    )
+
+    shown = [
+        item for item in scoped
+        if (not kinds or item["kind"] in kinds)
+        and (not severities or item["severity"] in severities)
+        and (not review_statuses or item["review_status"] in review_statuses)
+    ]
+
+    if not scoped:
+        st.success("No exceptions for these shipments.")
+        return
+
+    st.caption(f"{len(shown)} of {len(scoped)} exception(s).")
+
+    if shown:
+
+        st.dataframe(
+            pd.DataFrame([
+                {
+                    "Shipment": item["shipment_id"],
+                    "Type": item["kind"],
+                    "Category": item["category"],
+                    "Severity": item["severity"],
+                    "Description": item["description"],
+                    "Difference": shown_value(item["difference"]),
+                    "Unit": item["unit"] or "",
+                    "Review state": STATUS_LABELS[item["review_status"]]
+                    + (" (reopened)" if item["needs_recheck"] else ""),
+                    "Reviewer": item["reviewer"] or "",
+                    "Evidence": len(item["evidence"]),
+                }
+                for item in shown
+            ]),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+        st.download_button(
+            "Download exceptions (CSV)",
+            data=exceptions_csv(shown),
+            file_name="freight_audit_exceptions.csv",
+            mime="text/csv",
+            on_click="ignore",
+            key="an_exceptions_csv",
+        )
+
+        st.markdown("**Review an exception**")
+        show_exception_review(store, shown)
+
+    else:
+        st.info("No exceptions match these filters.")
+
+
+# ============================================================
 # MAIN TABS
 # ============================================================
 
-tab1, tab2, tab3, tab4 = st.tabs(
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
         "💬 Logistics Assistant",
         "📊 Shipment Reconciliation",
         "🧠 Shipment Intelligence",
         "🩺 Diagnostics",
+        "📈 Audit Analytics",
     ]
 )
 
@@ -2742,6 +3321,37 @@ with tab4:
         else:
 
             show_consistency_report(diagnostics)
+
+
+# ============================================================
+# TAB 5 — AUDIT ANALYTICS
+# ============================================================
+
+with tab5:
+
+    st.markdown(
+        '<div class="section-title">'
+        'Freight Audit Analytics'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.caption(
+        "Every identified shipment reconciled, with KPIs, an audit "
+        "register, shipment details and an exception register with "
+        "review states."
+    )
+
+    if st.button("Load audit analytics", type="primary"):
+        st.session_state["analytics_loaded"] = True
+
+    if st.session_state.get("analytics_loaded"):
+        show_audit_analytics(shipment_options)
+    else:
+        st.info(
+            "Load the analytics to reconcile every shipment in the "
+            "document folder. Results are reused until a document changes."
+        )
 
 
 # ============================================================
