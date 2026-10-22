@@ -1,0 +1,1046 @@
+{
+ "name": "structured-extraction-labels",
+ "version": "1",
+ "scope": "Synthetic and project-authored PDFs only (the two fixture shipments plus documents the evaluation writes). Expectations are authored by hand from the documents' construction, not from extractor output. This measures that the extractor reads the layouts it was written for; it is NOT evidence of accuracy on real carrier documents, which differ in layout, wording and quality.",
+ "documents": [
+  {
+   "name": "BOL_SHJ-2026-001.pdf",
+   "kind": "fixture",
+   "path": "shipment_SHJ-2026-001/BOL_SHJ-2026-001.pdf",
+   "document_type": "BOL",
+   "status": "extracted",
+   "labels": [
+    {
+     "field": "shipment_id",
+     "state": "EXTRACTED",
+     "value": "SHJ-2026-001",
+     "page": 1
+    },
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "SwiftLine Logistics",
+     "page": 1
+    },
+    {
+     "field": "origin",
+     "state": "EXTRACTED",
+     "value": "Dallas, Texas",
+     "page": 1
+    },
+    {
+     "field": "destination",
+     "state": "EXTRACTED",
+     "value": "Houston, Texas",
+     "page": 1
+    },
+    {
+     "field": "pickup_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-02",
+     "page": 1
+    },
+    {
+     "field": "expected_delivery_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-03",
+     "page": 1
+    },
+    {
+     "field": "piece_count",
+     "state": "EXTRACTED",
+     "value": 48,
+     "page": 1
+    },
+    {
+     "field": "weight",
+     "state": "EXTRACTED",
+     "value": {
+      "amount": 12500.0,
+      "unit": "lb"
+     },
+     "page": 1
+    },
+    {
+     "field": "equipment",
+     "state": "EXTRACTED",
+     "value": "53-foot Dry Van",
+     "page": 1
+    },
+    {
+     "field": "commodity",
+     "state": "EXTRACTED",
+     "value": "Industrial Machine Components",
+     "page": 1
+    },
+    {
+     "field": "shipper",
+     "state": "EXTRACTED",
+     "value": {
+      "name": "Texas Industrial Components",
+      "address_lines": [
+       "Dallas, Texas"
+      ]
+     },
+     "page": 1
+    },
+    {
+     "field": "consignee",
+     "state": "EXTRACTED",
+     "value": {
+      "name": "Gulf Manufacturing Solutions",
+      "address_lines": [
+       "Houston, Texas"
+      ]
+     },
+     "page": 1
+    }
+   ]
+  },
+  {
+   "name": "POD_SHJ-2026-001.pdf",
+   "kind": "fixture",
+   "path": "shipment_SHJ-2026-001/POD_SHJ-2026-001.pdf",
+   "document_type": "POD",
+   "status": "extracted",
+   "labels": [
+    {
+     "field": "shipment_id",
+     "state": "EXTRACTED",
+     "value": "SHJ-2026-001",
+     "page": 1
+    },
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "SwiftLine Logistics",
+     "page": 1
+    },
+    {
+     "field": "delivery_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-05",
+     "page": 1
+    },
+    {
+     "field": "delivered_pieces",
+     "state": "EXTRACTED",
+     "value": 45,
+     "page": 1
+    },
+    {
+     "field": "delivery_status",
+     "state": "EXTRACTED",
+     "value": "Delivered",
+     "page": 1
+    },
+    {
+     "field": "received_by",
+     "state": "EXTRACTED",
+     "value": "Michael Anderson",
+     "page": 1
+    },
+    {
+     "field": "signature",
+     "state": "EXTRACTED",
+     "value": "Michael Anderson",
+     "page": 1
+    },
+    {
+     "field": "signature_image",
+     "state": "UNSUPPORTED"
+    }
+   ]
+  },
+  {
+   "name": "INVOICE_SHJ-2026-001.pdf",
+   "kind": "fixture",
+   "path": "shipment_SHJ-2026-001/INVOICE_SHJ-2026-001.pdf",
+   "document_type": "INVOICE",
+   "status": "extracted",
+   "labels": [
+    {
+     "field": "shipment_id",
+     "state": "EXTRACTED",
+     "value": "SHJ-2026-001",
+     "page": 1
+    },
+    {
+     "field": "invoice_number",
+     "state": "EXTRACTED",
+     "value": "INV-SHJ-2026-001",
+     "page": 1
+    },
+    {
+     "field": "invoice_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-04",
+     "page": 1
+    },
+    {
+     "field": "due_date",
+     "state": "EXTRACTED",
+     "value": "2026-11-03",
+     "page": 1
+    },
+    {
+     "field": "payment_terms",
+     "state": "EXTRACTED",
+     "value": "Net 30",
+     "page": 1
+    },
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "SwiftLine Logistics",
+     "page": 1
+    },
+    {
+     "field": "origin",
+     "state": "EXTRACTED",
+     "value": "Dallas, Texas",
+     "page": 1
+    },
+    {
+     "field": "destination",
+     "state": "EXTRACTED",
+     "value": "Houston, Texas",
+     "page": 1
+    },
+    {
+     "field": "invoice_total",
+     "state": "EXTRACTED",
+     "value": 1550.0,
+     "page": 1
+    },
+    {
+     "field": "currency",
+     "state": "MISSING"
+    },
+    {
+     "field": "tax",
+     "state": "MISSING"
+    },
+    {
+     "field": "subtotal",
+     "state": "MISSING"
+    }
+   ],
+   "line_items": [
+    [
+     "Base Freight",
+     1200.0
+    ],
+    [
+     "Fuel Surcharge",
+     180.0
+    ],
+    [
+     "Detention Charge",
+     0.0
+    ],
+    [
+     "Other Accessorial Charges",
+     50.0
+    ]
+   ]
+  },
+  {
+   "name": "BOL_SHJ-2026-002.pdf",
+   "kind": "fixture",
+   "path": "shipment_SHJ-2026-002/BOL_SHJ-2026-002.pdf",
+   "document_type": "BOL",
+   "status": "extracted",
+   "labels": [
+    {
+     "field": "shipment_id",
+     "state": "EXTRACTED",
+     "value": "SHJ-2026-002",
+     "page": 1
+    },
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "Lakeshore Freight Lines",
+     "page": 1
+    },
+    {
+     "field": "origin",
+     "state": "EXTRACTED",
+     "value": "Chicago, Illinois",
+     "page": 1
+    },
+    {
+     "field": "destination",
+     "state": "EXTRACTED",
+     "value": "Atlanta, Georgia",
+     "page": 1
+    },
+    {
+     "field": "pickup_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-06",
+     "page": 1
+    },
+    {
+     "field": "expected_delivery_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-09",
+     "page": 1
+    },
+    {
+     "field": "shipper",
+     "state": "EXTRACTED",
+     "value": {
+      "name": "Midwest Steel Supply",
+      "address_lines": [
+       "Chicago, Illinois"
+      ]
+     },
+     "page": 1
+    },
+    {
+     "field": "consignee",
+     "state": "EXTRACTED",
+     "value": {
+      "name": "Peach State Fabrication",
+      "address_lines": [
+       "Atlanta, Georgia"
+      ]
+     },
+     "page": 1
+    }
+   ]
+  },
+  {
+   "name": "INVOICE_SHJ-2026-801.pdf",
+   "kind": "text",
+   "document_type": "INVOICE",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "FREIGHT INVOICE",
+     "shipment": "SHJ-2026-801",
+     "pairs": [
+      [
+       "Invoice Number",
+       "INV-801"
+      ],
+      [
+       "Invoice Date",
+       "October 4, 2026"
+      ],
+      [
+       "Carrier",
+       "Test Lines"
+      ],
+      [
+       "Currency",
+       "CAD"
+      ],
+      [
+       "Base Freight",
+       "$500.00"
+      ],
+      [
+       "Lift Gate Service",
+       "$40.00"
+      ],
+      [
+       "Storage",
+       "2 x $15.00 = $30.00"
+      ],
+      [
+       "Credit",
+       "-$20.00"
+      ],
+      [
+       "Subtotal",
+       "$550.00"
+      ],
+      [
+       "Sales Tax",
+       "$44.00"
+      ],
+      [
+       "Total Invoice Amount",
+       "$594.00"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "shipment_id",
+     "state": "EXTRACTED",
+     "value": "SHJ-2026-801",
+     "page": 1
+    },
+    {
+     "field": "invoice_number",
+     "state": "EXTRACTED",
+     "value": "INV-801",
+     "page": 1
+    },
+    {
+     "field": "invoice_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-04",
+     "page": 1
+    },
+    {
+     "field": "currency",
+     "state": "EXTRACTED",
+     "value": "CAD",
+     "page": 1
+    },
+    {
+     "field": "subtotal",
+     "state": "EXTRACTED",
+     "value": 550.0,
+     "page": 1
+    },
+    {
+     "field": "tax",
+     "state": "EXTRACTED",
+     "value": 44.0,
+     "page": 1
+    },
+    {
+     "field": "invoice_total",
+     "state": "EXTRACTED",
+     "value": 594.0,
+     "page": 1
+    },
+    {
+     "field": "due_date",
+     "state": "MISSING"
+    }
+   ],
+   "line_items": [
+    [
+     "Base Freight",
+     500.0
+    ],
+    [
+     "Lift Gate Service",
+     40.0
+    ],
+    [
+     "Storage",
+     30.0
+    ],
+    [
+     "Credit",
+     -20.0
+    ]
+   ]
+  },
+  {
+   "name": "INVOICE_SHJ-2026-802.pdf",
+   "kind": "text",
+   "document_type": "INVOICE",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "FREIGHT INVOICE",
+     "shipment": "SHJ-2026-802",
+     "pairs": [
+      [
+       "Invoice Number",
+       "INV-802"
+      ],
+      [
+       "Base Freight",
+       "$100.00"
+      ],
+      [
+       "Total Invoice Amount",
+       "$100.00"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "invoice_number",
+     "state": "EXTRACTED",
+     "value": "INV-802",
+     "page": 1
+    },
+    {
+     "field": "invoice_total",
+     "state": "EXTRACTED",
+     "value": 100.0,
+     "page": 1
+    },
+    {
+     "field": "currency",
+     "state": "MISSING"
+    },
+    {
+     "field": "invoice_date",
+     "state": "MISSING"
+    }
+   ],
+   "line_items": [
+    [
+     "Base Freight",
+     100.0
+    ]
+   ]
+  },
+  {
+   "name": "INVOICE_SHJ-2026-803.pdf",
+   "kind": "text",
+   "document_type": "INVOICE",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "FREIGHT INVOICE",
+     "shipment": "SHJ-2026-803",
+     "pairs": [
+      [
+       "Carrier",
+       "Test Lines"
+      ],
+      [
+       "Base Freight",
+       "$100.00"
+      ],
+      [
+       "Total Invoice Amount",
+       "TBD"
+      ],
+      [
+       "Invoice Date",
+       "10/05/2026"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "invoice_number",
+     "state": "MISSING"
+    },
+    {
+     "field": "invoice_total",
+     "state": "UNPARSEABLE"
+    },
+    {
+     "field": "invoice_date",
+     "state": "UNPARSEABLE"
+    },
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "Test Lines",
+     "page": 1
+    }
+   ]
+  },
+  {
+   "name": "INVOICE_SHJ-2026-804.pdf",
+   "kind": "text",
+   "document_type": "INVOICE",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "FREIGHT INVOICE",
+     "shipment": "SHJ-2026-804",
+     "pairs": [
+      [
+       "Invoice Number",
+       "INV-804"
+      ],
+      [
+       "Base Freight",
+       "USD 400.00"
+      ],
+      [
+       "Fuel Surcharge",
+       "CAD 40.00"
+      ],
+      [
+       "Total Invoice Amount",
+       "$440.00"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "invoice_number",
+     "state": "EXTRACTED",
+     "value": "INV-804",
+     "page": 1
+    },
+    {
+     "field": "currency",
+     "state": "CONFLICTING"
+    },
+    {
+     "field": "invoice_total",
+     "state": "EXTRACTED",
+     "value": 440.0,
+     "page": 1
+    }
+   ]
+  },
+  {
+   "name": "BOL_SHJ-2026-805.pdf",
+   "kind": "text",
+   "document_type": "BOL",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "BILL OF LADING",
+     "shipment": "SHJ-2026-805",
+     "pairs": [
+      [
+       "Carrier",
+       "Test Lines"
+      ],
+      [
+       "Number of Pieces",
+       "10"
+      ],
+      [
+       "Total Weight",
+       "850 kg"
+      ],
+      [
+       "Pickup Date",
+       "10/05/2026"
+      ],
+      [
+       "Expected Delivery Date",
+       "October 8, 2026"
+      ],
+      [
+       "Number of Pieces",
+       "12"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "Test Lines",
+     "page": 1
+    },
+    {
+     "field": "piece_count",
+     "state": "CONFLICTING"
+    },
+    {
+     "field": "weight",
+     "state": "EXTRACTED",
+     "value": {
+      "amount": 850.0,
+      "unit": "kg"
+     },
+     "page": 1
+    },
+    {
+     "field": "pickup_date",
+     "state": "UNPARSEABLE"
+    },
+    {
+     "field": "expected_delivery_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-08",
+     "page": 1
+    },
+    {
+     "field": "shipper",
+     "state": "MISSING"
+    },
+    {
+     "field": "equipment",
+     "state": "MISSING"
+    }
+   ]
+  },
+  {
+   "name": "BOL_SHJ-2026-806.pdf",
+   "kind": "partial",
+   "document_type": "BOL",
+   "status": "partial",
+   "pages": [
+    {
+     "title": "BILL OF LADING",
+     "shipment": "SHJ-2026-806",
+     "pairs": [
+      [
+       "Carrier",
+       "Test Lines"
+      ],
+      [
+       "Number of Pieces",
+       "7"
+      ]
+     ]
+    },
+    null
+   ],
+   "labels": [
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "Test Lines",
+     "page": 1
+    },
+    {
+     "field": "piece_count",
+     "state": "EXTRACTED",
+     "value": 7,
+     "page": 1
+    },
+    {
+     "field": "weight",
+     "state": "UNREADABLE"
+    },
+    {
+     "field": "expected_delivery_date",
+     "state": "UNREADABLE"
+    }
+   ]
+  },
+  {
+   "name": "BOL_SHJ-2026-807.pdf",
+   "kind": "text",
+   "document_type": "BOL",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "BILL OF LADING",
+     "shipment": "SHJ-2026-807",
+     "pairs": [
+      [
+       "Carrier",
+       "Test Lines"
+      ]
+     ]
+    },
+    {
+     "title": "BILL OF LADING (continued)",
+     "shipment": "SHJ-2026-807",
+     "pairs": [
+      [
+       "Number of Pieces",
+       "9"
+      ],
+      [
+       "Pickup Date",
+       "October 6, 2026"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "Test Lines",
+     "page": 1
+    },
+    {
+     "field": "piece_count",
+     "state": "EXTRACTED",
+     "value": 9,
+     "page": 2
+    },
+    {
+     "field": "pickup_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-06",
+     "page": 2
+    },
+    {
+     "field": "weight",
+     "state": "MISSING"
+    }
+   ]
+  },
+  {
+   "name": "RATECON_SHJ-2026-808.pdf",
+   "kind": "text",
+   "document_type": "RATE_CONFIRMATION",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "RATE CONFIRMATION",
+     "shipment": "SHJ-2026-808",
+     "pairs": [
+      [
+       "Carrier",
+       "Test Lines"
+      ],
+      [
+       "Origin",
+       "Dallas, Texas"
+      ],
+      [
+       "Destination",
+       "Atlanta, Georgia"
+      ],
+      [
+       "Pickup Date",
+       "October 6, 2026"
+      ],
+      [
+       "Equipment",
+       "53-foot Dry Van"
+      ],
+      [
+       "Agreed Rate",
+       "$1,850.00"
+      ],
+      [
+       "Fuel Surcharge",
+       "$120.00"
+      ],
+      [
+       "Payment Terms",
+       "Net 30"
+      ],
+      [
+       "Currency",
+       "USD"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "shipment_id",
+     "state": "EXTRACTED",
+     "value": "SHJ-2026-808",
+     "page": 1
+    },
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "Test Lines",
+     "page": 1
+    },
+    {
+     "field": "origin",
+     "state": "EXTRACTED",
+     "value": "Dallas, Texas",
+     "page": 1
+    },
+    {
+     "field": "destination",
+     "state": "EXTRACTED",
+     "value": "Atlanta, Georgia",
+     "page": 1
+    },
+    {
+     "field": "pickup_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-06",
+     "page": 1
+    },
+    {
+     "field": "equipment",
+     "state": "EXTRACTED",
+     "value": "53-foot Dry Van",
+     "page": 1
+    },
+    {
+     "field": "agreed_rate",
+     "state": "EXTRACTED",
+     "value": 1850.0,
+     "page": 1
+    },
+    {
+     "field": "fuel_surcharge",
+     "state": "EXTRACTED",
+     "value": 120.0,
+     "page": 1
+    },
+    {
+     "field": "payment_terms",
+     "state": "EXTRACTED",
+     "value": "Net 30",
+     "page": 1
+    },
+    {
+     "field": "currency",
+     "state": "EXTRACTED",
+     "value": "USD",
+     "page": 1
+    },
+    {
+     "field": "delivery_date",
+     "state": "MISSING"
+    }
+   ]
+  },
+  {
+   "name": "RATECON_SHJ-2026-809.pdf",
+   "kind": "text",
+   "document_type": "RATE_CONFIRMATION",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "RATE CONFIRMATION",
+     "shipment": "SHJ-2026-809",
+     "pairs": [
+      [
+       "Carrier",
+       "Test Lines"
+      ],
+      [
+       "Agreed Rate",
+       "call dispatch"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "Test Lines",
+     "page": 1
+    },
+    {
+     "field": "agreed_rate",
+     "state": "UNPARSEABLE"
+    },
+    {
+     "field": "fuel_surcharge",
+     "state": "MISSING"
+    }
+   ]
+  },
+  {
+   "name": "POD_SHJ-2026-810.pdf",
+   "kind": "text",
+   "document_type": "POD",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "PROOF OF DELIVERY",
+     "shipment": "SHJ-2026-810",
+     "pairs": [
+      [
+       "Carrier",
+       "Test Lines"
+      ],
+      [
+       "Delivery Date",
+       "October 7, 2026"
+      ],
+      [
+       "Number of Pieces Delivered",
+       "forty"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "Test Lines",
+     "page": 1
+    },
+    {
+     "field": "delivery_date",
+     "state": "EXTRACTED",
+     "value": "2026-10-07",
+     "page": 1
+    },
+    {
+     "field": "delivered_pieces",
+     "state": "UNPARSEABLE"
+    },
+    {
+     "field": "signature",
+     "state": "MISSING"
+    }
+   ]
+  },
+  {
+   "name": "BOL_SHJ-2026-811.pdf",
+   "kind": "text",
+   "document_type": "BOL",
+   "status": "extracted",
+   "pages": [
+    {
+     "title": "BILL OF LADING",
+     "shipment": "SHJ-2026-811",
+     "pairs": [
+      [
+       "Carrier",
+       "Test Lines"
+      ],
+      [
+       "Number of Pieces",
+       "4"
+      ]
+     ]
+    },
+    {
+     "title": "BILL OF LADING",
+     "shipment": "SHJ-2026-812",
+     "pairs": [
+      [
+       "Number of Pieces",
+       "4"
+      ]
+     ]
+    }
+   ],
+   "labels": [
+    {
+     "field": "shipment_id",
+     "state": "CONFLICTING"
+    },
+    {
+     "field": "carrier",
+     "state": "EXTRACTED",
+     "value": "Test Lines",
+     "page": 1
+    },
+    {
+     "field": "piece_count",
+     "state": "EXTRACTED",
+     "value": 4,
+     "page": 1
+    }
+   ]
+  },
+  {
+   "name": "SCAN_SHJ-2026-813.pdf",
+   "kind": "image_only",
+   "document_type": "UNKNOWN",
+   "status": "needs_ocr",
+   "labels": [
+    {
+     "field": "shipment_id",
+     "state": "UNREADABLE"
+    }
+   ]
+  },
+  {
+   "name": "BROKEN_SHJ-2026-814.pdf",
+   "kind": "corrupt",
+   "document_type": "UNKNOWN",
+   "status": "unreadable",
+   "labels": [
+    {
+     "field": "shipment_id",
+     "state": "UNREADABLE"
+    }
+   ]
+  }
+ ]
+}
