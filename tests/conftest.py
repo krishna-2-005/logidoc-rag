@@ -52,9 +52,12 @@ def production_snapshot():
                     path.stat().st_mtime,
                 )
 
-    # The exception review and audit history databases (and their
+    # The exception review, audit history, user and ingestion databases (and their
     # journal files) must not be created or changed by the tests either
-    for database in (config.REVIEW_DB_PATH, config.HISTORY_DB_PATH):
+    for database in (
+        config.REVIEW_DB_PATH, config.HISTORY_DB_PATH,
+        config.AUTH_DB_PATH, config.INGESTION_DB_PATH,
+    ):
 
         for suffix in ("", "-journal", "-wal", "-shm"):
 
