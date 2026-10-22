@@ -102,6 +102,10 @@ def test_existing_tabs_are_kept_and_analytics_loads_on_request(dashboard):
         "🩺 Diagnostics",
         "📈 Audit Analytics",
         "🧭 Audit Operations",
+        "📥 Exception Queue",
+        "📉 Historical Trends",
+        "🗂️ Ingestion",
+        "⚙️ Administration",
     ]
 
     # Nothing is reconciled until asked for

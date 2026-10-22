@@ -22,9 +22,11 @@ import pandas as pd
 import streamlit as st
 
 import audit_explanations as explanations
+import authz
 import document_completeness as completeness
 import financial_exposure as exposure
 from audit_analytics import build_exceptions, with_reviews
+from audit_history import record_run_as
 from audit_export import NOT_AVAILABLE, ExportError, audit_csv, export_filename
 from chunker import describe_problems
 from audit_pdf_export import audit_pdf, pdf_filename
@@ -529,13 +531,20 @@ def show_timeline(history, shipment_key):
 # ONE SHIPMENT, STEP BY STEP
 # ============================================================
 
-def record_audit(history, snapshot, exceptions, label):
+def record_audit(history, snapshot, exceptions, label, principal=None):
     """
-    The click action of the record buttons: one run, stored once.
+    The click action of the record buttons: one run, stored once. With a
+    principal, recording needs the history.record permission.
     """
 
     try:
-        run = history.record_run(snapshot, exceptions, label=label)
+        if principal is not None:
+            run = record_run_as(principal, history, snapshot, exceptions, label=label)
+        else:
+            run = history.record_run(snapshot, exceptions, label=label)
+    except authz.PermissionDenied as error:
+        st.session_state["op_record_message"] = ("error", str(error))
+        return
     except Exception as error:
         st.session_state["op_record_message"] = ("error", f"The audit could not be recorded: {error}")
         return
@@ -558,7 +567,7 @@ def record_audit(history, snapshot, exceptions, label):
 
 def show_shipment_workflow(
     snapshot, register, review_store, history, review_widget, llm,
-    review_error=None, history_error=None,
+    review_error=None, history_error=None, principal=None,
 ):
 
     st.subheader("3. Audit a shipment")
@@ -654,15 +663,20 @@ def show_shipment_workflow(
 
         columns = st.columns(2)
 
+        may_record = principal is None or principal.can(authz.HISTORY_RECORD)
+
+        if not may_record:
+            st.caption("Only administrators can record audits; you can still compare earlier ones.")
+
         columns[0].button(
             "Record audit for this shipment",
-            on_click=record_audit, args=(history, one, exceptions, f"Single shipment: {chosen}"),
-            key="op_record_one",
+            on_click=record_audit, args=(history, one, exceptions, f"Single shipment: {chosen}", principal),
+            key="op_record_one", disabled=not may_record,
         )
         columns[1].button(
             "Record audit for all shipments",
-            on_click=record_audit, args=(history, snapshot, build_exceptions(snapshot), "All shipments"),
-            key="op_record_all",
+            on_click=record_audit, args=(history, snapshot, build_exceptions(snapshot), "All shipments", principal),
+            key="op_record_all", disabled=not may_record,
         )
 
         message = st.session_state.get("op_record_message")
@@ -703,7 +717,7 @@ def show_shipment_workflow(
 # ============================================================
 
 def render(snapshot, files, indexed_sources, review_store, history, review_widget, llm=None,
-           review_error=None, history_error=None):
+           review_error=None, history_error=None, principal=None):
     """
     The whole Audit Operations tab for an audit snapshot
     (audit_analytics.build_snapshot), the scanned files
@@ -728,5 +742,5 @@ def render(snapshot, files, indexed_sources, review_store, history, review_widge
 
     show_shipment_workflow(
         snapshot, register, review_store, history, review_widget, llm,
-        review_error=review_error, history_error=history_error,
+        review_error=review_error, history_error=history_error, principal=principal,
     )
