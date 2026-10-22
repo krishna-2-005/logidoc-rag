@@ -34,7 +34,6 @@ from ingestion_manager import (
     STATUS_DUPLICATE,
     STATUS_FAILED,
     STATUS_INCONSISTENT,
-    ingest_uploads,
 )
 from consistency_report import check_destination
 from display_text import cited_fields, escape_markdown_dollars, money_text
@@ -42,7 +41,15 @@ from audit_export import NOT_AVAILABLE, ExportError, audit_csv, export_filename
 from audit_pdf_export import audit_pdf, pdf_filename
 import config
 import audit_workflow_ui
+import auth_ui
+import authz
+import exception_ui
+import ingestion_service
+import ingestion_ui
+import reconciliation
+import trends_ui
 from audit_history import HistoryStore
+from exception_workflow import ExceptionWorkflow
 from chunker import describe_problems, read_chunks
 from document_completeness import scan_folder
 from audit_analytics import (
@@ -63,6 +70,7 @@ from review_store import (
     DISMISSED,
     STATUS_LABELS,
     STATUSES,
+    Policy,
     ReviewError,
     ReviewStore,
 )
@@ -126,6 +134,15 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+# ============================================================
+# SIGN-IN
+# ============================================================
+
+# The acting user. In required mode nothing below this line runs for a
+# visitor who is not signed in (auth_ui.gate stops the script).
+PRINCIPAL = auth_ui.gate()
 
 
 # ============================================================
@@ -1683,10 +1700,14 @@ with st.sidebar:
         help="Upload BOL, POD and Invoice documents.",
     )
 
+    can_ingest = PRINCIPAL.can(authz.INGESTION_WRITE)
+
     process_button = st.button(
         "Process Documents",
         type="primary",
         use_container_width=True,
+        disabled=not can_ingest,
+        help=None if can_ingest else "Only administrators can add documents.",
     )
 
     if process_button:
@@ -1701,25 +1722,43 @@ with st.sidebar:
 
             try:
 
-                # Incremental and non-destructive: existing PDFs and
-                # vectors are kept. ingest_uploads makes no st.*
-                # calls, so Streamlit cannot stop it half-way; the
-                # result is saved before the next st.* call.
+                # Validated, incremental and non-destructive: existing
+                # PDFs and vectors are kept, every file gets a status
+                # in the ingestion register, transient failures are
+                # retried. The service makes no st.* calls, so
+                # Streamlit cannot stop it half-way; the result is
+                # saved before the next st.* call.
                 with st.spinner(
                     "Checking, indexing and storing documents..."
                 ):
 
-                    st.session_state.ingestion_result = (
-                        ingest_uploads(
-                            uploaded_files,
-                            RAW_DATA_DIR,
-                            CHROMA_DIR
-                        )
+                    locations = config.ingestion_locations(RAW_DATA_DIR)
+
+                    summary = ingestion_service.process_files(
+                        PRINCIPAL,
+                        [
+                            ingestion_service.Upload(
+                                uploaded.name,
+                                bytes(uploaded.getbuffer())
+                            )
+                            for uploaded in uploaded_files
+                        ],
+                        RAW_DATA_DIR,
+                        CHROMA_DIR,
+                        ingestion_ui.open_register(RAW_DATA_DIR),
+                        locations["quarantine"],
                     )
 
-                if st.session_state.ingestion_result["files_added"]:
+                    st.session_state.ingestion_result = (
+                        ingestion_ui.legacy_view(summary)
+                    )
+
+                if summary["corpus_changed"]:
 
                     st.session_state.documents_processed = True
+
+                    # Everything cached from the documents is stale
+                    st.cache_data.clear()
 
                     # Reload shipments and documents from the index
                     st.rerun()
@@ -1896,18 +1935,77 @@ st.divider()
 # AUDIT ANALYTICS
 # ============================================================
 
+def ingestion_problems():
+    """
+    The files offered for ingestion that could not be ingested and have
+    not been resolved (ingestion_service.audit_problems), as a hashable
+    tuple of (file name, status, reason). The audit holds them against
+    every shipment: a file that was not ingested might belong to it.
+    """
+
+    try:
+        found = ingestion_service.open_problems(
+            config.ingestion_locations(RAW_DATA_DIR)["register"]
+        )
+    except Exception:
+        return ()
+
+    return tuple(
+        (item["filename"], item["status"], item["error"])
+        for item in found
+    )
+
+
+def reconcile_with_ingestion_problems(shipment_id):
+    """
+    reconcile_shipment, holding the files that could not be ingested
+    against the shipment like the unreadable files of the folder: it is
+    never clean while one might belong to it. Without such files this is
+    exactly reconcile_shipment(shipment_id).
+    """
+
+    offered = ingestion_problems()
+
+    if not offered:
+        return reconcile_shipment(shipment_id)
+
+    chunks, raw_problems = reconciliation.load_document_chunks()
+
+    return reconcile_shipment(
+        shipment_id,
+        chunks=chunks,
+        unreadable_files=ingestion_service.merge_problems(
+            raw_problems,
+            [
+                {"filename": name, "status": status, "error": error}
+                for name, status, error in offered
+            ],
+        ),
+    )
+
+
 @st.cache_data(show_spinner=False, max_entries=4)
-def load_audit_snapshot(raw_dir, fingerprint):
+def load_audit_snapshot(raw_dir, fingerprint, offered_problems=()):
     """
     Every shipment reconciled from one reading of the raw PDFs.
-    Cached per folder and fingerprint (file names, sizes and times),
-    so it is recomputed as soon as a document changes.
+    Cached per folder, fingerprint (file names, sizes and times) and the
+    open ingestion errors, so it is recomputed as soon as a document
+    changes or an ingestion problem appears or is resolved.
     """
 
     # A PDF that cannot be used does not stop every audit: it is
     # reported, and every shipment's result knows about it (it cannot
-    # be clean while an unreadable file might belong to it)
+    # be clean while an unreadable file might belong to it). So are the
+    # files that could not be ingested at all.
     chunks, problems = read_chunks(raw_dir)
+
+    problems = ingestion_service.merge_problems(
+        problems,
+        [
+            {"filename": name, "status": status, "error": error}
+            for name, status, error in offered_problems
+        ],
+    )
 
     return build_snapshot(chunks, reconcile_shipment, unreadable_files=problems)
 
@@ -2135,12 +2233,58 @@ def show_shipment_audit(row, result, shipment_options):
             st.caption("This shipment is not in the search index, so it cannot be selected in the sidebar.")
 
 
+def review_policy():
+    """
+    The workflow rules set on the server (config.MIN_NOTE_LENGTH,
+    config.REQUIRE_APPROVAL).
+    """
+
+    return Policy(
+        min_note=config.MIN_NOTE_LENGTH,
+        require_approval=config.REQUIRE_APPROVAL,
+    )
+
+
+def assignable_users():
+    """
+    Who an exception can be assigned to: the active accounts when users
+    sign in, any name in local development mode (None).
+    """
+
+    if not PRINCIPAL.authenticated:
+        return None
+
+    return [
+        user["username"]
+        for user in auth_ui.open_store().users()
+        if user["active"]
+    ]
+
+
 def show_exception_review(store, exceptions, prefix="an"):
     """
     Review state, history and the form to change it, for one exception.
     prefix keeps the widget keys apart when the widget is shown in
     more than one tab.
+
+    A signed-in user always gets the full workflow (exception_ui): roles,
+    required notes and evidence, assignment, approval, and their own
+    account recorded on every change. The quick form below, which takes a
+    free-typed reviewer name, exists only in local development mode.
     """
+
+    if PRINCIPAL.authenticated:
+
+        if store is None:
+            st.info("The review database is unavailable; review changes cannot be saved.")
+            return
+
+        exception_ui.show_review(
+            PRINCIPAL, ExceptionWorkflow(store, assignable_users), store,
+            exceptions, prefix=prefix, assignable=assignable_users(),
+        )
+
+        return
 
     labels = {
         f"{item['shipment_id']} · {item['category']} ({item['kind']})": item
@@ -2217,7 +2361,7 @@ def show_audit_analytics(shipment_options):
 
     try:
         with st.spinner("Reconciling every shipment..."):
-            snapshot = load_audit_snapshot(str(RAW_DATA_DIR), fingerprint)
+            snapshot = load_audit_snapshot(str(RAW_DATA_DIR), fingerprint, ingestion_problems())
     except Exception as error:
         st.error(f"Audit analytics could not be computed: {error}")
         return
@@ -2245,7 +2389,7 @@ def show_audit_analytics(shipment_options):
     exceptions = build_exceptions(snapshot)
 
     try:
-        store = ReviewStore(config.REVIEW_DB_PATH)
+        store = ReviewStore(config.REVIEW_DB_PATH, review_policy())
         reviews = store.sync(exceptions)
     except Exception as error:
         store, reviews = None, {}
@@ -2479,7 +2623,7 @@ def show_audit_operations():
 
     try:
         with st.spinner("Reading and reconciling every shipment..."):
-            snapshot = load_audit_snapshot(str(RAW_DATA_DIR), fingerprint)
+            snapshot = load_audit_snapshot(str(RAW_DATA_DIR), fingerprint, ingestion_problems())
             files = load_document_scan(str(RAW_DATA_DIR), fingerprint)
     except Exception as error:
         st.error(f"Audit operations could not be loaded: {error}")
@@ -2497,7 +2641,7 @@ def show_audit_operations():
     review_store = history = review_error = history_error = None
 
     try:
-        review_store = ReviewStore(config.REVIEW_DB_PATH)
+        review_store = ReviewStore(config.REVIEW_DB_PATH, review_policy())
     except Exception as error:
         review_error = str(error)
 
@@ -2510,14 +2654,78 @@ def show_audit_operations():
         snapshot, files, indexed_sources, review_store, history,
         show_exception_review, llm=call_llm,
         review_error=review_error, history_error=history_error,
+        principal=PRINCIPAL,
     )
+
+
+def show_exception_queue():
+    """
+    The Exception Queue tab: the exceptions of every shipment with their
+    assignee, state and age, and the workflow actions the signed-in user
+    may take (src/exception_ui.py).
+    """
+
+    fingerprint = source_fingerprint(RAW_DATA_DIR)
+
+    if not fingerprint:
+        st.info("No PDFs in the document folder yet. Upload documents in the sidebar.")
+        return
+
+    try:
+        with st.spinner("Reconciling every shipment..."):
+            snapshot = load_audit_snapshot(str(RAW_DATA_DIR), fingerprint, ingestion_problems())
+
+        store = ReviewStore(config.REVIEW_DB_PATH, review_policy())
+        reviews = store.sync(build_exceptions(snapshot))
+    except Exception as error:
+        st.error(f"The exception queue could not be loaded: {error}")
+        return
+
+    exceptions = with_reviews(build_exceptions(snapshot), reviews)
+
+    exception_ui.show_queue(
+        PRINCIPAL, ExceptionWorkflow(store, assignable_users), store, exceptions,
+        assignable=assignable_users(),
+    )
+
+
+def show_historical_trends():
+    """
+    The Historical Trends tab (src/trends_ui.py): only what the recorded
+    audits say, separate from the current-state analytics.
+    """
+
+    try:
+        history = HistoryStore(config.HISTORY_DB_PATH)
+    except Exception as error:
+        st.error(f"The audit history is unavailable: {error}")
+        return
+
+    trends_ui.show_trends(PRINCIPAL, history)
+
+
+def show_ingestion_tab():
+
+    ingestion_ui.show_ingestion(PRINCIPAL, RAW_DATA_DIR, CHROMA_DIR)
+
+
+def show_administration():
+
+    stores = {}
+
+    if PRINCIPAL.can(authz.ADMIN_MAINTENANCE):
+        stores["exception review history"] = lambda: ReviewStore(
+            config.REVIEW_DB_PATH, review_policy()
+        ).verify_integrity()
+
+    auth_ui.show_admin(PRINCIPAL, stores)
 
 
 # ============================================================
 # MAIN TABS
 # ============================================================
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(
     [
         "💬 Logistics Assistant",
         "📊 Shipment Reconciliation",
@@ -2525,6 +2733,10 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         "🩺 Diagnostics",
         "📈 Audit Analytics",
         "🧭 Audit Operations",
+        "📥 Exception Queue",
+        "📉 Historical Trends",
+        "🗂️ Ingestion",
+        "⚙️ Administration",
     ]
 )
 
@@ -2778,7 +2990,7 @@ with tab2:
                 "Reconciling shipment documents..."
             ):
 
-                result = reconcile_shipment(
+                result = reconcile_with_ingestion_problems(
                     None
                     if selected_shipment == "All Shipments"
                     else selected_shipment
@@ -3466,6 +3678,100 @@ with tab6:
             "Load the operations view to read every document and reconcile "
             "every shipment. Results are reused until a document changes."
         )
+
+
+# ============================================================
+# TAB 7 — EXCEPTION QUEUE
+# ============================================================
+
+with tab7:
+
+    st.markdown(
+        '<div class="section-title">'
+        'Exception Queue'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.caption(
+        "Assign exceptions, review them, and resolve or dismiss them with "
+        "notes and evidence. Reviewing never changes the audit result."
+    )
+
+    if st.button("Load exception queue", type="primary"):
+        st.session_state["queue_loaded"] = True
+
+    if st.session_state.get("queue_loaded"):
+        show_exception_queue()
+    else:
+        st.info(
+            "Load the queue to reconcile every shipment and list its exceptions."
+        )
+
+
+# ============================================================
+# TAB 8 — HISTORICAL TRENDS
+# ============================================================
+
+with tab8:
+
+    st.markdown(
+        '<div class="section-title">'
+        'Historical Trends'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    if st.button("Load historical trends", type="primary"):
+        st.session_state["trends_loaded"] = True
+
+    if st.session_state.get("trends_loaded"):
+        show_historical_trends()
+    else:
+        st.info(
+            "Load the trends to read the recorded audit history."
+        )
+
+
+# ============================================================
+# TAB 9 — INGESTION
+# ============================================================
+
+with tab9:
+
+    st.markdown(
+        '<div class="section-title">'
+        'Document Ingestion'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    if st.button("Load ingestion register", type="primary"):
+        st.session_state["ingestion_loaded"] = True
+
+    if st.session_state.get("ingestion_loaded"):
+        show_ingestion_tab()
+    else:
+        st.info(
+            "Load the register to see the status of every file offered "
+            "for ingestion and the open errors."
+        )
+
+
+# ============================================================
+# TAB 10 — ADMINISTRATION
+# ============================================================
+
+with tab10:
+
+    st.markdown(
+        '<div class="section-title">'
+        'Administration'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    show_administration()
 
 
 # ============================================================
