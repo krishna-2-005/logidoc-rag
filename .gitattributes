@@ -1,0 +1,4 @@
+# The evaluation datasets and labels are frozen and compared by SHA-256 (tests/test_assistant_safety_fixes.py),
+# so their bytes must reach every checkout unchanged: no line-ending conversion.
+tests/eval/assistant_cases*.jsonl -text
+tests/eval/*labels.json -text

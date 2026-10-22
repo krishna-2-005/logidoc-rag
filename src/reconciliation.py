@@ -16,6 +16,7 @@ from shipment_calculations import (
     NEEDS_REVIEW,
     QUANTITY_MATCH,
     INVOICE_MISMATCH,
+    Records,
     audit_delivery,
     audit_invoice,
     audit_quantity,
@@ -128,15 +129,20 @@ def compare_numbers(value1, value2):
 # AUDITS (shared with the chat calculations)
 # ============================================================
 
-def audit_records(chunks):
+def audit_records(chunks, overrides=None):
     """
     The chunks in the record format of shipment_calculations
     (rag.get_document_records): quantities, delivery dates and the
     invoice are read and calculated by the same code as the chat
     answers.
+
+    overrides: {field: FieldValue} of approved reviewer corrections
+    (audit_inputs.build_overrides); the readers then use them in place of
+    the document's own value for those fields. None reads the documents
+    only, exactly as before.
     """
 
-    return [
+    records = Records([
         {
             "document": chunk["text"],
             "metadata": chunk["metadata"],
@@ -145,7 +151,12 @@ def audit_records(chunks):
             "raw": chunk["text"],
         }
         for chunk in chunks
-    ]
+    ])
+
+    if overrides:
+        records.overrides = dict(overrides)
+
+    return records
 
 
 def evidence_entries(audit):
@@ -165,6 +176,10 @@ def evidence_entries(audit):
             "document_type": metadata.get("document_type"),
             "shipment_id": metadata.get("shipment_id"),
             "text": item.text,
+            # Where the value came from: the document ("legacy_reader") or a
+            # reviewer-approved correction (page unknown, never invented)
+            "value_origin": metadata.get("value_origin") or "legacy_reader",
+            "correction_id": metadata.get("correction_id"),
         })
 
     return entries
@@ -197,7 +212,7 @@ def unreadable_message(problems):
     )
 
 
-def reconcile_shipment(shipment_id=None, chunks=None, unreadable_files=None):
+def reconcile_shipment(shipment_id=None, chunks=None, unreadable_files=None, overrides=None):
     """
     Reconcile the BOL, Invoice and POD of one shipment.
 
@@ -419,7 +434,7 @@ def reconcile_shipment(shipment_id=None, chunks=None, unreadable_files=None):
 
     # Quantities, delivery dates and the invoice are read and
     # calculated by shipment_calculations, like the chat answers
-    records = audit_records(chunks)
+    records = audit_records(chunks, overrides)
 
     quantity_audit = audit_quantity(records)
 

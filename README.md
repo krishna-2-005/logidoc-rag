@@ -296,6 +296,353 @@ shipments**; opening the tab or any rerun writes nothing.
   could not be reconciled: this is **not** treated as resolved), plus the
   values that changed and the final status change.
 
+## Production readiness
+
+Four workstreams sit on top of the audit: sign-in and roles, an exception
+assignment and approval workflow, historical trends, and reliable ingestion.
+A FastAPI layer and a React interface expose the same services; the
+Streamlit app keeps working. None of them recalculates an audit.
+
+### Authentication and roles (`src/auth.py`, `src/authz.py`)
+
+| Mode (`LOGIDOC_AUTH_MODE`) | Behaviour |
+|---|---|
+| `local` (default) | A single-user development mode. Nobody signs in; every action is recorded as `local-dev` and **not authenticated**. The API only starts on a loopback address. |
+| `required` | Every use needs a signed-in account. There is no self-registration. |
+
+`LOGIDOC_ENV=production` refuses `local` mode, hides the interactive API docs
+and sets Secure cookies.
+
+- Passwords: salted scrypt hashes (`scrypt$n$r$p$salt$hash`), at least 12
+  characters; a password is never stored or logged.
+- Sessions: a random token whose SHA-256 only is stored; 30 minutes idle and 8
+  hours absolute lifetime; ended by logout, a role or password change, or
+  deactivating the account (the next request fails). Five wrong passwords lock
+  the account for 15 minutes; an unknown user and a wrong password answer
+  identically.
+- Roles: **Administrator** (users, history recording, ingestion, dismissals,
+  approvals, integrity checks) and **Auditor / reviewer** (view, assign to
+  self, start, note, resolve, reopen, download reports). Every service call
+  checks the permission itself (`authz.require`), so hiding a button is never
+  the only protection. The last active administrator cannot be removed.
+- Create the first administrator on the server (no password on the command
+  line):
+
+```powershell
+$env:LOGIDOC_AUTH_MODE = "required"
+python scripts/manage_users.py create alice --role admin
+python scripts/manage_users.py create bob --role reviewer
+python scripts/manage_users.py list
+```
+
+**What this does not give you:** transport security (serve everything over
+HTTPS from a reverse proxy; the application never sees TLS), protection from
+someone who can write the database files or run code on the server, password
+recovery by e-mail, MFA or SSO. If you need those, put an identity provider in
+front of the app; `authz.Principal` is the one interface to connect it to.
+
+### Exception workflow (`src/review_store.py`, `src/exception_workflow.py`)
+
+`Open -> In review -> Resolved | Dismissed`, and back to `Open` by reopening.
+Rules (enforced inside the database transaction, not only in the screen):
+
+| Action | Rule |
+|---|---|
+| Start review | Only an open exception; assigns it to you unless already assigned |
+| Resolve | Only from *In review*; a note (default 10+ characters) **and** at least one evidence reference |
+| Dismiss | Administrators only; a reason note |
+| Reopen | A note |
+| Approve / reject | Only with `LOGIDOC_REQUIRE_APPROVAL=1`; administrators; never the person who resolved it (the single `local-dev` user excepted); rejecting needs a note |
+
+Evidence references are short strings (a document and page, a credit memo, a
+ticket), not document text. Every event records the signed-in user, their
+role and whether they signed in. `review_events` cannot be updated or deleted
+(triggers) and the events form a hash chain (`verify_integrity`,
+Administration). The chain detects accidental or naive edits; it cannot
+protect against someone who can rewrite the whole database file. Resolving
+never changes a reconciliation result, and a resolved exception is reopened
+if the audited values change.
+
+Server-side settings only: `LOGIDOC_REQUIRE_APPROVAL`, `LOGIDOC_MIN_NOTE_LENGTH`.
+In `local` mode the Streamlit analytics tabs keep the original quick review
+form (free-typed reviewer name, marked unauthenticated and not subject to the
+evidence rule); in `required` mode it is replaced by the full workflow.
+
+### Historical trends (`src/trend_analytics.py`)
+
+Computed only from recorded audit runs (the audit history), never from the
+current documents. A shipment counts once per period (week, month or quarter
+of the *audit run*) with its latest audit in it; an unchanged shipment audited
+again still counts.
+
+- Delay, shortage, invoice-mismatch and discrepancy rates come with their
+  sample size and a 95% Wilson interval. A shipment whose value is missing,
+  conflicting or unreadable is left out of that rate's *n*, never counted as
+  on time, complete or zero.
+- Invoice variance is an **arithmetic mismatch** (total versus line items),
+  never "overbilling" or a recoverable amount. Amounts are added only within
+  one currency; documents state none today, so the group is "Not stated".
+- Carrier scorecards rank by discrepancy rate only with at least 5 decided
+  shipments (adjustable); smaller samples are shown but not ranked, and
+  overlapping intervals are called out. Shipments without a carrier are never
+  ranked.
+- Filters: carrier, final status, discrepancy category, audit date range;
+  CSV export of the filtered analytics (formula-injection safe).
+- With no history, or only one period, the screen says so; nothing is drawn.
+
+Audit history schema version 2 adds `carrier` and `currency` to
+`shipment_snapshots`. Older snapshots keep NULL and show as "Not stated".
+The carrier name is stored as a structured field (like the shipment ID), never
+the text around it.
+
+### Reliable ingestion (`src/document_validation.py`, `ingestion_register.py`, `ingestion_service.py`, `document_lifecycle.py`)
+
+- **Validation** before anything is written: name (no paths, no reserved
+  names), size (`LOGIDOC_MAX_UPLOAD_MB`, default 25), PDF signature, damaged,
+  password-protected, no pages, page limit, and image-only scans (reported as
+  `unsupported: needs OCR`; **there is no OCR**).
+- **Per-file status** in a separate register: `queued`, `processing`,
+  `indexed`, `partial` (pages without text, no shipment ID, unknown type),
+  `failed`, `unsupported`, with reason and corrective action. A duplicate
+  (same content hash) is recorded as `indexed` with code `duplicate`.
+- **Retries** only for transient failures (service unreachable, locked
+  database), with growing pauses; each failed attempt is rolled back and
+  vector IDs come from the content hash, so a retry cannot index a file twice.
+  A file that keeps failing is kept (named by its hash) for a manual retry.
+- **No false clean audit:** an open `failed`/`unsupported` file is held against
+  every shipment like an unreadable PDF (the result becomes `NEEDS REVIEW`)
+  until it is corrected, retried or resolved with a written note.
+- **Replace / remove / reprocess** (administrators): the original PDF is copied
+  to `data/archive/` and verified first; the new vectors are built before
+  anything is swapped; on any failure the old vectors and PDF are restored.
+  Originals are never deleted or modified automatically.
+- **Cache consistency:** `corpus_signature` (documents + index IDs) changes on
+  every add, replace or remove; the API's caches are keyed by the document
+  state and the open ingestion errors.
+
+### Structured extraction (`src/document_extraction.py`, `src/extraction_store.py`)
+
+`extract_document(path)` reads one PDF into a typed `DocumentExtraction`:
+document type, status (`extracted`, `partial`, `needs_ocr`, `unreadable`),
+typed fields, invoice line items and the reasons it needs review. It is
+deterministic (label/value pairs on the page text; no language model, no
+network) and never raises for a damaged or scanned file.
+
+| Type | Fields |
+|---|---|
+| BOL | shipment_id, shipper, consignee (name + address lines), carrier, origin, destination, pickup_date, expected_delivery_date, piece_count, weight (amount + unit), equipment, commodity |
+| POD | shipment_id, carrier, delivery_date, delivered_pieces, delivery_status, received_by, signature (printed name), damage_report; signature_image is UNSUPPORTED |
+| INVOICE | shipment_id, invoice_number, invoice_date, due_date, payment_terms, carrier, origin, destination, currency, subtotal, tax, invoice_total, and any number of line items (description, amount, optional quantity x rate, page); see "Invoice charges" below |
+| RATE_CONFIRMATION | shipment_id, carrier, shipper, consignee, origin, destination, pickup_date, delivery_date, equipment, weight, currency, agreed_rate, fuel_surcharge, payment_terms, terms |
+
+Every field has a state: `EXTRACTED` (with a typed value), `MISSING` (not on
+the document), `UNPARSEABLE` (present but not a valid value; the text is
+kept), `UNREADABLE` (some pages have no text, so absence cannot be claimed),
+`UNSUPPORTED` (the extractor cannot read it) or `CONFLICTING` (different
+values; the alternatives and their pages are listed and none is chosen). A
+missing value is `None`, never 0 or an empty string. Provenance per field:
+source file, page (only when known, never guessed), method, validation result
+and warnings. There is no numeric confidence: nothing is calibrated, so none
+is claimed; `basis = "exact_label"` says why a value is trusted.
+
+A field written more than once with different values, or once readable and
+once not, is `CONFLICTING`. A repeated label without a value, or a value with
+more lines than the field takes (one for dates, amounts, counts, codes and
+terms; four for a shipper or consignee; a few for commodity, damage report and
+terms), keeps the value but marks the field `needs_review`, so the document is
+not complete. Warnings and review reasons name the field, the problem and the
+page; they never quote the document.
+
+Invoice charges: a line item is a labelled amount with a currency mark ($, EUR,
+GBP, US$ or an ISO code before or after it). Labels that say the number is
+something else (counts, weights, identifiers, dates, amounts paid, deposits,
+balances) are listed as excluded. A number without a currency mark, and any
+discount, rebate, allowance or adjustment, is listed as unclassified: the
+invoice needs review and its total is not checked against the line items.
+
+Currency is never assumed: an explicit code or a symbol naming one currency
+(EUR, GBP, US$) is read; a bare `$` leaves the currency MISSING with a
+warning. A document that names two shipments is attributed to neither.
+`validate_shipment()` reports shipment, carrier, route and currency
+mismatches, invoice arithmetic differences and duplicate files; it resolves
+nothing. The audit calculations still use their own field readers
+(`shipment_calculations.read_field`, `reconciliation.extract_field`); a test
+checks that both agree with the new extractor on the fixture shipments.
+
+Results can be stored in `extractions.sqlite3` (one row per file hash and
+extractor version; reprocessing is a no-op). The extractor version is a schema
+number plus a fingerprint of the extraction source files, so any change to the
+parsing stores new results instead of reusing old ones. Stored results contain
+typed values, states, pages, labels and reason codes; the raw text snippets are
+dropped.
+
+**Corrections and approval.** A reviewer *proposes* a correction
+(`POST /api/extractions/{id}/corrections`, reviewer or admin). It is parsed by the
+same parsers, needs a reason, records who, when, the previous value and the
+correction it was based on (`based_on`, required, `null` when there was none;
+a stale request gets 409), and has **no effect on anything** until a different,
+signed-in administrator approves it
+(`POST /api/extractions/corrections/{id}/decision`, `approve` or `reject`; a
+rejection needs a reason). The proposer cannot decide their own correction,
+a correction is decided once, and one proposal per field can be pending. The
+extracted value is never overwritten; the extraction view keeps the extracted,
+proposed and approved values apart. Shipment IDs cannot be corrected. Running an
+extraction is admin only. Corrections made before approvals existed (schema < 4)
+are marked **legacy**: they never apply and cannot be approved; propose them again.
+
+**What an approved correction changes.** Only an approved correction reaches an
+audit, and only for the fields a calculation reads: BOL `piece_count` and
+`expected_delivery_date`, POD `delivered_pieces` and `delivery_date`, INVOICE
+`invoice_total`. They replace the document reader's value for that shipment in the
+quantity, delivery and invoice audits (and so in the financial exposure and the
+assistant). Charges by label, carrier, route and completeness still use the
+original readers; other approved fields are recorded but consumed by nothing.
+A correction applies only while its document is unchanged. Unresolved values (missing,
+conflicting, unparseable) stay unresolved; the audit still says NEEDS REVIEW. See
+`docs/CORRECTION_AWARE_AUDIT.md`.
+
+**Audit inputs and history.** Every recorded run stores, per shipment, the inputs
+its calculations consumed (`GET /api/history/runs/{id}/inputs`): the value, whether
+it came from the document reader or an approved correction, the correction,
+extraction and extractor version, the document, the page (null when unknown),
+validation, warnings and the calculation version. Approving a correction makes the
+next read recalculate, and records a targeted run for that shipment that
+*supersedes* its earlier runs (kept, with their inputs); other shipments are not
+touched. If recording fails the approval stands, `GET /api/extractions/staleness`
+lists the shipment, and `POST /api/extractions/recompute` records it (safe to repeat, or
+to call from two places at once: the check and the write are one transaction, so a
+recalculation is recorded once). Runs from
+before inputs were recorded have none; they are not reconstructed. The assistant
+adds a note, and marks the citation `value_origin: approved_correction` with an
+unknown page, when a result uses an approved correction.
+
+Results can be stored in `extractions.sqlite3` (one row per file hash and
+extractor version; reprocessing is a no-op). The extractor version is a schema
+number plus a fingerprint of the extraction source files, so any change to the
+parsing stores new results instead of reusing old ones. Stored results contain
+typed values, states, pages, labels and reason codes; the raw text snippets are
+dropped.
+
+If the extraction store is damaged or from a newer version, the audit still answers from
+the documents but says so: each shipment's inputs carry `corrections_unavailable`, a
+recorded run notes `correction_store_unavailable`, `GET /api/extractions/staleness` reports
+`corrections_available: false` and the assistant adds a note. It never looks like "no
+correction was ever approved". Row ids outside 1 to 2147483647 are refused with 422.
+
+Stored extractions cannot be updated or deleted; corrections and decisions are
+append-only (SQLite triggers) and hash-chained, and every stored result has a
+hash. `GET /api/extractions/integrity` (administrator) recomputes them and also
+reports an approval made by the proposer. This detects changes made with ordinary
+SQL; it is not tamper-proof against someone who can write the database file (they
+can drop triggers, recompute hashes, remove the newest rows or replace the file).
+Rows written before the hashes existed are reported as unchained legacy rows.
+
+**Reviewer interface.** The React app has a reviewer interface for all of this; it only
+calls the endpoints above and never decides anything itself (the server is the authority):
+
+- *Shipment workspace, Extractions section* (`ExtractionPanel`): per document, every field with its
+  typed value, source file, page (or "page not recorded"), validation, warnings and
+  needs-review flag; missing, conflicting, unreadable, unparseable and unsupported values are named
+  in words, never drawn as 0; the original, proposed, approved, rejected and legacy values are shown
+  apart. Raw document text is never displayed. Reviewers and administrators can propose a correction
+  (`CorrectionDialog`: a required reason, the correct `based_on`, a 409 asks the user to reload the
+  latest state before submitting again, and no double submission). Shipment ID corrections are not
+  offered. Administrators can extract a document that has no stored extraction.
+- *Status* (`RecomputeStatus`): a warning when the correction store cannot be read ("Corrections
+  cannot be verified right now"), whether the latest recorded run lacks approved corrections, a
+  retry that records the run (shown as successful only when the server says so), and an
+  administrator's integrity check.
+- *Correction approvals* (administrators; the entry is hidden from reviewers and the page refuses
+  them): the pending queue with shipment, document, field, original and proposed values, reason,
+  proposer, version, and Approve / Reject (a rejection needs a reason). A proposer's own approve and
+  reject buttons are disabled with the reason, because the server refuses them too. The outcome
+  of each decision, including a failed run recording with its retry, comes from the server's reply.
+- *Audit History, Recorded runs*: calculation version, "Superseded by run #N" / "Supersedes run #M"
+  links, a stale marker, and an inline inspector of each run's recorded inputs (value, source,
+  correction, document, page) and the result it recorded. A run recorded before inputs were
+  recorded says so; nothing is reconstructed.
+
+The interface mirrors one server fact for explanation only: which calculation reads an approved
+field (`consumerOf`, the same five fields as `audit_inputs.TARGETS`); the server decides. On a phone the
+field table scrolls inside its card.
+
+Limitations: no OCR; tabular (column) layouts and line items printed as
+table rows are not read; labels outside the known list are not recognized;
+the measured accuracy (see the evaluation) is on synthetic and
+project-authored PDFs only and is not evidence of accuracy on real carrier
+documents.
+
+### HTTP API (`src/api`) and React interface (`frontend/`)
+
+```powershell
+python src/api/serve.py                      # API on http://127.0.0.1:8000
+cd frontend; npm install; npm run dev        # UI on http://localhost:5173 (proxies /api)
+npm run build                                # production build -> frontend/dist
+python src/api/serve.py                      # now also serves the build at /
+npm test                                     # frontend tests (Vitest)
+```
+
+| Variable | Meaning |
+|---|---|
+| `LOGIDOC_API_HOST` / `LOGIDOC_API_PORT` | Listen address (default `127.0.0.1:8000`; a non-loopback host needs `required` mode) |
+| `LOGIDOC_CORS_ORIGINS` | Comma-separated origins allowed to call the API (`*` is refused: cookies are used) |
+| `LOGIDOC_COOKIE_SECURE` | `1` to mark the session cookie Secure (implied by `LOGIDOC_ENV=production`) |
+| `LOGIDOC_FRONTEND_DIR` | The React build to serve (default `frontend/dist`) |
+| `LOGIDOC_AUTH_DB`, `LOGIDOC_REVIEW_DB`, `LOGIDOC_HISTORY_DB`, `LOGIDOC_INGESTION_DB` | Database locations |
+
+Security of the API: HttpOnly + SameSite=Strict session cookie; every change
+needs the `X-LogiDoc-Client` header (CSRF); CORS limited to the configured
+origins; no route takes a file system path (documents are chosen by name from
+the server's own listing); request bodies validated; uploads size-capped;
+errors never carry a stack trace or a path; the settings route lists a fixed
+set of harmless values. In production the API serves the build, and in
+development Vite proxies `/api`, so the page and the API share one origin.
+
+Endpoints, all under `/api`: `session`, `auth/login`, `auth/logout`,
+`overview`, `shipments`, `shipments/{id}`, `documents`, `documents/file`,
+`completeness`, `exposure`, `exceptions` (and `/{key}`, `/{key}/actions`,
+`/{key}/history`, `/activity`), `history/runs`, `history/shipments/{id}`,
+`history/compare`, `trends`, `trends/export.csv`, `reports/...`,
+`ingestion/register`, `ingestion/errors`, `ingestion/upload`,
+`ingestion/{id}/retry`, `ingestion/{id}/resolve`, `documents/reprocess`,
+`documents/replace`, `documents/remove`, `chat`, `settings`, `admin/users`,
+`admin/events`, `admin/verify-history`, `health`.
+
+React screens: Overview, Shipment Explorer (and detail), Document
+Intelligence (documents, ingestion, ask), Freight Audit, Exception Center,
+Audit History (trends, shipment history, runs), Document Completeness,
+Reports, Settings. Language-model answers are labelled "Generated" and kept
+apart from the verified findings. The interface only displays what the API
+returns; it never calculates an audit.
+
+### Databases
+
+| File (default in `data/`) | Schema | Content |
+|---|---|---|
+| `audit_reviews.sqlite3` | v2 (migrates v1 in one transaction) | `exception_reviews` (state, assignee, evidence references, approval), `review_events` (append-only, hash-chained) |
+| `audit_history.sqlite3` | v3 (migrates v1, v2) | append-only runs, snapshots (with carrier, currency), findings, and per run the consumed `run_inputs`, `run_input_sets` and `run_supersessions` |
+| `auth.sqlite3` | v1 | `users` (password hashes), `sessions` (token hashes), `auth_events` |
+| `ingestion_register.sqlite3` | v1 | `ingestion_files`, append-only `ingestion_events` and `ingestion_actions`; metadata only, never file contents |
+| `extractions.sqlite3` | v4 (migrates v1-v3 step by step, each step one transaction) | `extractions` (typed fields per file hash and extractor version, no raw text, payload hash; no update/delete), append-only hash-chained `field_corrections` (proposals) and `correction_decisions` (one approval or rejection each) |
+
+All databases are local runtime data and are git-ignored, as are
+`data/quarantine/` and `data/archive/`. A database with a newer schema than
+the code is refused, not guessed at.
+
+### Deploying
+
+1. Python 3.10, `pip install -r requirements.txt`, Ollama running with both models.
+2. `npm ci && npm run build` in `frontend/`.
+3. Set `LOGIDOC_ENV=production`, `LOGIDOC_AUTH_MODE=required`,
+   `LOGIDOC_CORS_ORIGINS` (only if the UI is served from another origin) and
+   create the first administrator with `scripts/manage_users.py`.
+4. Run `python src/api/serve.py` behind a TLS-terminating reverse proxy (nginx,
+   Caddy, IIS). Do not expose it without TLS. Streamlit (`app.py`) can run the
+   same way with `LOGIDOC_AUTH_MODE=required`, but it has its own server: do
+   not publish it without the same proxy.
+5. One process, one writer: do not run two ingestion processes on one folder.
+   Back up `data/` (databases, raw PDFs, archive) and `chroma_db/`.
+
 ## Setup (Windows, PowerShell)
 
 Requires Python 3.10 and [Ollama](https://ollama.com/download).
@@ -340,8 +687,82 @@ address: `$env:OLLAMA_HOST = "http://127.0.0.1:9"; python -m pytest -q`.
 Three tests need Ollama (real embeddings in ingestion, the full rebuild
 and the upload workflow); everything else, including all RAG scoping,
 grounding and calculation tests, runs offline with deterministic stand-in
-embeddings and a fake language model. Results on 2026-10-21: 574 passed
-with Ollama; 571 passed and 3 skipped with Ollama unreachable.
+embeddings and a fake language model. Results on 2026-10-21: 853 passed
+with Ollama (574 before the production-readiness work); with Ollama
+unreachable the same three tests skip. Frontend: `cd frontend; npm test`
+(53 tests), `npm run build`.
+
+## Assistant evaluation suite
+
+A repeatable, **deterministic** evaluation of the AI Logistics Assistant, the
+extraction and the RAG retrieval. It needs no network, no Ollama and no
+hosted model, and it never touches `data/raw`, `chroma_db` or any real
+database: the corpus is built in a temporary folder from the fixture PDFs and
+synthetic PDFs.
+
+```powershell
+python scripts/evaluate_assistant.py                      # everything, human-readable
+python scripts/evaluate_assistant.py --json reports/eval.json     # also write JSON (refuses to overwrite without --force)
+python scripts/evaluate_assistant.py --no-rag             # skip the slower RAG part (its thresholds show "skipped")
+python scripts/evaluate_assistant.py --min routing_intent_accuracy=0.9
+python -m pytest tests/test_assistant_eval.py             # tests of the suite itself
+```
+
+Exit code `0` = every threshold passed, `1` = a threshold or a mandatory
+safety check failed, `2` = malformed dataset, bad option or refused overwrite.
+`reports/` and `eval_report*.json` are git-ignored; no baseline is tracked.
+
+**Datasets** (`tests/eval/`, versioned, scope stated in their first line):
+`assistant_cases.jsonl` (labelled questions: expected intent, response status,
+facts, citations, forbidden text, safety flag, ambiguity flag),
+`extraction_labels.json` (documents to build and expected field values) and the
+existing `questions.jsonl` (RAG, 40 questions). They are written by the
+project for the project: a score says the system does what the labels say, not
+that it is accurate on real documents.
+
+**What is measured, and how**
+
+| Section | Metrics |
+|---|---|
+| Assistant routing | intent accuracy, per category, confusion matrix, misrouted case ids. The routing metric covers the question-to-intent step only. |
+| Assistant answers | status accuracy; supported questions answered; unsupported ones not answered; false and missed answers; facts and finding values compared field by field (no whole-sentence match); arithmetic mismatches never described as overbilling; generated text flagged |
+| Citations | every cited file exists, its type is right, its page is valid **or unknown** (never invented), expected sources are cited, no other shipment is cited |
+| Security / reliability | unauthenticated and forged principals, cross-shipment tool calls, invalid tool names and arguments, citation leakage, prompt injection (question and document text), model timeout / empty / missing output, duplicate requests, mixed currencies, missing values |
+| Extraction | field accuracy, precision, recall, missing-field detection (a label can say a field is genuinely absent), source filename/page attribution, document type and status (parsed, partial, image-only, corrupt), duplicates |
+| RAG (offline lexical embeddings) | recall@5, precision@5, hit@1, citation precision, abstention accuracy, cross-shipment leakage; questions that need the language model are not measured offline and are excluded |
+
+Rules: a metric is `n/a` (never 0) when no label supports it; cases marked
+`ambiguous` are reported separately with their observed outcome and never
+counted as passed or failed; cases marked `safety` and the leakage and
+citation checks are **mandatory**, and a missing mandatory metric also fails.
+Fields the extractor does not output (shipper, consignee, invoice number,
+currency, tax, field confidence) and OCR are listed as not measured; reconciliation needs a BOL, an
+invoice and a POD, so incomplete shipments have no field values to score.
+Other thresholds (`--min NAME=VALUE`) have defaults in
+`assistant_eval.DEFAULT_THRESHOLDS`; they are conventions chosen for this
+project, not industry targets.
+
+**Dataset sets and comparability.** `assistant_cases.jsonl` (v1.0, 54 cases) is
+frozen: its labels never change, so it stays comparable with every earlier
+run. `assistant_cases_v2.jsonl` (additions) and `assistant_cases_v3.jsonl`
+(held-out) are reported separately (`by_set` in the JSON, one line per set in
+the text report). A set stops being held-out once the classifier is changed in
+response to its failures; the dataset's own `_meta.scope` says how it was
+labelled. Cases flagged `ambiguous` are never scored; `safety` cases are
+mandatory.
+
+**Intent classifier** (`src/intent_classifier.py`): deterministic and offline.
+It normalizes and stems the question, scores weighted cues per intent
+(phrases are matched on whole words, never as substrings), and returns one
+intent, `none` (unsupported topic, an action request such as "pay", "send" or
+"delete" because the assistant is read-only, or no signal) or `ambiguous` (two
+requests in one question, or tied signals), for which the assistant asks which
+one is meant instead of guessing. It only chooses a tool family: shipment
+scope, authorization and argument validation are unchanged and run first.
+
+The live-model mode is not implemented: model-based evaluation would be
+non-deterministic and billable, so it is kept out of this command. Use
+`python scripts/evaluate.py --ollama` for the existing live RAG evaluation.
 
 ## Evaluation
 
@@ -410,14 +831,15 @@ The PDFs are in `tests/fixtures/`; SHJ-2026-001 is also the sample in
   router does not recognise, is left to the model.
 - **Audit Analytics** covers the PDFs in the document folder, like the
   Reconciliation tab (not the chat index), and shows the current audit
-  only: it draws no trend charts. The review database is local,
-  single-user and has no authentication: the reviewer name is typed in.
+  only (trends are in Audit History / Historical Trends). In local
+  development mode the quick review form takes a typed reviewer name, which
+  is not verified.
   The analytics CSVs cover the filtered shipments and exceptions only;
   there is no analytics-level PDF. Reconciling many shipments reads every
   PDF once and may take a while.
 - **Audit Operations.** History exists only for audits that someone
-  recorded: there is no automatic or scheduled recording, no cross-shipment
-  trend view, and the history database is local and single-user. The
+  recorded: there is no automatic or scheduled recording, and the history database is
+  local. The
   completeness register reads text only (no OCR), identifies a document
   by its content (type and `Shipment Number`), and cannot tell which
   shipment an unreadable file belongs to: for that reason a single
@@ -446,8 +868,9 @@ The PDFs are in `tests/fixtures/`; SHJ-2026-001 is also the sample in
 - **No OCR:** scanned PDFs without a text layer cannot be read.
 - **Shipment identity** comes from the `Shipment Number` printed in each
   document. Documents without one are never attributed to a shipment.
-- **Single machine, single writer.** No authentication, multi-user
-  locking across processes, backups or monitoring; ChromaDB caches indexes
+- **Single machine, single writer.** Authentication is local accounts only
+  (no SSO or MFA, and it needs HTTPS in front); no locking across
+  processes, backups or monitoring; ChromaDB caches indexes
   per process, so do not ingest from another process while the app runs.
 - **Full rebuild** (`python src/vector_store.py`) deletes and recreates all
   vectors and is not used by the app.

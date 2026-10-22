@@ -329,7 +329,39 @@ def date_like_text(text, start):
     return " ".join(kept).rstrip(".,;")
 
 
+class Records(list):
+    """
+    The records of one shipment, optionally with approved reviewer
+    corrections: overrides maps a field name to the FieldValue that stands
+    for it (audit_inputs builds them from approved corrections only).
+    A plain list has none, so every existing caller reads the documents
+    exactly as before.
+    """
+
+    overrides = None
+
+
+def overridden(name, records):
+
+    return getattr(records, "overrides", None) or {}
+
+
 def read_field(name, records):
+    """
+    The values of a field: the approved correction when the records carry
+    one for it (a single value), otherwise what the documents say
+    (read_document_field).
+    """
+
+    override = overridden(name, records).get(name)
+
+    if override is not None:
+        return [override]
+
+    return read_document_field(name, records)
+
+
+def read_document_field(name, records):
     """
     Every value of a field in records of the field's document types.
     Overlapping label matches (e.g. "Pieces" inside "Number of
@@ -1290,11 +1322,17 @@ def invoice_figures(records):
 
     # Every amount on the invoice documents must be one of these
     # fields, or the sum could leave a charge out
+    # (a field with an approved correction accounts for the amount the
+    # document itself prints as well: it is superseded, not unknown)
     accounted = {
         (id(item.record), item.start)
         for name in names
         for item in readings[name]
     }
+
+    for name in names:
+        if name in overridden(name, records):
+            accounted |= {(id(item.record), item.start) for item in read_document_field(name, records)}
 
     # A summary such as "Amount Due" may only repeat the total or the
     # line-item sum; it is never added

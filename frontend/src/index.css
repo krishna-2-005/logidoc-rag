@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Design tokens (HSL, shadcn/ui convention). Every foreground/background pair
+  used for text is checked for WCAG AA contrast in src/test/contrast.test.ts.
+*/
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --primary: 217 91% 33%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 32% 93%;
+    --secondary-foreground: 222 47% 14%;
+    --muted: 214 32% 94%;
+    --muted-foreground: 215 19% 33%;
+    --accent: 214 40% 94%;
+    --accent-foreground: 222 47% 14%;
+    --destructive: 0 70% 40%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 24% 87%;
+    --input: 214 20% 78%;
+    --ring: 217 91% 45%;
+
+    /* The sidebar */
+    --navy: 218 66% 16%;
+    --navy-deep: 220 70% 11%;
+    --navy-line: 218 40% 26%;
+    --navy-text: 213 40% 90%;
+
+    /* Status: a strong colour on its own soft background */
+    --ok: 162 90% 19%;
+    --ok-soft: 152 70% 93%;
+    --warn: 28 96% 27%;
+    --warn-soft: 46 96% 91%;
+    --bad: 0 72% 38%;
+    --bad-soft: 0 86% 95%;
+    --info: 217 91% 33%;
+    --info-soft: 214 95% 94%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply tracking-tight;
+  }
+
+  /* One visible focus style everywhere: keyboard users always see where they are */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+  }
+}
+
+@layer components {
+  .page-enter {
+    animation: page-enter 140ms ease-out both;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -166,7 +166,16 @@ def describe_problems(problems):
     The problem files as one line of text.
     """
 
-    labels = {UNREADABLE: "unreadable", NO_TEXT: "no extractable text"}
+    labels = {
+        UNREADABLE: "unreadable",
+        NO_TEXT: "no extractable text",
+        # Ingestion register codes (ingestion_service)
+        "needs_ocr": "image-only scan, needs OCR",
+        "corrupted": "damaged PDF",
+        "password_protected": "password-protected",
+        "interrupted": "ingestion did not finish",
+        "retries_exhausted": "ingestion failed, retry needed",
+    }
 
     return ", ".join(
         f"{item['filename']} ({labels.get(item['status'], item['status'])})"

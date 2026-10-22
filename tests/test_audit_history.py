@@ -389,9 +389,17 @@ def test_no_document_text_is_stored(store):
 
     content = store.path.read_bytes()
 
-    for text in (b"BILL OF LADING", b"Shipment Number:", b"Chicago, Illinois", b"Swift Lines",
-                 b"Number of Pieces:", b"BOL_SHJ-2026-001.pdf"):
+    for text in (b"BILL OF LADING", b"Shipment Number:", b"Chicago, Illinois",
+                 b"Number of Pieces:", b"BOL_SHJ-2026-001.pdf", b"Carrier: Swift Lines"):
         assert text not in content, text
+
+    # Schema version 2 keeps the carrier as a structured field (it is what
+    # carrier scorecards group by), like the shipment ID: the name alone,
+    # never the text around it
+    with sqlite3.connect(store.path) as connection:
+        carriers = {row[0] for row in connection.execute("SELECT carrier FROM shipment_snapshots")}
+
+    assert carriers == {"Swift Lines"}
 
     with sqlite3.connect(store.path) as connection:
         columns = {

@@ -13,12 +13,31 @@ data/raw/*.pdf
 # Ingestion runtime artifacts: journal and leftover partial copies
 .ingestion_journal.jsonl
 .*.part
+.*.new
 
 # Exception review database (local review state)
 data/audit_reviews.sqlite3*
 data/audit_history.sqlite3*
 
+# User accounts, ingestion register, retry copies and archived originals
+# (local runtime data; never commit them)
+data/auth.sqlite3*
+data/ingestion_register.sqlite3*
+data/extractions.sqlite3*
+data/quarantine/
+data/archive/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
 # Backups and logs
 *_backup.py
 logs/
-.env
+
+# Generated evaluation reports
+reports/
+eval_report*.json
