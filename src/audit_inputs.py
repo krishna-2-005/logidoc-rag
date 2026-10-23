@@ -32,6 +32,7 @@ Nothing here stores document text: values are typed, and reasons are codes.
 import hashlib
 from datetime import date
 
+import document_extraction
 from shipment_calculations import FIELDS, FieldValue, Records, read_document_field
 
 
@@ -269,6 +270,13 @@ def build_inputs(shipment_key, shipment_id, chunks, plan, extractions=None):
             if agrees is False:
                 entry["warnings"].append("structured_extraction_differs")
                 entry["validation"] = "warning"
+
+            # Made by an earlier version of the extractor: extract again before relying on the comparison
+            if row["extractor_version"] != document_extraction.EXTRACTOR_VERSION:
+                entry["warnings"].append("structured_extraction_outdated")
+
+                if entry["validation"] == "valid":
+                    entry["validation"] = "warning"
 
         choice = plan.get(audit_field)
 
