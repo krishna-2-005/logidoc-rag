@@ -425,7 +425,14 @@ function RunStatus({ run, stale, onInspect }: { run: AuditRun; stale: boolean; o
           Supersedes run #{item.old_run_id} ({item.shipment_key})
         </p>
       ))}
-      {stale && <Badge tone="warn">Stale: missing approved corrections</Badge>}
+      {stale && (
+        <Badge
+          tone="warn"
+          title="This is the latest recorded run of the shipment, and it does not include approved corrections the audit now reads. It is not about the extractor version; an outdated cross-check is shown on the shipment and Corrections screens."
+        >
+          Stale: missing approved corrections
+        </Badge>
+      )}
       {run.superseded_by.length === 0 && !stale && <span className="text-xs text-muted-foreground">Not superseded</span>}
     </div>
   )

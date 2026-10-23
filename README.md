@@ -692,6 +692,26 @@ with Ollama (574 before the production-readiness work); with Ollama
 unreachable the same three tests skip. Frontend: `cd frontend; npm test`
 (53 tests), `npm run build`.
 
+## Real-document extraction evaluation
+
+The extraction scores above come from synthetic, project-authored documents. A separate,
+reproducible harness measures the extractor on **real documents we have permission to process**,
+against labels a person wrote and a second person verified without seeing the extractor's output:
+`src/real_eval.py`, `scripts/evaluate_real_documents.py` (`template`, `validate`, `coverage`,
+`freeze`, `evaluate`) and `docs/real_world_evaluation/` (the labelling protocol, example files and the
+known gaps).
+
+**Status: no real-world result exists.** No permitted real documents have been supplied, so
+`evaluate` reports `NOT MEASURED` and lists the data still required (documents per type, layout
+families, multi-page, table, credit, foreign-currency, conflicting, image-only, encrypted and
+malformed examples). Documents, manifest, labels and reports live in `eval_real/`, which is git-ignored;
+the tool refuses a directory inside a repository that does not ignore it. Reports name documents by
+id only and show values as shapes. Every metric carries its denominator and a Wilson 95% interval;
+fewer than 10 labelled cases is "not measured". The held-out split can be scored only after `freeze`, and
+the report calls a held-out score independent only if the labels, manifest and extractor are unchanged
+since the freeze. `tests/test_known_extraction_defects.py` is an executable register of defects found with
+synthetic probes (none observed on real documents).
+
 ## Assistant evaluation suite
 
 A repeatable, **deterministic** evaluation of the AI Logistics Assistant, the

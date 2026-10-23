@@ -33,6 +33,8 @@ from auth import UserStore  # noqa: E402
 from authz import ADMIN, PermissionDenied, Principal  # noqa: E402
 from extraction_store import ExtractionStore, InvalidTransition, StaleCorrection, StoreError  # noqa: E402
 from test_api import A, B, PASSWORD, Rig  # noqa: E402
+from extraction_migration import MigrationAborted  # noqa: E402
+from migration_support import upgrade  # noqa: E402
 
 ALICE = Principal("alice", "admin", True, 1)
 DAVE = Principal("dave", "admin", True, 4)
@@ -647,6 +649,7 @@ def v3_store(path):
 def test_legacy_corrections_are_marked_legacy_and_never_promoted(tmp_path):
     path = tmp_path / "x.sqlite3"
     v3_store(path)
+    upgrade(path)
     store = ExtractionStore(path)
 
     assert store.version() == store_module.SCHEMA_VERSION
@@ -673,8 +676,8 @@ def test_a_failed_store_upgrade_rolls_back_and_the_retry_succeeds(tmp_path, monk
     good = dict(store_module.MIGRATIONS)
     monkeypatch.setattr(store_module, "MIGRATIONS", {**good, 4: good[4] + "\nTHIS IS NOT SQL;"})
 
-    with pytest.raises(sqlite3.DatabaseError):
-        ExtractionStore(path)
+    with pytest.raises(MigrationAborted):
+        upgrade(path)
 
     connection = sqlite3.connect(path)
 
@@ -684,6 +687,7 @@ def test_a_failed_store_upgrade_rolls_back_and_the_retry_succeeds(tmp_path, monk
     connection.close()
 
     monkeypatch.setattr(store_module, "MIGRATIONS", good)
+    upgrade(path)
 
     assert ExtractionStore(path).corrections(1)[0]["status"] == "legacy"
 

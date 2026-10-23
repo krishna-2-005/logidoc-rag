@@ -1,0 +1,29 @@
+{
+  "dataset": "EXAMPLE ONLY: a shape to copy. These entries describe no real document.",
+  "documents": [
+    {
+      "id": "DOC-0001",
+      "file": "documents/DOC-0001.pdf",
+      "sha256": "<sha256 of the file, 64 hex characters>",
+      "document_type": "INVOICE",
+      "layout_family": "family-01",
+      "split": "development",
+      "source_permission": {"basis": "customer_consent", "confirmed_by": "<person>", "confirmed_on": "2026-01-01"},
+      "redaction": {"status": "partial", "method": "names, addresses and account numbers blacked out; amounts and dates untouched"},
+      "properties": ["multi_page", "table_layout", "tax", "fuel_surcharge"],
+      "limitations": "Second page is a terms page with no fields."
+    },
+    {
+      "id": "DOC-0002",
+      "file": "documents/DOC-0002.pdf",
+      "sha256": "<sha256 of the file, 64 hex characters>",
+      "document_type": "POD",
+      "layout_family": "family-02",
+      "split": "heldout",
+      "source_permission": {"basis": "own_document", "confirmed_by": "<person>", "confirmed_on": "2026-01-01"},
+      "redaction": {"status": "full", "method": "recipient and driver names replaced"},
+      "properties": ["ambiguous_signature"],
+      "limitations": "Signature is a scribble beside a printed name."
+    }
+  ]
+}

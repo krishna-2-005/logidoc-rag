@@ -39,6 +39,7 @@ from pathlib import Path
 import audit_analytics as analytics
 import audit_inputs
 import authz
+import document_extraction
 import document_completeness as completeness
 import financial_exposure as exposure
 import ingestion_service
@@ -114,12 +115,20 @@ class AuditService:
 
     def extraction_store(self):
         """
-        The extraction store when it exists and is at the current schema
-        version, else None. Opening it for the audit never creates or migrates
-        anything.
+        A read-only extraction store for the audit, else None (no file, or a file from before approvals
+        existed, which can hold none). A current store and a valid older one still awaiting its upgrade are
+        both read: approvals must not disappear because an upgrade is pending. An unreadable, too-new or
+        structurally invalid file raises StoreUnavailable. Opening it never creates, migrates or writes.
         """
 
-        return ExtractionStore.open_if_current(self.locations.extraction_path())
+        return ExtractionStore.open_for_reading(self.locations.extraction_path())
+
+    def store_state(self):
+        """{state, version, reason} of the extraction store file (extraction_store.inspect): nothing is opened for writing."""
+
+        found = ExtractionStore.inspect(self.locations.extraction_path())
+
+        return {"state": found.state, "version": found.version, "reason": found.reason, "migration": found.migration}
 
     def corrections_token(self):
         """Changes whenever a correction is approved or an extraction stored (part of the audit cache key)."""
@@ -245,7 +254,8 @@ class AuditService:
 
             return snapshot
 
-        return self.cached("snapshot", compute, extra=self.corrections_token())
+        # The extractor version is part of the key: a changed version recomputes the cross-check without a restart
+        return self.cached("snapshot", compute, extra=(self.corrections_token(), document_extraction.EXTRACTOR_VERSION))
 
     def scan(self):
         """
@@ -343,6 +353,27 @@ class AuditService:
 
         return self.history_store().staleness(applied)
 
+    def outdated_cross_checks(self):
+        """
+        The shipments whose stored structured extractions were made by another
+        extractor version than the current one: [{shipment_key, shipment_id,
+        fields, extractor_versions, current_version}]. Recorded runs keep their
+        own recorded inputs; this only says the cross-check beside them is stale.
+        """
+
+        current = document_extraction.EXTRACTOR_VERSION
+        result = []
+
+        for item in self.snapshot()["shipments"]:
+            fields = [f for f in (item.get("inputs") or {}).get("fields", []) if "structured_extraction_outdated" in f["warnings"]]
+
+            if fields:
+                result.append({"shipment_key": item["shipment_key"], "shipment_id": item["shipment_id"],
+                               "fields": [f["field"] for f in fields],
+                               "extractor_versions": sorted({f["extractor_version"] for f in fields}), "current_version": current})
+
+        return result
+
     def corrections_available(self):
         """False while the extraction store is damaged or from a newer version: approved corrections cannot be read."""
 
@@ -394,7 +425,7 @@ class AuditService:
         if not path.is_file():
             raise ValueError("No such correction.")
 
-        outcome = ExtractionStore(path).decide(principal, correction_id, decision, note)
+        outcome = ExtractionStore.open_for_write(path).decide(principal, correction_id, decision, note)
         self.invalidate()
 
         if outcome["decision"] != "approved":

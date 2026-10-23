@@ -23,6 +23,7 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
         sys.path.insert(0, str(path))
 
 import document_extraction as de  # noqa: E402
+from migration_support import upgrade  # noqa: E402
 import extraction_store as store_module  # noqa: E402
 from authz import Principal  # noqa: E402
 from document_extraction import CONFLICTING, EXTRACTED, extract_document  # noqa: E402
@@ -288,7 +289,7 @@ def test_m5_an_intact_history_verifies(store):
     result = store.verify_history()
 
     assert result == {"ok": True, "corrections_checked": 3, "decisions_checked": 3, "extractions_checked": 1,
-                      "unchained_legacy": 0, "problems": []}
+                      "aliases_checked": 1, "unchained_legacy": 0, "problems": []}
 
 
 def tamper(store, *statements):
@@ -344,6 +345,7 @@ def test_m5_rows_from_before_the_chain_are_reported_as_legacy_not_hidden(tmp_pat
     connection.commit()
     connection.close()
 
+    upgrade(path)
     upgraded = ExtractionStore(path)
     upgraded.propose(BOB, 1, "tax", "6", REASON, based_on=1)
     result = upgraded.verify_history()
@@ -448,7 +450,7 @@ def test_l1_the_version_is_a_fingerprint_of_the_extraction_sources():
     sources = [PROJECT_ROOT / "src" / name for name in de.FINGERPRINT_SOURCES]
 
     assert all(path.is_file() for path in sources)
-    assert de.EXTRACTOR_VERSION == f"{de.EXTRACTOR_SCHEMA}+{de.source_fingerprint(sources)}"
+    assert de.EXTRACTOR_VERSION == f"{de.EXTRACTOR_SCHEMA}+{de.source_fingerprint(sources, extra=de.FINGERPRINT_EXTRA)}"
 
 
 def test_l1_any_source_change_changes_the_fingerprint_but_line_endings_do_not(tmp_path):

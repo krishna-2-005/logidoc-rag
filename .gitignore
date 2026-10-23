@@ -41,3 +41,6 @@ logs/
 # Generated evaluation reports
 reports/
 eval_report*.json
+
+# Real-document evaluation: confidential documents, labels and reports stay local
+eval_real/

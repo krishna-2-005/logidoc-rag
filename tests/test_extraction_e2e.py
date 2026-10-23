@@ -28,6 +28,7 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
         sys.path.insert(0, str(path))
 
 import audit_history  # noqa: E402
+from migration_support import upgrade  # noqa: E402
 import extraction_store as store_module  # noqa: E402
 from assistant import UNAVAILABLE_NOTE, Assistant  # noqa: E402
 from auth import UserStore  # noqa: E402
@@ -340,11 +341,11 @@ def test_a_damaged_correction_store_is_reported_not_silently_ignored(rig):
 
     assert UNAVAILABLE_NOTE in reply["uncertainty"]
 
-    # Extraction endpoints fail closed with a generic error, and nothing leaks
+    # Extraction endpoints fail closed (503, never an empty list), and nothing leaks: no path, no document text
     for url in ("/api/extractions", "/api/extractions/pending", "/api/extractions/integrity"):
         failed = alice.get(url)
 
-        assert failed.status_code == 500 and failed.json() == {"detail": "Something went wrong on the server."}
+        assert failed.status_code == 503 and failed.json() == {"detail": "The extraction store cannot be read."}
 
     # A run recorded now says so
     recorded = audit_history.record_run_as(ALICE, rig.state.service.history_store(), rig.state.service.snapshot(),
@@ -457,6 +458,7 @@ def test_a_version_1_store_with_records_upgrades_to_the_current_one(tmp_path):
     connection.commit()
     connection.close()
 
+    upgrade(path)
     store = ExtractionStore(path)
 
     assert store.version() == store_module.SCHEMA_VERSION and [r["filename"] for r in store.list()] == ["a.pdf"]
@@ -480,6 +482,7 @@ def test_a_version_2_store_keeps_its_corrections_as_legacy(tmp_path):
     connection.commit()
     connection.close()
 
+    upgrade(path)
     store = ExtractionStore(path)
     legacy = store.corrections(1)[0]
 

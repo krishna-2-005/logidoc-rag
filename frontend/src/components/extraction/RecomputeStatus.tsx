@@ -4,8 +4,22 @@ import { errorMessage } from "@/components/common/states"
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { can, useIntegrity, useRecompute, useSession, useStaleness } from "@/hooks/queries"
+import { label } from "@/lib/format"
 
 type Outcome = { tone: "ok" | "info" | "bad"; text: string }
+
+/**
+ * What an audit field is called in the outdated cross-check notice. The shared label() (the one the
+ * run inputs inspector uses) gives "Delivered pieces", "Invoice total"; only the two audit date ids,
+ * which it would call "Expected date" and "Actual date", are spelled out. An unlisted id falls back
+ * to its own words ("some_new_field" reads "Some new field").
+ */
+const AUDIT_FIELD_LABELS: Record<string, string> = {
+  expected_date: "Expected delivery date",
+  actual_date: "Actual delivery date",
+}
+
+export const auditFieldLabel = (id: string): string => AUDIT_FIELD_LABELS[id] ?? label(id)
 
 /**
  * Warns when approved corrections cannot be read. The audit then answers from
@@ -86,8 +100,11 @@ export function RecomputeStatus({ shipmentKey }: { shipmentKey?: string }) {
   const [failed, setFailed] = useState(false)
   const busy = useRef(false)
   const canRecord = can(session.data, "history.record")
+  // Only decides which words are shown: the server checks the permission on every request
+  const canExtract = can(session.data, "extraction.run")
 
   const entries = (staleness.data?.stale ?? []).filter((item) => !shipmentKey || item.shipment_key === shipmentKey)
+  const outdated = (staleness.data?.outdated_cross_checks ?? []).filter((item) => !shipmentKey || item.shipment_key === shipmentKey)
 
   const run = async (target?: string) => {
     if (busy.current) return
@@ -139,6 +156,22 @@ export function RecomputeStatus({ shipmentKey }: { shipmentKey?: string }) {
             ) : (
               <p className="mt-1 text-xs">An administrator can record it.</p>
             )}
+          </div>
+        </Alert>
+      ))}
+
+      {outdated.map((item) => (
+        <Alert key={item.shipment_key} tone="warn" className="items-start" data-testid={`outdated-${item.shipment_key}`}>
+          <div className="flex-1">
+            <p className="font-medium">The structured cross-check is out of date{shipmentKey ? "" : ` for ${item.shipment_id}`}.</p>
+            <p className="mt-0.5">
+              Affected fields: {item.fields.map(auditFieldLabel).join(", ")}. The stored extraction was made by extractor version {item.extractor_versions.join(", ")}; the current version is {item.current_version}.
+            </p>
+            <p className="mt-0.5 text-xs">
+              The audit values are read from the documents and are unchanged, and no audit run has been recalculated or recorded because of this. {canExtract
+                ? "Run the extraction again for this shipment's documents (Extract fields) to refresh the comparison."
+                : "You cannot run the extraction. Ask an authorized reviewer or administrator to run it again."}
+            </p>
           </div>
         </Alert>
       ))}

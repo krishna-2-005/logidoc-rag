@@ -7,6 +7,7 @@ import { EmptyState, ErrorState, LoadingBlock, errorMessage } from "@/components
 import { MIN_REASON } from "@/components/extraction/CorrectionDialog"
 import { CorrectionBadge, consumerOf, valueOrState } from "@/components/extraction/fields"
 import { CorrectionStoreWarning, RecomputeStatus } from "@/components/extraction/RecomputeStatus"
+import { StoreStateNotice, useStoreWriteBlock } from "@/components/extraction/storeState"
 import { Alert } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -210,6 +211,7 @@ function DecisionDialog({ item, mode, shipmentLabel, onClose, onDone }: { item: 
 }
 
 function QueueItem({ item, shipmentLabel, own, onDecide }: { item: Correction; shipmentLabel: string; own: boolean; onDecide: (mode: Mode) => void }) {
+  const blocked = useStoreWriteBlock()
   const id = `correction-${item.id}`
 
   return (
@@ -264,10 +266,10 @@ function QueueItem({ item, shipmentLabel, own, onDecide }: { item: Correction; s
       </dl>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={() => onDecide("approve")} disabled={own} aria-describedby={own ? `${id}-own` : undefined}>
+        <Button size="sm" onClick={() => onDecide("approve")} disabled={own || blocked !== null} title={blocked ?? undefined} aria-describedby={own ? `${id}-own` : undefined}>
           <Check /> Approve
         </Button>
-        <Button size="sm" variant="outline" onClick={() => onDecide("reject")} disabled={own} aria-describedby={own ? `${id}-own` : undefined}>
+        <Button size="sm" variant="outline" onClick={() => onDecide("reject")} disabled={own || blocked !== null} title={blocked ?? undefined} aria-describedby={own ? `${id}-own` : undefined}>
           <X /> Reject
         </Button>
         {own && (
@@ -312,6 +314,7 @@ export function Corrections() {
 
       <div className="mb-6 space-y-4">
         <CorrectionStoreWarning />
+        <StoreStateNotice />
         <RecomputeStatus />
       </div>
 

@@ -20,6 +20,7 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
         sys.path.insert(0, str(path))
 
 import document_extraction as de  # noqa: E402
+from migration_support import upgrade  # noqa: E402
 import extraction_store as store_module  # noqa: E402
 from authz import PermissionDenied, Principal  # noqa: E402
 from extraction_store import ExtractionStore, StoreError  # noqa: E402
@@ -214,23 +215,27 @@ def test_a_version_1_database_is_upgraded_without_losing_rows(tmp_path):
     connection.commit()
     connection.close()
 
+    with pytest.raises(store_module.MigrationPending):                       # a request never upgrades a file
+        ExtractionStore(path)
+
+    upgrade(path)
     upgraded = ExtractionStore(path)
 
     assert upgraded.version() == store_module.SCHEMA_VERSION and [r["filename"] for r in upgraded.list()] == ["a.pdf"] and upgraded.corrections(1) == []
+    assert [a["relation"] for a in upgraded.aliases(1)] == ["original"]
 
 
-def test_a_failed_migration_rolls_back_and_the_next_start_retries(tmp_path, monkeypatch):
+def test_a_failed_creation_rolls_back_completely_and_the_next_start_retries(tmp_path, monkeypatch):
     path = tmp_path / "m.sqlite3"
     good = dict(store_module.MIGRATIONS)
-    monkeypatch.setattr(store_module, "MIGRATIONS", {1: good[1], 2: good[2] + "\nTHIS IS NOT SQL;"})
+    monkeypatch.setattr(store_module, "MIGRATIONS", {**good, 2: good[2] + "\nTHIS IS NOT SQL;"})
 
     with pytest.raises(sqlite3.DatabaseError):
         ExtractionStore(path)
 
     connection = sqlite3.connect(path)
 
-    assert connection.execute("SELECT version FROM schema_info").fetchone() == (1,)
-    assert connection.execute("SELECT name FROM sqlite_master WHERE name = 'field_corrections'").fetchone() is None
+    assert connection.execute("SELECT name FROM sqlite_master").fetchall() == []       # one transaction: nothing was left behind
     connection.close()
 
     monkeypatch.setattr(store_module, "MIGRATIONS", good)

@@ -1,0 +1,39 @@
+{
+  "labels_version": "EXAMPLE ONLY: a shape to copy. These labels describe no real document.",
+  "documents": {
+    "DOC-0001": {
+      "labelled_by": "<person A>",
+      "verified_by": "<person B, a different person>",
+      "verified_on": "2026-01-02",
+      "labelled_without_extractor_output": true,
+      "document_status": "extracted",
+      "expected_complete": true,
+      "arithmetic": "match",
+      "fields": [
+        {"field": "invoice_number", "state": "EXTRACTED", "value": "<as printed>", "page": 1},
+        {"field": "invoice_date", "state": "EXTRACTED", "value": "2026-01-01", "page": 1},
+        {"field": "invoice_total", "state": "EXTRACTED", "value": 1550.0, "page": 2},
+        {"field": "currency", "state": "MISSING"},
+        {"field": "tax", "state": "EXTRACTED", "value": 50.0, "page": 2},
+        {"field": "due_date", "state": "UNPARSEABLE"},
+        {"field": "payment_terms", "state": "CONFLICTING"}
+      ],
+      "line_items": [["Base Freight", 1200.0], ["Fuel Surcharge", 300.0]],
+      "notes": "The two payment terms (page 1 and page 2) disagree."
+    },
+    "DOC-0002": {
+      "labelled_by": "<person A>",
+      "verified_by": "<person B, a different person>",
+      "verified_on": "2026-01-02",
+      "labelled_without_extractor_output": true,
+      "document_status": "extracted",
+      "expected_complete": false,
+      "fields": [
+        {"field": "delivery_date", "state": "EXTRACTED", "value": "2026-01-03", "page": 1},
+        {"field": "delivered_pieces", "state": "EXTRACTED", "value": 45, "page": 1},
+        {"field": "signature", "state": "EXTRACTED", "value": "<printed name>", "page": 1},
+        {"field": "signature_image", "state": "UNSUPPORTED"}
+      ]
+    }
+  }
+}
