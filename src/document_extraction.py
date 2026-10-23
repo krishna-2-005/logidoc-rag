@@ -45,7 +45,7 @@ shipment ID, total versus line items); it chooses nothing.
 
 import hashlib
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -70,17 +70,27 @@ FINGERPRINT_SOURCES = (
 )
 
 
-def source_fingerprint(paths):
+# What else decides the extracted text: the PDF library. A new PyMuPDF can read the same file
+# differently, so its version is part of the extractor version too.
+FINGERPRINT_EXTRA = (f"pymupdf={pymupdf.__version__}",)
+
+
+def source_fingerprint(paths, extra=()):
     digest = hashlib.sha256()
 
     for path in paths:
         digest.update(Path(path).name.encode("utf-8") + b"\0")
         digest.update(Path(path).read_bytes().replace(b"\r\n", b"\n") + b"\0")
 
+    for item in extra:
+        digest.update(str(item).encode("utf-8") + b"\0")
+
     return digest.hexdigest()[:12]
 
 
-EXTRACTOR_VERSION = f"{EXTRACTOR_SCHEMA}+{source_fingerprint(Path(__file__).parent / name for name in FINGERPRINT_SOURCES)}"
+EXTRACTOR_VERSION = (
+    f"{EXTRACTOR_SCHEMA}+{source_fingerprint((Path(__file__).parent / name for name in FINGERPRINT_SOURCES), FINGERPRINT_EXTRA)}"
+)
 
 EXTRACTED = "EXTRACTED"
 MISSING = "MISSING"
@@ -115,6 +125,7 @@ class Spec:
     labels: tuple = ()        # exact labels (lower case) that carry the field
     note: str = ""
     max_lines: int = 1        # lines of a value that belong to it; more are not used and need review
+    review_if_blank: bool = False   # a blank placeholder where this was expected means a person must look (evidence of receipt)
 
 
 def labels(*names):
@@ -144,8 +155,8 @@ SCHEMAS = {
         "delivery_date": Spec("date", labels("Delivery Date", "Actual Delivery Date")),
         "delivered_pieces": Spec("count", labels("Number of Pieces Delivered", "Pieces Delivered", "Delivered Pieces", "Quantity Delivered")),
         "delivery_status": Spec("text", labels("Delivery Status")),
-        "received_by": Spec("text", labels("Received By")),
-        "signature": Spec("text", labels("Signature"), "the printed or typed name next to the signature line"),
+        "received_by": Spec("text", labels("Received By"), review_if_blank=True),
+        "signature": Spec("text", labels("Signature"), "the printed or typed name next to the signature line", review_if_blank=True),
         "damage_report": Spec("text", labels("Damage Report"), max_lines=3),
         "signature_image": Spec("text", (), "a handwritten signature drawn on the page is not detected"),
     },
@@ -161,7 +172,8 @@ SCHEMAS = {
         "currency": Spec("currency", labels("Currency")),
         "subtotal": Spec("money", labels("Subtotal", "Sub Total")),
         "tax": Spec("money", labels("Tax", "Sales Tax", "VAT", "GST", "HST", "Total Tax")),
-        "invoice_total": Spec("money", labels("Total Invoice Amount", "Invoice Total", "Grand Total", "Total Amount", "Amount Due", "Total Due")),
+        "invoice_total": Spec("money", labels("Total Invoice Amount", "Invoice Total", "Grand Total", "Total Amount", "Amount Due", "Total Due",
+                                              "Total", "Total Payable", "Amount Payable")),
     },
     RATE: {
         "shipment_id": Spec("identifier"),
@@ -190,12 +202,15 @@ REQUIRED = {
     RATE: ("shipment_id", "agreed_rate"),
 }
 
-# Labels whose money value is a total or a tax, never a line item
-NON_ITEM_LABELS = {
-    "total invoice amount", "invoice total", "grand total", "total amount", "amount due", "total due", "subtotal",
-    "sub total", "tax", "sales tax", "vat", "gst", "hst", "total tax", "balance", "balance due", "agreed rate",
-    "total rate",
-}
+# Labels whose money value is a total or a tax, never a line item. Derived from the
+# schema so that a label cannot be both a field and a charge
+NON_ITEM_LABELS = (
+    set(SCHEMAS[INVOICE]["invoice_total"].labels) | set(SCHEMAS[INVOICE]["tax"].labels) | set(SCHEMAS[INVOICE]["subtotal"].labels)
+    | {"balance", "balance due", "agreed rate", "total rate"}
+)
+
+# Every label any schema knows: a line holding several of them is split at each
+KNOWN_LABELS = {label for schema in SCHEMAS.values() for spec in schema.values() for label in spec.labels} | NON_ITEM_LABELS
 
 
 # ============================================================
@@ -259,6 +274,7 @@ class DocumentExtraction:
     line_items: list = field(default_factory=list)
     unclassified_amounts: list = field(default_factory=list)
     excluded_amounts: list = field(default_factory=list)
+    percentage_charges: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     review_reasons: list = field(default_factory=list)
     error: str = None
@@ -308,8 +324,19 @@ def validate_extraction(extraction):
 # THE LABEL-PAIR PARSER
 # ============================================================
 
-LABEL_ONLY = re.compile(r"^([A-Za-z][A-Za-z0-9 /&.#()'’-]{1,60}):\s*$")
-LABEL_VALUE = re.compile(r"^([A-Z][A-Za-z0-9 /&.#()'’-]{1,40}):\s+(\S.*)$")
+LABEL_CHARS = r"A-Za-z0-9 /&.#()'’%-"
+LABEL_ONLY = re.compile(rf"^([A-Za-z][{LABEL_CHARS}]{{1,60}}):\s*$")
+LABEL_VALUE = re.compile(rf"^([A-Z][{LABEL_CHARS}]{{1,40}}):\s+(\S.*)$")
+
+# A rate written in a label ("VAT 20%", "Sales Tax (8.25%)") is not part of what the label is
+PERCENT_NOTE = re.compile(r"\s*\(?\s*(\d+(?:\.\d+)?)\s*%\s*\)?\s*$")
+
+# A known label followed by its colon, optionally with such a rate
+KNOWN_LABEL_RE = re.compile(
+    r"(?<![\w])(" + "|".join(re.escape(label) for label in sorted(KNOWN_LABELS, key=len, reverse=True)) + r")"
+    r"(?:\s*\(?\s*\d+(?:\.\d+)?\s*%\s*\)?)?\s*:",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -318,6 +345,8 @@ class Pair:
     key: str
     lines: list
     page: int
+    percent: float = None        # the rate written in the label, when there is one
+    ambiguous: bool = False      # lines under a line that held several labels cannot be assigned to one of them
 
     @property
     def raw(self):
@@ -325,17 +354,63 @@ class Pair:
 
 
 def normalize_label(label):
-    return " ".join(label.lower().replace("’", "'").split())
+    text = " ".join(label.lower().replace("’", "'").split())
+
+    return PERCENT_NOTE.sub("", text).strip()
 
 
-def parse_pairs(text, page):
+def label_percent(label):
+    found = PERCENT_NOTE.search(label)
+
+    return float(found.group(1)) if found else None
+
+
+def split_known(line):
+    """
+    The line cut before every known label that follows an earlier "label:" on it,
+    so each value stops at the next recognised label ("Shipper: A   Consignee: B").
+    A label is only cut when whitespace precedes it and something labelled came
+    first: "Base Rate:" is one label, not "Base" followed by the label "Rate".
+    """
+
+    first = line.find(":")
+
+    if first < 0:
+        return [line]
+
+    # The line starts with a known label, or a later label stands apart (two spaces or a tab):
+    # otherwise "Special Instructions: Max Weight: 40,000 lbs" would make a weight out of a note
+    starts_known = bool(KNOWN_LABEL_RE.match(line))
+
+    def stands_apart(position):
+        before = line[:position]
+        gap = before[len(before.rstrip()):]
+
+        return len(gap) >= 2 or "\t" in gap
+
+    cuts = [m.start() for m in KNOWN_LABEL_RE.finditer(line, first + 1)
+            if line[m.start() - 1].isspace() and (starts_known or stands_apart(m.start()))]
+
+    if not cuts:
+        return [line]
+
+    bounds = [0, *cuts, len(line)]
+
+    return [line[a:b].strip() for a, b in zip(bounds, bounds[1:]) if line[a:b].strip()]
+
+
+def parse_pairs(text, page, strays=None):
     """
     The "Label:" / value pairs of one page of text, in order. A value is the
     non-blank lines after a label up to the next label; "Label: value" on one
-    line is also a pair. Text before the first label is not a pair.
+    line is also a pair, and a line holding several known labels gives one pair
+    per label. Text before the first label is not a pair. Lines that follow a line
+    of several labels might belong to any of them (columns): those pairs are
+    marked ambiguous. strays, when given, collects the lines before the first label
+    (they belong to no pair).
     """
 
-    pairs, current = [], None
+    pairs, current, shared = [], None, None
 
     for line in text.splitlines():
         line = line.strip()
@@ -343,17 +418,40 @@ def parse_pairs(text, page):
         if not line:
             continue
 
-        only = LABEL_ONLY.match(line)
-        inline = None if only else LABEL_VALUE.match(line)
+        segments = split_known(line)
+        members = []
 
-        if only:
-            current = Pair(only.group(1).strip(), normalize_label(only.group(1)), [], page)
+        for index, segment in enumerate(segments):
+            only = LABEL_ONLY.match(segment)
+            inline = None if only else LABEL_VALUE.match(segment)
+            known = KNOWN_LABEL_RE.match(segment)
+
+            if known:
+                label, value = segment[: known.end() - 1].strip(), segment[known.end():].strip()
+                current = Pair(label, normalize_label(label), [value] if value else [], page, label_percent(label))
+            elif only:
+                current = Pair(only.group(1).strip(), normalize_label(only.group(1)), [], page, label_percent(only.group(1)))
+            elif inline:
+                current = Pair(inline.group(1).strip(), normalize_label(inline.group(1)), [inline.group(2).strip()], page, label_percent(inline.group(1)))
+            elif current is not None:
+                current.lines.append(segment)
+
+                if shared:
+                    for member in shared:
+                        member.ambiguous = True
+
+                continue
+            else:
+                if strays is not None:
+                    strays.append(segment)
+
+                continue
+
             pairs.append(current)
-        elif inline:
-            current = Pair(inline.group(1).strip(), normalize_label(inline.group(1)), [inline.group(2).strip()], page)
-            pairs.append(current)
-        elif current is not None:
-            current.lines.append(line)
+            members.append(current)
+
+        # The pairs of one line of several labels share whatever lines follow it
+        shared = members if len(members) > 1 else None
 
     return pairs
 
@@ -396,6 +494,31 @@ def parse_money(raw):
         code = SYMBOL_CURRENCY[symbol]
 
     return (-amount if negative else amount), code, symbol
+
+
+# Characters that only mark where something would be written: lines, dashes, boxes, brackets
+PLACEHOLDER_CHARS = "_-–—−‐.…=*~/\\|[](){}<>:;·•☐□▢▭"
+PLACEHOLDER_WORDS = {"signature", "sign here", "sign", "print name", "printed name", "name", "n/a", "na"}
+PERCENT_VALUE = re.compile(r"^\(?\s*-?\s*(\d+(?:\.\d+)?)\s*%")
+
+
+def is_placeholder(text):
+    """
+    Whether a line holds nothing a person wrote: only rule characters or empty
+    boxes, a bare X mark ("X ______"), or the form's own caption ("(signature)").
+    """
+
+    core = text.strip()
+
+    if not core:
+        return False
+
+    letters = "".join(c for c in core if c not in PLACEHOLDER_CHARS and not c.isspace())
+
+    if letters == "" or letters.lower() == "x":
+        return True
+
+    return core.strip(PLACEHOLDER_CHARS + " ").lower() in PLACEHOLDER_WORDS
 
 
 def parse_date_text(raw):
@@ -458,6 +581,9 @@ def interpret(spec, pair):
         return value, [], reason
 
     if spec.kind == "money":
+        if PERCENT_VALUE.match(pair.lines[0].strip()):
+            return None, [], "percentage_without_basis: the value is a percentage and no basis is stated, so no amount is calculated"
+
         amount, _, _ = parse_money(pair.lines[0])
         return amount, [], (None if amount is not None else "not a money amount")
 
@@ -498,13 +624,33 @@ def read_spec_field(name, spec, pairs, filename, unreadable):
 
     for pair in found:
         if not pair.lines:
-            readings.append({"pair": pair, "value": None, "warnings": [], "error": None, "empty": True, "cut": 0})
+            readings.append({"pair": pair, "value": None, "warnings": [], "error": None, "empty": True, "cut": 0, "review": False})
             continue
 
-        kept = Pair(pair.label, pair.key, pair.lines[:spec.max_lines], pair.page)
+        # Placeholder lines (rules, dashes, empty boxes) hold nothing written; a name under one is read, with a flag
+        lines = list(pair.lines)
+        skipped = 0
+
+        while lines and is_placeholder(lines[0]):
+            lines.pop(0)
+            skipped += 1
+
+        if not lines:
+            readings.append({"pair": pair, "value": None, "warnings": [], "error": None, "empty": True, "cut": 0, "review": False, "placeholder": True})
+            continue
+
+        kept = replace(pair, lines=lines[:spec.max_lines])
         value, warnings, error = interpret(spec, kept)
-        readings.append({"pair": kept, "value": value, "warnings": list(warnings), "error": error, "empty": False,
-                         "cut": len(pair.lines) - len(kept.lines)})
+        notes = list(warnings)
+
+        if skipped:
+            notes.append("placeholder_line_skipped: a blank line or box came first, and the next text was read instead")
+
+        if pair.ambiguous:
+            notes.append("columns_ambiguous: the lines under a line holding several labels cannot be assigned to one of them")
+
+        readings.append({"pair": kept, "value": value, "warnings": notes, "error": error, "empty": False,
+                         "cut": len(lines) - len(kept.lines), "review": bool(skipped or pair.ambiguous)})
 
     good = [r for r in readings if r["value"] is not None]
     unparseable = [r for r in readings if r["value"] is None and not r["empty"]]
@@ -538,12 +684,19 @@ def read_spec_field(name, spec, pairs, filename, unreadable):
             warnings.append(f"extra_lines_ignored: lines after the value were not used (this field takes at most {spec.max_lines})")
             needs_review = True
 
+        if any(r["review"] for r in good):
+            needs_review = True
+
         return make(name, EXTRACTED, first["pair"], filename, value=first["value"], method="label_pair", basis="exact_label",
                     validation=WARNING if warnings else VALID, warnings=warnings, needs_review=needs_review)
 
     if unparseable:
         return make(name, UNPARSEABLE, unparseable[0]["pair"], filename, method="label_pair", validation=INVALID,
                     warnings=[unparseable[0]["error"]])
+
+    if empty[0].get("placeholder"):
+        return make(name, MISSING, empty[0]["pair"], filename, method="label_pair", validation=NOT_CHECKED, needs_review=spec.review_if_blank,
+                    warnings=["placeholder_only: the field holds only a blank line or box, nothing was written"])
 
     return make(name, MISSING, empty[0]["pair"], filename, method="label_pair", validation=NOT_CHECKED,
                 warnings=["The label is present but has no value."])
@@ -664,7 +817,6 @@ def read_currency(pairs, texts, filename, unreadable):
 
 QTY_RATE = re.compile(r"^(\d+(?:\.\d+)?)\s*[x×@]\s*([$€£]?\s*\d[\d,]*(?:\.\d+)?)\s*=?\s*(.+)$", re.IGNORECASE)
 
-
 # A word of a label that says the number is not a charge: a count, a weight, an
 # identifier, a date, or money already paid or carried over
 NON_CHARGE_WORDS = {
@@ -677,12 +829,58 @@ NON_CHARGE_WORDS = {
 # decide (deducted or not): it is listed for review and the arithmetic is not checked
 ADJUSTMENT_WORDS = {"discount", "discounts", "rebate", "allowance", "adjustment", "writeoff"}
 
-CURRENCY_MARK = re.compile(r"US\$|[$€£]|\b(?:USD|CAD|EUR|GBP|MXN|AUD|JPY|CHF)\b")
+# A label that is a total is never a charge, whichever total it is
+TOTAL_WORDS = {"total", "subtotal", "grand"}
+
+# A tax this extractor has no field for: unresolved, never silently a charge or dropped
+TAX_WORDS = {"tax", "taxes", "vat", "gst", "hst", "pst", "qst"}
+
+# Words that make a label with "tax" in it a total, not a tax amount ("Subtotal Before Tax", "Total Incl. Tax")
+TAX_QUALIFIERS = {"before", "excluding", "excl", "ex", "without", "pre", "including", "incl", "inc", "with", "plus"}
+
+CODES = "USD|CAD|EUR|GBP|MXN|AUD|JPY|CHF"
+CURRENCY_MARK = re.compile(rf"US\$|[$€£]|\b(?:{CODES})\b")
+
+# An amount that says which money it is: a symbol or a code before or after the number
+MARKED_AMOUNT = re.compile(
+    rf"(?:US\$|[$€£])\s*\(?-?\d[\d,]*(?:\.\d+)?\)?|\b(?:{CODES})\s*\(?-?\d[\d,]*(?:\.\d+)?\)?|\(?-?\d[\d,]*(?:\.\d+)?\)?\s*(?:{CODES})\b"
+)
+
+# "Fuel: $18.00" inside a value: a label that is followed by an amount
+EMBEDDED_CHARGE = re.compile(
+    rf"(?:^|(?<=\s))([A-Za-z][{LABEL_CHARS}]{{0,40}}?)\s*:\s*(?=\(?-?\s*(?:US\$|[$€£]|\d|(?:{CODES})\b))"
+)
+
+
+def split_units(label, text):
+    """
+    [(label, text, split)] for the charge or charges a line holds, or None when
+    the line holds several amounts that cannot be told apart reliably. A line is
+    split only into "label: amount" units where every unit is exactly one amount.
+    """
+
+    if QTY_RATE.match(text):
+        return [(label, text, False)]
+
+    embedded = list(EMBEDDED_CHARGE.finditer(text))
+
+    if len(MARKED_AMOUNT.findall(text)) <= 1 and not embedded:
+        return [(label, text, False)]
+
+    if embedded:
+        cuts = [m.start() for m in embedded] + [len(text)]
+        parts = [(label, text[:cuts[0]].strip(), True)]
+        parts += [(m.group(1).strip(), text[m.end():cuts[i + 1]].strip(), True) for i, m in enumerate(embedded)]
+
+        if all(part and parse_money(part)[0] is not None for _, part, _ in parts):
+            return parts
+
+    return None
 
 
 def read_line_items(pairs, filename):
     """
-    The charges of an invoice, as (items, unclassified, excluded).
+    The charges of an invoice, as (items, unclassified, excluded, percentages).
 
     A charge is a "Label: amount" pair whose label is not a total, a subtotal
     or a tax, whose label does not say it is something else (a count, a weight,
@@ -692,21 +890,38 @@ def read_line_items(pairs, filename):
     amounts) are kept with their sign. The labels are not limited to a fixed
     list.
 
-    A number that may or may not be a charge (no currency mark, or a discount
-    or adjustment) is unclassified: listed by label and page (never by its
-    text), it makes the invoice need review and its arithmetic unchecked.
+    Nothing that looks like money is dropped silently. A total (by any label with
+    the word total) is excluded, not a charge. A tax without its own field, a
+    discount, an amount without a currency mark, an amount that cannot be read, an
+    amount on a later line, and a line holding several amounts that cannot be
+    separated are unclassified: listed by label and page (never by their text),
+    they make the invoice need review and its arithmetic unchecked. A charge
+    stated as a percentage is kept as such, with no amount calculated.
+    A line is split into several charges only when it reads as "label: amount"
+    units, and each is then marked split_from_one_line.
     """
 
-    items, unclassified, excluded = [], [], []
+    items, unclassified, excluded, percentages = [], [], [], []
 
-    for pair in pairs:
-        if pair.key in NON_ITEM_LABELS or not pair.lines:
-            continue
+    def unresolved(label, page, reason):
+        unclassified.append({"label": label, "page": page, "reason": reason})
 
-        first = pair.lines[0].strip()
+    def read_unit(label, text, page, split):
+        key = normalize_label(label)
+        words = set(re.findall(r"[a-z0-9]+", key.replace("-", "")))
+
+        if key in NON_ITEM_LABELS:
+            return
+
+        percent = PERCENT_VALUE.match(text)
+
+        if percent:
+            percentages.append({"label": label, "percent": float(percent.group(1)), "page": page})
+            return
+
         quantity = rate = None
-        warnings = []
-        match = QTY_RATE.match(first)
+        warnings = ["split_from_one_line"] if split else []
+        match = QTY_RATE.match(text)
 
         if match:
             quantity = float(match.group(1))
@@ -715,26 +930,60 @@ def read_line_items(pairs, filename):
 
             if amount is not None and rate is not None and abs(round(quantity * rate, 2) - abs(amount)) > 0.01:
                 warnings.append("quantity x rate does not equal the amount")
+                unresolved(label, page, "quantity_rate_mismatch")
         else:
-            amount, _, _ = parse_money(first)
+            amount, _, _ = parse_money(text)
 
         if amount is None:
-            continue
+            if MARKED_AMOUNT.search(text):
+                unresolved(label, page, "amount_not_understood")
 
-        words = set(re.findall(r"[a-z0-9]+", pair.key.replace("-", "")))
-        where = {"label": pair.label, "page": pair.page}
+            return
 
         if words & ADJUSTMENT_WORDS:
-            unclassified.append({**where, "reason": "adjustment_needs_review"})
+            unresolved(label, page, "adjustment_needs_review")
+        elif words & TAX_WORDS and not words & TAX_QUALIFIERS:
+            unresolved(label, page, "tax_without_field")
         elif words & NON_CHARGE_WORDS:
-            excluded.append({**where, "reason": "not_a_charge"})
-        elif not CURRENCY_MARK.search(first):
-            unclassified.append({**where, "reason": "no_currency_mark"})
+            excluded.append({"label": label, "page": page, "reason": "not_a_charge"})
+        elif words & TOTAL_WORDS:
+            excluded.append({"label": label, "page": page, "reason": "total_like_label"})
+        elif words & TAX_WORDS:
+            excluded.append({"label": label, "page": page, "reason": "total_like_label"})
+        elif not CURRENCY_MARK.search(text):
+            unresolved(label, page, "no_currency_mark")
         else:
-            items.append(LineItem(description=pair.label, amount=amount, quantity=quantity, rate=rate, page=pair.page,
-                                  raw_text=pair.raw[:MAX_RAW], source_file=filename, warnings=warnings))
+            items.append(LineItem(description=label, amount=amount, quantity=quantity, rate=rate, page=page,
+                                  raw_text=text[:MAX_RAW], source_file=filename, warnings=warnings))
 
-    return items, unclassified, excluded
+    for pair in pairs:
+        if pair.key in NON_ITEM_LABELS or not pair.lines:
+            continue
+
+        units = split_units(pair.label, pair.lines[0].strip())
+
+        if units is None:
+            unresolved(pair.label, pair.page, "multiple_amounts_on_one_line")
+        else:
+            for label, text, split in units:
+                read_unit(label, text, pair.page, split)
+
+        # Amounts on the lines after the first belong to no charge: they are not dropped silently
+        if any(MARKED_AMOUNT.search(line) or PERCENT_VALUE.match(line.strip()) for line in pair.lines[1:]):
+            unresolved(pair.label, pair.page, "amount_on_following_line")
+
+    # The same label and amount twice may be a recap or a repeated charge: the text cannot say which, so
+    # both stay in the items (nothing is merged) and the set is unresolved: review, arithmetic unchecked
+    seen = {}
+
+    for item in items:
+        seen.setdefault((normalize_label(item.description), item.amount), []).append(item)
+
+    for (_, _), group in seen.items():
+        if len(group) > 1:
+            unresolved(group[1].description, group[1].page, "repeated_charge")
+
+    return items, unclassified, excluded, percentages
 
 
 # ============================================================
@@ -792,7 +1041,13 @@ def extract_document(path, filename=None):
     document_type = classify_document(filename, full_text)
     unreadable = bool(blank)
 
-    pairs = [pair for n, t in with_text for pair in parse_pairs(t, n)]
+    pairs, strays = [], []
+
+    for n, t in with_text:
+        found = []
+        pairs.extend(parse_pairs(t, n, strays=found))
+        strays.extend((n, line) for line in found)
+
     schema = SCHEMAS.get(document_type)
 
     extraction = DocumentExtraction(filename, digest, document_type, S_PARTIAL if blank else S_EXTRACTED, pages=total,
@@ -817,7 +1072,13 @@ def extract_document(path, filename=None):
                 extraction.fields[name] = read_spec_field(name, spec, pairs, filename, unreadable)
 
     if document_type == INVOICE:
-        extraction.line_items, extraction.unclassified_amounts, extraction.excluded_amounts = read_line_items(pairs, filename)
+        (extraction.line_items, extraction.unclassified_amounts, extraction.excluded_amounts,
+         extraction.percentage_charges) = read_line_items(pairs, filename)
+
+        # An amount on a line before the page's first label belongs to no label: never dropped silently
+        for page, line in strays:
+            if MARKED_AMOUNT.search(line):
+                extraction.unclassified_amounts.append({"label": "(a line before the first label)", "page": page, "reason": "amount_outside_a_label"})
 
     if blank:
         extraction.warnings.append(
@@ -850,6 +1111,9 @@ def review(extraction):
     if extraction.unclassified_amounts:
         reasons.append(f"unclassified_amounts: {len(extraction.unclassified_amounts)} amount(s) could not be classified as charges")
 
+    if extraction.percentage_charges:
+        reasons.append(f"percentage_charges: {len(extraction.percentage_charges)} charge(s) are stated as a percentage with no basis; no amount was calculated")
+
     for name in REQUIRED.get(extraction.document_type, ("shipment_id",)):
         item = extraction.fields.get(name)
 
@@ -878,6 +1142,9 @@ def line_total(extraction):
 
     if extraction.unclassified_amounts:
         return None, "some amounts could not be classified as charges"
+
+    if extraction.percentage_charges:
+        return None, "a charge is stated as a percentage and no amount was calculated"
 
     tax = extraction.fields.get("tax")
 
