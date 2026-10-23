@@ -7,6 +7,7 @@ import { useToast } from "@/components/common/toast"
 import { CorrectionDialog } from "@/components/extraction/CorrectionDialog"
 import { CorrectionBadge, FieldStateBadge, STATE_LOOK, ValidationBadge, consumerOf, pageText, valueText } from "@/components/extraction/fields"
 import { CorrectionStoreWarning, RecomputeStatus } from "@/components/extraction/RecomputeStatus"
+import { StoreStateNotice, useStoreWriteBlock } from "@/components/extraction/storeState"
 import { Alert } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -14,7 +15,7 @@ import { Card } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { can, useExtraction, useExtractions, useRunExtraction, useSession, useStaleness } from "@/hooks/queries"
 import { dateTime, label } from "@/lib/format"
-import type { Correction, DocumentFile, ExtractionDetail, ExtractionSummary } from "@/lib/types"
+import type { Correction, DocumentFile, ExtractionAlias, ExtractionDetail, ExtractionSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const TONE_BORDER = { plain: "border-border", ok: "border-ok", warn: "border-warn", bad: "border-bad" } as const
@@ -41,6 +42,7 @@ function FieldRow({ detail, name, canPropose, onPropose }: { detail: ExtractionD
   const legacy = corrections.filter((item) => item.status === "legacy")
   const consumer = consumerOf(detail.document_type, name)
   const title = label(name)
+  const blocked = useStoreWriteBlock()
 
   let action: ReactNode
 
@@ -49,7 +51,7 @@ function FieldRow({ detail, name, canPropose, onPropose }: { detail: ExtractionD
   else if (effective?.proposed) action = <span className="text-xs text-muted-foreground">A correction is awaiting a decision.</span>
   else if (canPropose)
     action = (
-      <Button variant="outline" size="sm" onClick={() => onPropose(name)} aria-label={`Propose a correction for ${title}`}>
+      <Button variant="outline" size="sm" onClick={() => onPropose(name)} disabled={blocked !== null} title={blocked ?? undefined} aria-label={`Propose a correction for ${title}`}>
         <Pencil /> Propose correction
       </Button>
     )
@@ -155,6 +157,68 @@ function FieldRow({ detail, name, canPropose, onPropose }: { detail: ExtractionD
   )
 }
 
+const ALIAS_LOOK: Record<ExtractionAlias["relation"], { text: string; tone: "neutral" | "ok" | "warn" }> = {
+  original: { text: "Original name", tone: "neutral" },
+  same_type: { text: "Same type", tone: "ok" },
+  type_conflict: { text: "Type conflict", tone: "warn" },
+}
+
+/**
+ * The file names this content was seen under. Information only: no alias is used by an audit or a correction, and a
+ * name that classifies as another type is recorded but not used at all. While the store awaits its migration the
+ * records do not exist yet, which is said as "not available", never as "none".
+ */
+function Aliases({ detail }: { detail: ExtractionDetail }) {
+  if (detail.aliases_available === undefined) return null
+
+  if (detail.aliases_available === false) {
+    return (
+      <div data-testid="aliases-unavailable" className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+        <p className="font-medium text-foreground">File names</p>
+        <p className="mt-0.5">Other file names for this content are not available until the extraction store is migrated. This does not mean there are none.</p>
+      </div>
+    )
+  }
+
+  const aliases = detail.aliases ?? []
+
+  if (aliases.length === 0) {
+    return (
+      <div data-testid="aliases-empty" className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+        <p className="font-medium text-foreground">File names</p>
+        <p className="mt-0.5">No file names are recorded for this content.</p>
+      </div>
+    )
+  }
+
+  const conflicts = aliases.filter((item) => item.relation === "type_conflict")
+
+  return (
+    <div data-testid="aliases" className="rounded-md border p-3 text-sm">
+      <p className="font-medium">File names for this content</p>
+      <ul className="mt-2 space-y-1.5">
+        {aliases.map((item) => {
+          const look = ALIAS_LOOK[item.relation] ?? { text: "Unknown relation", tone: "neutral" as const }
+
+          return (
+            <li key={item.id} className="flex flex-wrap items-center gap-2" data-testid={`alias-${item.relation}`}>
+              <span className="break-all">{item.filename}</span>
+              <span className="text-muted-foreground">read as {label(item.inferred_type)}</span>
+              <Badge tone={look.tone}>{look.text}</Badge>
+            </li>
+          )
+        })}
+      </ul>
+      {conflicts.length > 0 && (
+        <p className="mt-2 text-xs text-warn">
+          {conflicts.length === 1 ? "A name" : `${conflicts.length} names`} classified as a different document type than this extraction ({label(detail.document_type)}). Type-conflicting names are recorded for review only: they are not used for any audit calculation and have no corrections.
+        </p>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">File names are information only. They do not change this extraction, its corrections or any audit.</p>
+    </div>
+  )
+}
+
 function ExtractionBody({ detail, canPropose, onPropose }: { detail: ExtractionDetail; canPropose: boolean; onPropose: (field: string) => void }) {
   const { payload } = detail
   const names = Object.keys(payload.fields)
@@ -185,6 +249,8 @@ function ExtractionBody({ detail, canPropose, onPropose }: { detail: ExtractionD
           </div>
         </Alert>
       )}
+
+      <Aliases detail={detail} />
 
       <Table>
         <TableHeader>
@@ -250,6 +316,8 @@ function ExtractionCard({ summary, startOpen, canPropose }: { summary: Extractio
         </span>
         <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {summary.pending_count > 0 && <Badge tone="warn">{summary.pending_count} awaiting approval</Badge>}
+          {typeof summary.alias_count === "number" && summary.alias_count > 1 && <Badge tone="neutral">{summary.alias_count} file names</Badge>}
+          {summary.has_type_conflict === true && <Badge tone="warn">File name type conflict</Badge>}
           {summary.status !== "extracted" && <Badge tone="warn">{label(summary.status)}</Badge>}
           <span>Extractor {summary.extractor_version}</span>
           <span>{dateTime(summary.created_at)}</span>
@@ -281,6 +349,7 @@ function NotExtracted({ documents }: { documents: DocumentFile[] }) {
   const run = useRunExtraction()
   const [working, setWorking] = useState<string | null>(null)
   const canRun = can(session.data, "extraction.run")
+  const blocked = useStoreWriteBlock()
 
   if (documents.length === 0) return null
 
@@ -302,7 +371,7 @@ function NotExtracted({ documents }: { documents: DocumentFile[] }) {
             {file.filename} <span className="text-muted-foreground">has no stored extraction.</span>
           </span>
           {canRun ? (
-            <Button variant="outline" size="sm" disabled={working !== null} onClick={() => extract(file.filename)} aria-label={`Extract fields from ${file.filename}`}>
+            <Button variant="outline" size="sm" disabled={working !== null || blocked !== null} title={blocked ?? undefined} onClick={() => extract(file.filename)} aria-label={`Extract fields from ${file.filename}`}>
               {working === file.filename ? "Extracting…" : "Extract fields"}
             </Button>
           ) : (
@@ -367,6 +436,7 @@ export function ExtractionsSection({ shipmentId, shipmentKey, documents }: { shi
     >
       <div className="space-y-4">
         <CorrectionStoreWarning />
+        <StoreStateNotice />
         <RecomputeStatus shipmentKey={shipmentKey} />
         {body}
       </div>
