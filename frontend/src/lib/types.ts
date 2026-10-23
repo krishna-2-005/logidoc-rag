@@ -471,6 +471,8 @@ export interface ExtractionPayload {
   line_items: ExtractedLineItem[]
   unclassified_amounts: { label: string; page: number | null; reason: string }[]
   excluded_amounts: { label: string; page: number | null; reason: string }[]
+  /** charges stated as a percentage with no basis: no amount is calculated and the invoice needs review */
+  percentage_charges?: { label: string; percent: number; page: number | null }[]
   warnings: string[]
   review_reasons: string[]
   error: string | null
@@ -488,6 +490,18 @@ export interface ExtractionSummary {
   created_at: string
   correction_count: number
   pending_count: number
+  /** names this content was seen under; null while the store awaits its schema upgrade */
+  alias_count?: number | null
+  has_type_conflict?: boolean | null
+}
+
+export interface ExtractionAlias {
+  id: number
+  filename: string
+  inferred_type: string
+  relation: "original" | "same_type" | "type_conflict"
+  first_seen_at: string
+  seen_by: string | null
 }
 
 export interface ExtractionList {
@@ -550,6 +564,9 @@ export interface ExtractionDetail {
   effective: Record<string, EffectiveField>
   corrections: Correction[]
   limitations: string[]
+  aliases?: ExtractionAlias[]
+  /** false while the store awaits its schema upgrade (no alias table yet) */
+  aliases_available?: boolean
 }
 
 export interface PendingList {
@@ -585,10 +602,31 @@ export interface StaleShipment {
   stale_run_ids: number[]
 }
 
+export interface StoreMigration {
+  attempt: "none" | "failed" | "unfinished" | "succeeded" | "unverified"
+  /** a fixed code, never free text */
+  code: string | null
+  at: string | null
+  record: "ok" | "missing" | "ignored" | "unreadable"
+}
+
 export interface Staleness {
   stale: StaleShipment[]
   /** false while the correction store is damaged or from a newer version */
   corrections_available: boolean
+  /** shipments whose stored extractions come from another extractor version than the current one */
+  outdated_cross_checks?: { shipment_key: string; shipment_id: string; fields: string[]; extractor_versions: string[]; current_version: string }[]
+  /** what the extraction store file is: absent, older, migration_pending, current, unavailable or migration_failed */
+  store?: {
+    state: "absent" | "older" | "migration_pending" | "current" | "unavailable" | "migration_failed"
+    version: number | null
+    reason: string
+    /**
+     * The migration command's durable status record, reconciled by the server with the database (the database decides).
+     * attempt "failed" and "unfinished" are only ever sent for a store whose history the record was written for.
+     */
+    migration?: StoreMigration | null
+  }
 }
 
 export interface RecomputeResult {
