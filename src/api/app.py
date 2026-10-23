@@ -32,6 +32,7 @@ from api import routes_assistant, routes_audit, routes_auth, routes_extraction, 
 from api.core import ApiSettings, ApiState, csrf_guard
 from audit_service import Locations
 from auth import ConfigError
+from extraction_store import STORE_STATE_ERRORS
 from review_store import Policy
 
 
@@ -115,6 +116,15 @@ def create_app(state=None, settings=None):
         ]
 
         return JSONResponse(status_code=422, content={"detail": "; ".join(problems) or "Invalid request."})
+
+    async def store_not_usable(request: Request, error: Exception):
+
+        # Unreadable, too new, invalid, awaiting an upgrade, or an upgrade that failed: never an empty answer.
+        # The messages name no path and no document text.
+        return JSONResponse(status_code=503, content={"detail": str(error)})
+
+    for kind in STORE_STATE_ERRORS:
+        app.add_exception_handler(kind, store_not_usable)
 
     @app.exception_handler(ConfigError)
     async def misconfigured(request: Request, error: ConfigError):

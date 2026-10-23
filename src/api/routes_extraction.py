@@ -76,14 +76,26 @@ class RecomputeBody(BaseModel):
     shipment_id: str | None = Field(default=None, max_length=100)
 
 
-def store_of(state, create=False):
+def store_of(state):
+    """
+    A read-only store, or None when there is no store file. A GET never creates, upgrades or writes the
+    database. An unreadable, too-new or invalid file raises StoreUnavailable, and a file older than the first
+    schema that holds approvals raises MigrationPending (answered 503): neither is shown as "no extractions".
+    """
 
     path = state.locations.extraction_path()
+    found = ExtractionStore.inspect(path)
 
-    if not path.is_file() and not create:
-        return None
+    if found.state in (store_module.OLDER, store_module.MIGRATION_FAILED) and not ExtractionStore.readable(found):
+        raise store_module.MigrationPending(found.reason)
 
-    return ExtractionStore(path)
+    return ExtractionStore.open_for_reading(path)
+
+
+def writable_store_of(state, create=False):
+    """A store a write may use. Never upgrades a file that holds approvals (MigrationPending, MigrationFailed, 503)."""
+
+    return ExtractionStore.open_for_write(state.locations.extraction_path(), create=create)
 
 
 def summary(record, store):
@@ -91,6 +103,8 @@ def summary(record, store):
     corrections = store.corrections(record["id"])
     item["correction_count"] = len(corrections)
     item["pending_count"] = sum(1 for c in corrections if c["status"] == store_module.PENDING)
+    # None for a valid older store that has no alias table yet (its upgrade is pending)
+    item["alias_count"], item["has_type_conflict"] = store.alias_counts(record["id"])
 
     return item
 
@@ -139,7 +153,8 @@ def pending(principal=View, state: ApiState = Depends(get_state)):
 def staleness(principal=Depends(require(authz.HISTORY_VIEW)), state: ApiState = Depends(get_state)):
     """Shipments whose latest recorded run did not consume the approved corrections the audit reads now."""
 
-    return {"stale": state.service.staleness(), "corrections_available": state.service.corrections_available()}
+    return {"stale": state.service.staleness(), "corrections_available": state.service.corrections_available(),
+            "outdated_cross_checks": state.service.outdated_cross_checks(), "store": state.service.store_state()}
 
 
 @router.post("/recompute")
@@ -178,11 +193,16 @@ def run_extraction(body: RunBody, principal=Run, state: ApiState = Depends(get_s
     if not extraction.sha256:
         raise HTTPException(status_code=422, detail="The document could not be read.")
 
-    store = store_of(state, create=True)
-    extraction_id, created = store.save(extraction)
+    store = writable_store_of(state, create=True)
 
-    return {"id": extraction_id, "created": created, "status": extraction.status, "complete": extraction.complete,
-            "review_reasons": extraction.review_reasons}
+    try:
+        saved = store.save_with_alias(extraction, actor=principal.username)
+    except store_module.AliasTypeConflict as error:
+        # The conflicting name is already recorded (committed before this refusal); the stored extraction is untouched
+        raise HTTPException(status_code=409, detail=str(error)) from None
+
+    return {"id": saved["id"], "created": saved["created"], "alias": saved["alias"], "status": extraction.status,
+            "complete": extraction.complete, "review_reasons": extraction.review_reasons}
 
 
 @router.get("/{extraction_id}")
@@ -194,15 +214,17 @@ def extraction_detail(extraction_id: RowId, principal=View, state: ApiState = De
     if record is None:
         raise HTTPException(status_code=404, detail="No such extraction.")
 
+    aliases = store.aliases(extraction_id)
+
     return {**record, "effective": store.effective(extraction_id), "corrections": store.corrections(extraction_id),
-            "limitations": LIMITATIONS}
+            "aliases": aliases or [], "aliases_available": aliases is not None, "limitations": LIMITATIONS}
 
 
 @router.post("/{extraction_id}/corrections")
 def propose_correction(extraction_id: RowId, body: CorrectionBody, principal=Correct, state: ApiState = Depends(get_state)):
     """Records a proposed correction. It has no effect until it is approved."""
 
-    store = store_of(state)
+    store = writable_store_of(state)
 
     if store is None or store.row(extraction_id) is None:
         raise HTTPException(status_code=404, detail="No such extraction.")
@@ -213,6 +235,8 @@ def propose_correction(extraction_id: RowId, body: CorrectionBody, principal=Cor
         raise denied(error) from None
     except store_module.StaleCorrection as error:
         raise HTTPException(status_code=409, detail=str(error)) from None
+    except store_module.STORE_STATE_ERRORS:
+        raise
     except store_module.StoreError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
 
@@ -231,6 +255,8 @@ def decide(correction_id: RowId, body: DecisionBody, principal=Approve, state: A
         raise denied(error) from None
     except store_module.InvalidTransition as error:
         raise HTTPException(status_code=409, detail=str(error)) from None
+    except store_module.STORE_STATE_ERRORS:
+        raise
     except store_module.StoreError as error:
         status = 404 if "Unknown correction" in str(error) else 422
         raise HTTPException(status_code=status, detail=str(error)) from None
