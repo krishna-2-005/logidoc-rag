@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
 import { Download, History as HistoryIcon, Info } from "lucide-react"
 import { Fragment, useState } from "react"
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
+import { Legend as ChartLegend, Swatch } from "@/components/common/Charts"
 import { PageHeader, Section } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
 import { EmptyState, ErrorState, LoadingBlock, errorMessage } from "@/components/common/states"
@@ -17,15 +18,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs } from "@/components/ui/tabs"
 import { can, useRecordRun, useRuns, useSession, useShipmentHistory, useShipments, useStaleness, useTrends } from "@/hooks/queries"
 import { download, get } from "@/lib/api"
-import { CHART } from "@/lib/chart"
+import { CHART, SERIES as SERIES_COLOURS } from "@/lib/chart"
 import { count, dateTime, interval, money, NA, rate } from "@/lib/format"
 import type { AuditRun, Proportion, SnapshotChanges, Snapshot, Trends } from "@/lib/types"
 
+// Four identities, so four categorical slots in their fixed order (never status colours)
 const SERIES: [string, "discrepancy" | "delay" | "shortage" | "invoice_mismatch", string][] = [
-  ["Discrepancy rate", "discrepancy", CHART.bad],
-  ["Delay rate", "delay", CHART.warn],
-  ["Shortage rate", "shortage", CHART.info],
-  ["Invoice arithmetic mismatch rate", "invoice_mismatch", CHART.neutral],
+  ["Discrepancy rate", "discrepancy", SERIES_COLOURS[0]],
+  ["Delay rate", "delay", SERIES_COLOURS[1]],
+  ["Shortage rate", "shortage", SERIES_COLOURS[2]],
+  ["Invoice arithmetic mismatch rate", "invoice_mismatch", SERIES_COLOURS[3]],
 ]
 
 function Rate({ item }: { item: Proportion }) {
@@ -126,6 +128,28 @@ function TrendsTab() {
   )
 }
 
+/** The hover card of the trend chart: the period, then each rate with its swatch; a missing rate says so. */
+function RateTooltip({ active, payload, label }: { active?: boolean; payload?: { name?: string; value?: number | null; color?: string }[]; label?: string }) {
+  if (!active || !payload?.length) return null
+
+  return (
+    <div className="min-w-48 rounded-lg border bg-card px-3 py-2.5 text-xs shadow-raised">
+      <p className="mb-1.5 font-medium">{label}</p>
+      <ul className="space-y-1">
+        {payload.map((item) => (
+          <li key={item.name} className="flex items-center justify-between gap-4">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <Swatch colour={item.color ?? CHART.neutral} />
+              {item.name}
+            </span>
+            <span className="tabular font-medium">{item.value === null || item.value === undefined ? "n/a" : `${item.value}%`}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function TrendsBody({ data, canExport, onExport }: { data: Trends; canExport: boolean; onExport: () => void }) {
   const chart = data.series.map((entry) => ({
     period: entry.period,
@@ -145,19 +169,30 @@ function TrendsBody({ data, canExport, onExport }: { data: Trends; canExport: bo
       )}
 
       {data.series.length >= 2 && (
-        <Card className="p-5">
-          <h3 className="mb-1 text-sm font-semibold">Rates by period</h3>
-          <p className="mb-3 text-xs text-muted-foreground">Percent of the shipments the question could be answered for. A period where a rate cannot be calculated has a gap, not a zero.</p>
+        <Card className="p-6">
+          <h3 className="text-[15px] font-semibold">Rates by period</h3>
+          <p className="mb-4 mt-1.5 text-[13px] text-muted-foreground">Percent of the shipments the question could be answered for. A period where a rate cannot be calculated has a gap, not a zero.</p>
+          <ChartLegend items={SERIES.map(([name, , colour]) => ({ key: name, label: name, colour }))} className="mb-4" />
           <div role="img" aria-label={`Rates by period for ${data.series.map((entry) => entry.period).join(", ")}. The same figures, with sample sizes, are in the table below.`} className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chart} margin={{ left: 0, right: 16, top: 8 }}>
+              <LineChart data={chart} margin={{ left: -8, right: 16, top: 8, bottom: 0 }}>
                 <CartesianGrid stroke={CHART.grid} vertical={false} />
-                <XAxis dataKey="period" stroke={CHART.axis} fontSize={12} />
-                <YAxis unit="%" domain={[0, 100]} stroke={CHART.axis} fontSize={12} />
-                <ChartTooltip />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <XAxis dataKey="period" stroke={CHART.axis} fontSize={12} tickLine={false} axisLine={{ stroke: CHART.grid }} tickMargin={8} />
+                <YAxis unit="%" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} stroke={CHART.axis} fontSize={12} tickLine={false} axisLine={false} />
+                <ChartTooltip content={<RateTooltip />} cursor={{ stroke: CHART.grid, strokeWidth: 1 }} />
                 {SERIES.map(([name, , colour]) => (
-                  <Line key={name} dataKey={name} stroke={colour} strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
+                  <Line
+                    key={name}
+                    dataKey={name}
+                    stroke={colour}
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    dot={{ r: 4, fill: colour, stroke: "#ffffff", strokeWidth: 2 }}
+                    activeDot={{ r: 5, fill: colour, stroke: "#ffffff", strokeWidth: 2 }}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
                 ))}
               </LineChart>
             </ResponsiveContainer>
