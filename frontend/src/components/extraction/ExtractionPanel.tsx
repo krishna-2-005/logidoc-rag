@@ -343,7 +343,7 @@ function ExtractionCard({ summary, startOpen, canPropose }: { summary: Extractio
   )
 }
 
-function NotExtracted({ documents }: { documents: DocumentFile[] }) {
+function NotExtracted({ documents, heading }: { documents: DocumentFile[]; heading?: boolean }) {
   const session = useSession()
   const toast = useToast()
   const run = useRunExtraction()
@@ -365,6 +365,12 @@ function NotExtracted({ documents }: { documents: DocumentFile[] }) {
 
   return (
     <Card className="divide-y">
+      {heading && (
+        <div className="px-4 py-4">
+          <h3 className="text-[15px] font-semibold">No extraction stored for this shipment</h3>
+          <p className="mt-1 text-[13px] text-muted-foreground">Extracting a document reads its fields into typed values with their source. Nothing is changed by viewing them.</p>
+        </div>
+      )}
       {documents.map((file) => (
         <div key={file.filename} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
           <span className="min-w-0 break-all">
@@ -411,13 +417,13 @@ export function ExtractionsSection({ shipmentId, shipmentKey, documents }: { shi
 
     body = (
       <div className="space-y-4">
-        {rows.length === 0 && (
+        {rows.length === 0 && missing.length === 0 && (
           <EmptyState title="No extraction stored for this shipment">Extracting a document reads its fields into typed values with their source. Nothing is changed by viewing them.</EmptyState>
         )}
         {rows.map((summary, index) => (
           <ExtractionCard key={summary.id} summary={summary} startOpen={index === 0} canPropose={canPropose} />
         ))}
-        <NotExtracted documents={missing} />
+        <NotExtracted documents={missing} heading={rows.length === 0} />
       </div>
     )
   }

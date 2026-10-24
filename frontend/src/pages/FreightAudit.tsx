@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom"
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 import { DeliveryCard, InvoiceCard, QuantityCard } from "@/components/common/AuditComparison"
+import { BarList } from "@/components/common/Charts"
 import { PageHeader, Section } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/common/states"
@@ -142,7 +142,7 @@ export function FreightAudit() {
             </span>
           </div>
 
-          <section aria-label="Comparisons" className="grid gap-4 lg:grid-cols-3">
+          <section aria-label="Comparisons" className="grid items-start gap-4 lg:grid-cols-3">
             <QuantityCard audit={shipment.data.result.quantity} />
             <DeliveryCard audit={shipment.data.result.delivery} />
             <InvoiceCard audit={shipment.data.result.invoice} />
@@ -150,27 +150,42 @@ export function FreightAudit() {
 
           <Section title="Invoice composition" description="Each line item the invoice states. A missing amount is left out, not drawn as zero.">
             <Card>
-              <CardContent className="pt-5">
+              <CardContent className="pt-6">
                 {(() => {
-                  const items = shipment.data!.result.invoice!.line_items.filter(([, amount]) => amount !== null).map(([name, amount]) => ({ name, amount: amount as number }))
+                  const invoice = shipment.data!.result.invoice!
+                  const items = invoice.line_items.filter(([, amount]) => amount !== null).map(([name, amount]) => ({ name, amount: amount as number }))
 
                   if (items.length === 0) return <p className="text-sm text-muted-foreground">No line item amount could be read.</p>
 
+                  const sum = items.reduce((total, item) => total + item.amount, 0)
+
                   return (
-                    <div role="img" aria-label={`Invoice line items: ${items.map((item) => `${item.name} ${money(item.amount)}`).join(", ")}. Stated total ${money(shipment.data!.result.invoice!.total)}.`} className="h-56">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={items} margin={{ left: 8, right: 8 }}>
-                          <CartesianGrid vertical={false} stroke={CHART.grid} />
-                          <XAxis dataKey="name" stroke={CHART.axis} fontSize={12} />
-                          <YAxis stroke={CHART.axis} fontSize={12} tickFormatter={(value: number) => `$${value}`} />
-                          <ChartTooltip formatter={(value) => money(Number(value))} cursor={{ fill: "#f1f5f9" }} />
-                          <Bar dataKey="amount" name="Amount" radius={[4, 4, 0, 0]} label={{ position: "top", fontSize: 12, fill: CHART.axis, formatter: (value: unknown) => money(Number(value)) }}>
-                            {items.map((item) => (
-                              <Cell key={item.name} fill={CHART.info} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+                    <div className="grid gap-8 lg:grid-cols-[1fr_16rem]">
+                      <BarList
+                        label="Invoice line items"
+                        rows={[...items]
+                          .sort((a, b) => b.amount - a.amount)
+                          .map((item) => ({
+                            key: item.name, name: item.name, label: item.name, display: money(item.amount),
+                            parts: [{ key: "amount", label: "Amount", value: Math.max(item.amount, 0), colour: CHART.info }],
+                          }))}
+                      />
+                      <dl className="space-y-3 rounded-lg bg-muted/60 p-4 text-sm" aria-label="Invoice totals">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <dt className="text-muted-foreground">Sum of line items</dt>
+                          <dd className="tabular font-medium">{money(sum)}</dd>
+                        </div>
+                        <div className="flex items-baseline justify-between gap-3">
+                          <dt className="text-muted-foreground">Stated total</dt>
+                          <dd className="tabular font-medium">{money(invoice.total)}</dd>
+                        </div>
+                        {invoice.total !== null && invoice.total !== undefined && Math.abs(invoice.total - sum) >= 0.005 && (
+                          <div className="flex items-baseline justify-between gap-3 border-t pt-3">
+                            <dt className="text-muted-foreground">Not explained by line items</dt>
+                            <dd className="tabular font-semibold text-bad">{money(invoice.total - sum)}</dd>
+                          </div>
+                        )}
+                      </dl>
                     </div>
                   )
                 })()}
@@ -184,15 +199,18 @@ export function FreightAudit() {
 
           {shipment.data.result.discrepancies && shipment.data.result.discrepancies.length > 0 && (
             <Section title="Discrepancies">
-              <div className="space-y-2">
-                {shipment.data.result.discrepancies.map((item, index) => (
-                  <Alert key={index} tone="bad">
-                    <p>
-                      <span className="font-medium">{item.category}:</span> {item.description}
-                    </p>
-                  </Alert>
-                ))}
-              </div>
+              <Card>
+                <ul className="divide-y">
+                  {shipment.data.result.discrepancies.map((item, index) => (
+                    <li key={index} className="flex gap-3 px-5 py-4 text-sm">
+                      <span aria-hidden="true" className="mt-1.5 size-2 shrink-0 rounded-full bg-bad" />
+                      <p>
+                        <span className="font-medium">{item.category}:</span> <span className="text-muted-foreground">{item.description}</span>
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
             </Section>
           )}
         </>
