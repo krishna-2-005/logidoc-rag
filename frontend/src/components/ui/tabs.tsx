@@ -28,7 +28,7 @@ export function Tabs({ items, value, onChange, children, label }: { items: TabIt
 
   return (
     <div>
-      <div role="tablist" aria-label={label} className="mb-5 flex gap-1 overflow-x-auto border-b">
+      <div role="tablist" aria-label={label} className="mb-6 flex gap-1 overflow-x-auto overflow-y-hidden border-b [scrollbar-width:none]">
         {items.map((item, index) => {
           const selected = item.id === value
 

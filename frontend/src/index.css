@@ -8,32 +8,32 @@
 */
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    --background: 220 20% 97.5%;
+    --foreground: 224 32% 11%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 224 32% 11%;
 
-    --primary: 217 91% 33%;
+    --primary: 224 76% 46%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 214 32% 93%;
-    --secondary-foreground: 222 47% 14%;
-    --muted: 214 32% 94%;
-    --muted-foreground: 215 19% 33%;
-    --accent: 214 40% 94%;
-    --accent-foreground: 222 47% 14%;
-    --destructive: 0 70% 40%;
+    --secondary: 220 16% 95%;
+    --secondary-foreground: 224 30% 15%;
+    --muted: 220 16% 95.5%;
+    --muted-foreground: 220 9% 38%;
+    --accent: 222 60% 96%;
+    --accent-foreground: 224 60% 30%;
+    --destructive: 0 70% 42%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 214 24% 87%;
-    --input: 214 20% 78%;
-    --ring: 217 91% 45%;
+    --border: 220 14% 90%;
+    --input: 220 13% 82%;
+    --ring: 224 76% 52%;
 
-    /* The sidebar */
-    --navy: 218 66% 16%;
-    --navy-deep: 220 70% 11%;
-    --navy-line: 218 40% 26%;
-    --navy-text: 213 40% 90%;
+    /* Dark surfaces: tooltips and the mobile bar */
+    --navy: 224 30% 12%;
+    --navy-deep: 224 35% 8%;
+    --navy-line: 224 20% 22%;
+    --navy-text: 220 14% 92%;
 
     /* Status: a strong colour on its own soft background */
     --ok: 162 90% 19%;
@@ -55,7 +55,7 @@
   }
 
   body {
-    @apply bg-background font-sans text-foreground antialiased;
+    @apply bg-background font-sans text-[14px] text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 

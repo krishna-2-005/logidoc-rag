@@ -29,12 +29,15 @@ export default {
         bad: { DEFAULT: "hsl(var(--bad))", soft: "hsl(var(--bad-soft))" },
         info: { DEFAULT: "hsl(var(--info))", soft: "hsl(var(--info-soft))" },
       },
-      borderRadius: { lg: "0.625rem", md: "0.5rem", sm: "0.375rem" },
+      borderRadius: { lg: "0.75rem", md: "0.5rem", sm: "0.375rem" },
       fontFamily: {
-        sans: ['"Inter"', "ui-sans-serif", "system-ui", "-apple-system", '"Segoe UI"', "Roboto", "sans-serif"],
+        sans: ['"Inter Variable"', '"Inter"', "ui-sans-serif", "system-ui", "-apple-system", '"Segoe UI"', "Roboto", "sans-serif"],
         mono: ["ui-monospace", '"Cascadia Code"', "Menlo", "Consolas", "monospace"],
       },
-      boxShadow: { card: "0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06)" },
+      boxShadow: {
+        card: "0 1px 2px 0 rgb(16 24 40 / 0.04)",
+        raised: "0 1px 2px 0 rgb(16 24 40 / 0.05), 0 4px 12px -2px rgb(16 24 40 / 0.06)",
+      },
     },
   },
   plugins: [],
