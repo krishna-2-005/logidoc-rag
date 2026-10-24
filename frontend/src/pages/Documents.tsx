@@ -30,7 +30,7 @@ function References({ file }: { file: DocumentFile }) {
 
   return (
     <details className="text-xs">
-      <summary className="cursor-pointer font-medium text-primary">Cited {file.references.length}×</summary>
+      <summary className="cursor-pointer whitespace-nowrap font-medium text-primary">Cited {file.references.length}×</summary>
       <ul className="mt-1.5 max-w-md space-y-1">
         {file.references.map((reference, index) => (
           <li key={index} className="rounded bg-muted/70 px-2 py-1">
@@ -85,7 +85,7 @@ function DocumentsTab() {
               <TableCell>{file.document_type ?? NA}</TableCell>
               <TableCell>
                 {file.shipment_id ? (
-                  <Link to={`/shipments/${encodeURIComponent(file.shipment_id)}`} className="text-primary hover:underline">
+                  <Link to={`/shipments/${encodeURIComponent(file.shipment_id)}`} className="whitespace-nowrap text-primary hover:underline">
                     {file.shipment_id}
                   </Link>
                 ) : (
@@ -94,12 +94,12 @@ function DocumentsTab() {
               </TableCell>
               <TableCell>
                 <StatusBadge status={file.status} />
-                <p className="mt-1 max-w-[14rem] text-xs text-muted-foreground">{file.error ?? file.status_text}</p>
+                {(file.error || file.text_pages !== file.total_pages) && <p className="mt-1 max-w-[14rem] text-xs text-muted-foreground">{file.error ?? file.status_text}</p>}
               </TableCell>
-              <TableCell className="tabular">
+              <TableCell className="tabular whitespace-nowrap">
                 {file.text_pages ?? NA} of {file.total_pages ?? NA}
               </TableCell>
-              <TableCell className="tabular">{formatSize(file.size)}</TableCell>
+              <TableCell className="tabular whitespace-nowrap">{formatSize(file.size)}</TableCell>
               <TableCell>
                 <References file={file} />
               </TableCell>

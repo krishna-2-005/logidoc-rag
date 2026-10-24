@@ -104,7 +104,7 @@ export function ShipmentDetailPage() {
       {!result.success && <Alert tone="bad">{result.error ?? "Reconciliation failed."}</Alert>}
 
       {result.success && result.quantity && result.delivery && result.invoice && (
-        <section aria-label="Audit comparisons" className="grid gap-4 lg:grid-cols-3">
+        <section aria-label="Audit comparisons" className="grid items-start gap-4 lg:grid-cols-3">
           <QuantityCard audit={result.quantity} />
           <DeliveryCard audit={result.delivery} />
           <InvoiceCard audit={result.invoice} />

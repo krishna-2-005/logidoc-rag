@@ -6,6 +6,7 @@ import App from "@/App"
 import { ToastProvider } from "@/components/common/toast"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ApiError } from "@/lib/api"
+import "@fontsource-variable/inter"
 import "@/index.css"
 
 const client = new QueryClient({

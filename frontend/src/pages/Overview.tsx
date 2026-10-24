@@ -1,15 +1,15 @@
 import { AlertTriangle, ClipboardCheck, DollarSign, Eye, FileX2, PackageCheck, Percent, RefreshCw, Truck } from "lucide-react"
 import { Link } from "react-router-dom"
-import { Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
+import { BarList, Legend, ProportionBar, type Segment } from "@/components/common/Charts"
 import { EmptyState, ErrorState, KpiSkeletons, LoadingBlock } from "@/components/common/states"
 import { KpiCard } from "@/components/common/KpiCard"
 import { PageHeader, Section } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, ChartCard } from "@/components/ui/card"
 import { useOverview } from "@/hooks/queries"
-import { CHART, REVIEW_COLOURS, STATUS_COLOURS, summarize } from "@/lib/chart"
+import { CHART, REVIEW_COLOURS, REVIEW_ORDER, STATUS_COLOURS, STATUS_ORDER, sentence } from "@/lib/chart"
 import { count, money, NA } from "@/lib/format"
 
 export function Overview() {
@@ -71,12 +71,14 @@ export function Overview() {
 
   const { kpis, exposure } = data
 
-  const statuses = Object.entries(data.status_counts).map(([name, value]) => ({ name, value }))
+  const ordered = (names: string[], counts: Record<string, number>) => [...names.filter((name) => name in counts), ...Object.keys(counts).filter((name) => !names.includes(name))]
+  const statuses: Segment[] = ordered(STATUS_ORDER, data.status_counts).map((name) => ({ key: name, label: sentence(name), value: data.status_counts[name], colour: STATUS_COLOURS[name] ?? CHART.neutral }))
+  const reviewCounts = data.reviews as unknown as Record<string, number>
+  const reviews: Segment[] = ordered(REVIEW_ORDER, reviewCounts).map((name) => ({ key: name, label: sentence(name), value: reviewCounts[name], colour: REVIEW_COLOURS[name] ?? CHART.neutral }))
   const categories = Object.entries(data.category_counts)
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value)
-  const reviews = Object.entries(data.reviews).map(([name, value]) => ({ name, value }))
-  const carriers = data.carriers.map((item) => ({ name: item.carrier, "With discrepancies": item.with_discrepancies, "No discrepancy found": item.shipments - item.with_discrepancies }))
+  const carriers = [...data.carriers].sort((a, b) => b.shipments - a.shipments)
 
   return (
     <>
@@ -116,7 +118,7 @@ export function Overview() {
         />
         <KpiCard title="Needs review" value={count(kpis.needs_review)} detail={`${count(kpis.no_discrepancies)} with no discrepancies`} icon={<Eye />} tone={kpis.needs_review > 0 ? "warn" : "ok"} definition={data.metric_definitions.needs_review} />
         <KpiCard
-          title="Invoice arithmetic variance"
+          title="Invoice variance"
           value={money(kpis.invoice_variance)}
           detail={kpis.invoice_variance === null ? "No invoice could be checked" : `Across ${kpis.invoice_variance_covered} invoice${kpis.invoice_variance_covered === 1 ? "" : "s"}`}
           icon={<DollarSign />}
@@ -125,104 +127,63 @@ export function Overview() {
       </section>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Audit result by shipment</CardTitle>
-            <CardDescription>{summarize(statuses.map((item) => [item.name.toLowerCase(), item.value]), "shipments")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div role="img" aria-label={`Shipments by audit result: ${summarize(statuses.map((item) => [item.name.toLowerCase(), item.value]), "shipments")}`} className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={statuses} layout="vertical" margin={{ left: 8, right: 24 }}>
-                  <CartesianGrid horizontal={false} stroke={CHART.grid} />
-                  <XAxis type="number" allowDecimals={false} stroke={CHART.axis} fontSize={12} />
-                  <YAxis type="category" dataKey="name" width={170} stroke={CHART.axis} fontSize={12} tickFormatter={(value: string) => value.charAt(0) + value.slice(1).toLowerCase()} />
-                  <ChartTooltip cursor={{ fill: "#f1f5f9" }} />
-                  <Bar dataKey="value" name="Shipments" radius={[0, 4, 4, 0]} label={{ position: "right", fontSize: 12, fill: CHART.axis }}>
-                    {statuses.map((item) => (
-                      <Cell key={item.name} fill={STATUS_COLOURS[item.name] ?? CHART.neutral} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+        <ChartCard title="Audit results" description="Every identified shipment, by what the audit found.">
+          <ProportionBar segments={statuses} unit={statuses.reduce((sum, item) => sum + item.value, 0) === 1 ? "shipment" : "shipments"} label="Shipments by audit result" />
+        </ChartCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Discrepancy categories</CardTitle>
-            <CardDescription>{categories.length === 0 ? "No discrepancy was detected." : summarize(categories.map((item) => [item.name, item.value]), "discrepancies")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {categories.length === 0 ? (
-              <EmptyState title="No discrepancies">Every reconciled shipment agrees across its documents.</EmptyState>
-            ) : (
-              <div role="img" aria-label={`Discrepancies by category: ${summarize(categories.map((item) => [item.name, item.value]), "discrepancies")}`} className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={categories} layout="vertical" margin={{ left: 8, right: 24 }}>
-                    <CartesianGrid horizontal={false} stroke={CHART.grid} />
-                    <XAxis type="number" allowDecimals={false} stroke={CHART.axis} fontSize={12} />
-                    <YAxis type="category" dataKey="name" width={120} stroke={CHART.axis} fontSize={12} />
-                    <ChartTooltip cursor={{ fill: "#f1f5f9" }} />
-                    <Bar dataKey="value" name="Shipments" fill={CHART.bad} radius={[0, 4, 4, 0]} label={{ position: "right", fontSize: 12, fill: CHART.axis }} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard
+          title="Exception review queue"
+          description="Review state is kept apart from the audit: resolving an exception never changes what the audit found."
+          action={
+            <Link to="/exceptions" className="text-xs font-medium text-primary hover:underline">
+              Open queue
+            </Link>
+          }
+        >
+          <ProportionBar segments={reviews} unit={reviews.reduce((sum, item) => sum + item.value, 0) === 1 ? "exception" : "exceptions"} label="Exceptions by review state" />
+        </ChartCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Carriers</CardTitle>
-            <CardDescription>Shipments per carrier named on the BOL. Small samples say little about a carrier; see Audit History for scorecards with sample sizes.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div role="img" aria-label={`Shipments per carrier: ${data.carriers.map((item) => `${item.carrier} ${item.shipments}, of which ${item.with_discrepancies} with discrepancies`).join("; ")}`} className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={carriers} margin={{ left: 0, right: 8 }}>
-                  <CartesianGrid vertical={false} stroke={CHART.grid} />
-                  <XAxis dataKey="name" stroke={CHART.axis} fontSize={12} />
-                  <YAxis allowDecimals={false} stroke={CHART.axis} fontSize={12} />
-                  <ChartTooltip cursor={{ fill: "#f1f5f9" }} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="With discrepancies" stackId="a" fill={CHART.bad} />
-                  <Bar dataKey="No discrepancy found" stackId="a" fill={CHART.ok} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+        <ChartCard title="Discrepancy categories" description={categories.length === 0 ? "No discrepancy was detected." : "Discrepancies found, by what disagreed across the documents."}>
+          {categories.length === 0 ? (
+            <EmptyState title="No discrepancies">Every reconciled shipment agrees across its documents.</EmptyState>
+          ) : (
+            <BarList
+              label="Discrepancies by category"
+              rows={categories.map((item) => ({
+                key: item.name, name: item.name, label: item.name, display: count(item.value),
+                parts: [{ key: "value", label: "Discrepancies", value: item.value, colour: CHART.bad }],
+              }))}
+            />
+          )}
+        </ChartCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Exception review queue</CardTitle>
-            <CardDescription>
-              Review state is kept apart from the audit: resolving an exception never changes what the audit found.{" "}
-              <Link to="/exceptions" className="font-medium text-primary underline underline-offset-2">
-                Open the Exception Center
-              </Link>
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div role="img" aria-label={`Exceptions by review state: ${summarize(reviews.map((item) => [item.name.replace("_", " "), item.value]), "exceptions")}`} className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={reviews} margin={{ left: 0, right: 8 }}>
-                  <CartesianGrid vertical={false} stroke={CHART.grid} />
-                  <XAxis dataKey="name" stroke={CHART.axis} fontSize={12} tickFormatter={(value: string) => value.replace("_", " ")} />
-                  <YAxis allowDecimals={false} stroke={CHART.axis} fontSize={12} />
-                  <ChartTooltip cursor={{ fill: "#f1f5f9" }} />
-                  <Bar dataKey="value" name="Exceptions" radius={[4, 4, 0, 0]} label={{ position: "top", fontSize: 12, fill: CHART.axis }}>
-                    {reviews.map((item) => (
-                      <Cell key={item.name} fill={REVIEW_COLOURS[item.name]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+        <ChartCard title="Carriers" description="Shipments per carrier named on the BOL. Small samples say little about a carrier; Audit History has scorecards with sample sizes.">
+          {carriers.length === 0 ? (
+            <EmptyState title="No carrier named">No reconciled shipment names a carrier on its BOL.</EmptyState>
+          ) : (
+            <>
+              <Legend
+                className="mb-4"
+                items={[
+                  { key: "bad", label: "Discrepancies found", colour: CHART.bad },
+                  { key: "ok", label: "No discrepancy found", colour: CHART.info },
+                ]}
+              />
+              <BarList
+                label="Shipments per carrier"
+                rows={carriers.map((item) => ({
+                  key: item.carrier, name: item.carrier, label: item.carrier,
+                  display: `${count(item.shipments)} shipment${item.shipments === 1 ? "" : "s"}`,
+                  note: item.with_discrepancies > 0 ? `${count(item.with_discrepancies)} with discrepancies` : "No discrepancy found",
+                  parts: [
+                    { key: "bad", label: "Discrepancies found", value: item.with_discrepancies, colour: CHART.bad },
+                    { key: "ok", label: "No discrepancy found", value: item.shipments - item.with_discrepancies, colour: CHART.info },
+                  ],
+                }))}
+              />
+            </>
+          )}
+        </ChartCard>
       </div>
 
       <Section title="Financial exposure" description={data.exposure_note}>
@@ -235,20 +196,28 @@ export function Overview() {
       </Section>
 
       <Section title="Document readiness">
-        <Card className="p-5">
-          <div className="flex flex-wrap items-center gap-x-8 gap-y-3 text-sm">
-            <span className="flex items-center gap-2">
-              <StatusBadge status="ready" /> {data.completeness.ready} shipment{data.completeness.ready === 1 ? "" : "s"} with a BOL, invoice and POD
-            </span>
-            <span className="flex items-center gap-2">
-              <StatusBadge status="incomplete" /> {data.completeness.incomplete} missing a document
-            </span>
-            <span className="text-muted-foreground">
-              {data.completeness.unusable_files} unusable and {data.completeness.unidentified_files} unidentified file(s)
-            </span>
-            <Link to="/completeness" className="font-medium text-primary underline underline-offset-2">
-              Open Document Completeness
-            </Link>
+        <Card className="grid divide-y sm:grid-cols-[1fr_1fr_1fr_auto] sm:divide-x sm:divide-y-0">
+          <div className="p-5">
+            <StatusBadge status="ready" />
+            <p className="tabular mt-3 text-2xl font-semibold">{count(data.completeness.ready)}</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">shipment{data.completeness.ready === 1 ? "" : "s"} with a BOL, invoice and POD</p>
+          </div>
+          <div className="p-5">
+            <StatusBadge status="incomplete" />
+            <p className="tabular mt-3 text-2xl font-semibold">{count(data.completeness.incomplete)}</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">missing a document</p>
+          </div>
+          <div className="p-5">
+            <span className="text-[13px] font-medium text-muted-foreground">Files not used</span>
+            <p className="tabular mt-3 text-2xl font-semibold">{count(data.completeness.unusable_files + data.completeness.unidentified_files)}</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              {data.completeness.unusable_files} unusable, {data.completeness.unidentified_files} unidentified
+            </p>
+          </div>
+          <div className="flex items-center p-5">
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/completeness">Open completeness</Link>
+            </Button>
           </div>
         </Card>
       </Section>
