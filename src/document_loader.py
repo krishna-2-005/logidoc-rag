@@ -8,6 +8,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import RAW_DATA_DIR
 
+import pdf_access
+
 from document_classifier import classify_document as classify_content
 from identifier_extractor import (
     extract_all_identifiers,
@@ -69,31 +71,37 @@ def extract_pdf(pdf_path):
     Extract text from a PDF page by page.
     """
 
-    document = pymupdf.open(pdf_path)
-
     pages = []
 
-    for page_number, page in enumerate(
-        document,
-        start=1
-    ):
+    # PyMuPDF is single-threaded: one document at a time (pdf_access)
+    with pdf_access.PDF_LOCK:
 
-        # sort=True keeps text in visual reading order
-        text = page.get_text(
-            "text",
-            sort=True
-        ).strip()
+        document = pymupdf.open(pdf_path)
 
-        if text:
+        try:
 
-            pages.append(
-                {
-                    "page": page_number,
-                    "text": text
-                }
-            )
+            for page_number, page in enumerate(
+                document,
+                start=1
+            ):
 
-    document.close()
+                # sort=True keeps text in visual reading order
+                text = page.get_text(
+                    "text",
+                    sort=True
+                ).strip()
+
+                if text:
+
+                    pages.append(
+                        {
+                            "page": page_number,
+                            "text": text
+                        }
+                    )
+
+        finally:
+            document.close()
 
     return pages
 

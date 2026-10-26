@@ -547,6 +547,8 @@ def new_outcome(input_path, stage="validate"):
         "message": None,
         "action": None,
         "error": None,
+        # The model service failed, not this file (model_client)
+        "service_down": False,
         "rollback_error": None,
         "warnings": [],
         "operation_id": None,
@@ -840,6 +842,7 @@ def ingest_file(
         outcome.update(
             status=STATUS_FAILED,
             error=describe_error(error),
+            service_down=bool(getattr(error, "service_down", False)),
         )
 
         if written_ids:

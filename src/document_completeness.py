@@ -40,6 +40,7 @@ from pathlib import Path
 
 import pymupdf
 
+import pdf_access
 from audit_analytics import cell, write_csv
 from chunker import read_chunks
 from document_loader import load_document
@@ -102,13 +103,16 @@ def scan_file(path, loader=load_document):
 
     try:
 
-        document = pymupdf.open(stream=data, filetype="pdf")
+        # PyMuPDF is single-threaded: one document at a time (pdf_access)
+        with pdf_access.PDF_LOCK:
 
-        try:
-            total = len(document)
-            text_pages = sum(1 for page in document if page.get_text("text").strip())
-        finally:
-            document.close()
+            document = pymupdf.open(stream=data, filetype="pdf")
+
+            try:
+                total = len(document)
+                text_pages = sum(1 for page in document if page.get_text("text").strip())
+            finally:
+                document.close()
 
     except Exception as error:
         entry["error"] = f"{type(error).__name__}: {error}"[:200]

@@ -78,6 +78,12 @@ NAME_CONFLICT = "name_conflict"
 INDEX_INCONSISTENT = "index_inconsistent"
 PROCESSING_FAILED = "processing_failed"
 RETRIES_EXHAUSTED = "retries_exhausted"
+
+# The model service failed (model_client: not reachable, timed out, model not
+# installed): the file is not retried, the rest of its batch is not tried
+# either, and every one of them keeps a copy for a retry once the service is back
+MODEL_SERVICE_DOWN = "model_service_down"
+NOT_ATTEMPTED = "not_attempted"
 DUPLICATE = "duplicate"
 NO_SHIPMENT_ID = "no_shipment_id"
 UNKNOWN_DOCUMENT_TYPE = "unknown_document_type"
@@ -271,6 +277,19 @@ def finish_from_outcome(register, file_id, outcome, checked, actor, quarantine_d
         )
 
     # Failed
+    if outcome.get("service_down"):
+
+        return register.update(
+            file_id, register_module.FAILED, actor=actor, code=MODEL_SERVICE_DOWN,
+            message=f"{outcome.get('error')} (stage: {outcome.get('stage')})",
+            action=(
+                "The model service is not usable, so the rest of this upload was not tried either. "
+                "A copy is kept: use Retry once the service works again."
+            ),
+            quarantine_name=keep_for_retry(quarantine_dir, sha256, data),
+            **common,
+        )
+
     transient = is_transient(outcome)
     kept = keep_for_retry(quarantine_dir, sha256, data) if transient else None
 
@@ -291,6 +310,45 @@ def finish_from_outcome(register, file_id, outcome, checked, actor, quarantine_d
     )
 
 
+def record_invalid(register, file_id, checked, actor, sha256, data):
+    """
+    Records a file that failed validation (not a PDF, damaged, no text...).
+    """
+
+    return register.update(
+        file_id, checked["status"], actor=actor, code=checked["code"],
+        message=validation.describe(checked), action=checked["action"],
+        sha256=sha256, size=len(data), pages=checked["pages"], text_pages=checked["text_pages"],
+    )
+
+
+def not_attempted(register, upload, actor, quarantine_dir, file_id):
+    """
+    A file of a batch that stopped because the model service failed on an
+    earlier file. It is validated (that needs no model service) and, when it
+    is usable, failed with a copy kept for a retry. Nothing is indexed or
+    stored.
+    """
+
+    data = bytes(upload.data)
+    sha256 = sha256_of(data)
+    checked = validation.validate_pdf(upload.name, data)
+
+    if not checked["ok"]:
+        return record_invalid(register, file_id, checked, actor.username, sha256, data)
+
+    record = register.update(
+        file_id, register_module.FAILED, actor=actor.username, code=NOT_ATTEMPTED,
+        message="Not tried: the model service failed on an earlier file of this upload.",
+        action="A copy is kept: use Retry once the model service works again.",
+        quarantine_name=keep_for_retry(quarantine_dir, sha256, data),
+        sha256=sha256, size=len(data), pages=checked["pages"], text_pages=checked["text_pages"],
+    )
+    record["matched_files"] = []
+
+    return record
+
+
 def process_one(
     register, upload, actor, raw_dir, chroma_dir, collection_name, embed_text, quarantine_dir,
     max_attempts, backoff, sleep, existing_id=None,
@@ -308,12 +366,7 @@ def process_one(
     checked = validation.validate_pdf(upload.name, data)
 
     if not checked["ok"]:
-
-        return register.update(
-            file_id, checked["status"], actor=actor.username, code=checked["code"],
-            message=validation.describe(checked), action=checked["action"],
-            sha256=sha256, size=len(data), pages=checked["pages"], text_pages=checked["text_pages"],
-        )
+        return record_invalid(register, file_id, checked, actor.username, sha256, data)
 
     register.update(file_id, register_module.PROCESSING, actor=actor.username)
 
@@ -334,7 +387,8 @@ def process_one(
                 [path], Path(raw_dir), Path(chroma_dir), collection_name, embed_text
             )["files"][0]
 
-            if not is_transient(outcome) or attempt >= max_attempts:
+            # A failed model service is not retried: it would fail the same way
+            if outcome.get("service_down") or not is_transient(outcome) or attempt >= max_attempts:
                 break
 
             register.attempt_failed(file_id, outcome["error"], actor=actor.username)
@@ -370,7 +424,9 @@ def process_files(
     interrupted (KeyboardInterrupt, SystemExit), the file in progress was
     already rolled back by ingestion_manager; it and the files not yet
     started are marked failed (interrupted) and the interruption is
-    raised again.
+    raised again. If the model service fails (MODEL_SERVICE_DOWN), the
+    files after it are not tried (NOT_ATTEMPTED); each keeps a copy for a
+    retry.
     """
 
     require(principal, authz.INGESTION_WRITE)
@@ -393,12 +449,20 @@ def process_files(
 
         try:
 
+            service_down = False
+
             for upload, file_id in zip(uploads, file_ids):
+
+                if service_down:
+                    records.append(not_attempted(register, upload, principal, quarantine_dir, file_id))
+                    continue
 
                 records.append(process_one(
                     register, upload, principal, raw_dir, chroma_dir, collection_name, embed_text,
                     quarantine_dir, max_attempts, backoff, sleep, existing_id=file_id,
                 ))
+
+                service_down = records[-1]["code"] == MODEL_SERVICE_DOWN
 
         except BaseException:
 
@@ -442,7 +506,8 @@ def retry(
 ):
     """
     Processes a failed file again from the copy kept for a retry (only
-    files that failed for a transient reason have one). Returns the
+    files that failed for a transient reason or because the model service
+    failed have one). Returns the
     summary of process_files. A file without a kept copy cannot be
     retried: its corrected version has to be uploaded again.
     """
