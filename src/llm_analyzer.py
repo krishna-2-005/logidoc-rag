@@ -1,4 +1,4 @@
-import ollama
+import model_client
 
 MODEL_NAME = "nemotron-3-nano:4b"
 
@@ -46,7 +46,7 @@ Use ONLY the information provided in the reconciliation result.
 Do not invent or assume information.
 """
 
-    response = ollama.chat(
+    response = model_client.chat(
         model=MODEL_NAME,
         messages=[
             {

@@ -1,11 +1,11 @@
 from pathlib import Path
 import sys
-import ollama
 
 # Add project root to Python path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import model_client
 from config import LLM_MODEL
 from shipment_search import search_shipment
 
@@ -193,7 +193,7 @@ shipment documents above.
     # Call Ollama
     # --------------------------------------------------------
 
-    response = ollama.chat(
+    response = model_client.chat(
         model=LLM_MODEL,
         messages=[
             {

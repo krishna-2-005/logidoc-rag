@@ -19,7 +19,8 @@ if str(PROJECT_ROOT) not in sys.path:
 # ============================================================
 
 import chromadb
-import ollama
+
+import model_client
 
 from source_evidence import (
     create_evidence,
@@ -118,7 +119,7 @@ def get_collection():
 
 def embed_query(text):
 
-    return ollama.embeddings(
+    return model_client.embeddings(
         model=EMBEDDING_MODEL,
         prompt=text
     )["embedding"]
@@ -126,7 +127,7 @@ def embed_query(text):
 
 def call_llm(prompt):
 
-    response = ollama.chat(
+    response = model_client.chat(
         model=LLM_MODEL,
         messages=[
             {

@@ -5,7 +5,7 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import ollama
+import model_client
 
 from config import EMBEDDING_MODEL
 from chunker import create_all_chunks
@@ -17,7 +17,7 @@ def generate_embedding(text):
     using the local nomic-embed-text model.
     """
 
-    response = ollama.embeddings(
+    response = model_client.embeddings(
         model=EMBEDDING_MODEL,
         prompt=text
     )
