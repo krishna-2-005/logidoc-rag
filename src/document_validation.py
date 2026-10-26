@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pymupdf
 
+import pdf_access
+
 
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_PAGES = 400
@@ -157,34 +159,36 @@ def validate_pdf(name, data, max_bytes=MAX_FILE_BYTES, max_pages=MAX_PAGES):
     if b"%PDF-" not in data[:1024]:
         return reject(UNSUPPORTED, NOT_A_PDF)
 
-    try:
-        document = pymupdf.open(stream=data, filetype="pdf")
-    except Exception as error:
-        return reject(FAILED, CORRUPTED, error=f"{type(error).__name__}: {error}"[:200])
-
-    try:
-
-        if document.needs_pass or document.is_encrypted:
-            return reject(FAILED, PASSWORD_PROTECTED)
-
-        total = len(document)
-
-        if total == 0:
-            return reject(FAILED, NO_PAGES, pages=0)
-
-        if total > max_pages:
-            return reject(
-                FAILED, TOO_MANY_PAGES, pages=total,
-                message=f"The PDF has {total} pages; the limit is {max_pages}.",
-            )
+    with pdf_access.PDF_LOCK:
 
         try:
-            with_text = [bool(page.get_text("text").strip()) for page in document]
+            document = pymupdf.open(stream=data, filetype="pdf")
         except Exception as error:
-            return reject(FAILED, CORRUPTED, pages=total, error=f"{type(error).__name__}: {error}"[:200])
+            return reject(FAILED, CORRUPTED, error=f"{type(error).__name__}: {error}"[:200])
 
-    finally:
-        document.close()
+        try:
+
+            if document.needs_pass or document.is_encrypted:
+                return reject(FAILED, PASSWORD_PROTECTED)
+
+            total = len(document)
+
+            if total == 0:
+                return reject(FAILED, NO_PAGES, pages=0)
+
+            if total > max_pages:
+                return reject(
+                    FAILED, TOO_MANY_PAGES, pages=total,
+                    message=f"The PDF has {total} pages; the limit is {max_pages}.",
+                )
+
+            try:
+                with_text = [bool(page.get_text("text").strip()) for page in document]
+            except Exception as error:
+                return reject(FAILED, CORRUPTED, pages=total, error=f"{type(error).__name__}: {error}"[:200])
+
+        finally:
+            document.close()
 
     empty_pages = [number for number, has in enumerate(with_text, start=1) if not has]
     text_pages = total - len(empty_pages)

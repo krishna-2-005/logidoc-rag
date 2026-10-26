@@ -51,6 +51,7 @@ from pathlib import Path
 
 import pymupdf
 
+import pdf_access
 from document_loader import classify_document
 from identifier_extractor import extract_all_identifiers
 from logistics_fields import IDENTIFIER_ALIASES
@@ -66,7 +67,7 @@ EXTRACTOR_SCHEMA = "1.1"
 
 FINGERPRINT_SOURCES = (
     "document_extraction.py", "document_loader.py", "document_classifier.py", "identifier_extractor.py",
-    "logistics_fields.py", "shipment_calculations.py", "shipment_identity.py",
+    "logistics_fields.py", "shipment_calculations.py", "shipment_identity.py", "pdf_access.py",
 )
 
 
@@ -1019,10 +1020,14 @@ def extract_document(path, filename=None):
     digest = hashlib.sha256(data).hexdigest()
 
     try:
-        document = pymupdf.open(stream=data, filetype="pdf")
-        texts = [(n, page.get_text("text", sort=True).strip()) for n, page in enumerate(document, start=1)]
-        total = len(document)
-        document.close()
+        # PyMuPDF is single-threaded: one document at a time (pdf_access)
+        with pdf_access.PDF_LOCK:
+            document = pymupdf.open(stream=data, filetype="pdf")
+            try:
+                texts = [(n, page.get_text("text", sort=True).strip()) for n, page in enumerate(document, start=1)]
+                total = len(document)
+            finally:
+                document.close()
     except Exception as error:
         return DocumentExtraction(filename, digest, "UNKNOWN", S_UNREADABLE, error=f"{type(error).__name__}: {error}"[:200],
                                   fields=empty_fields("UNKNOWN", filename, UNREADABLE, "The PDF could not be opened."),

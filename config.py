@@ -82,6 +82,17 @@ def ingestion_locations(raw_dir=RAW_DATA_DIR):
 LLM_MODEL = "nemotron-3-nano:4b"
 EMBEDDING_MODEL = "nomic-embed-text"
 
+# How long one call to Ollama may take (seconds; see src/model_client.py).
+# Without a limit a stopped or stuck Ollama holds the request, and an
+# upload's ingestion lock, forever. Measured on this project: an embedding
+# with its search at most 3.9 s, a generated answer at most 23.8 s, so the
+# defaults leave a wide margin. Set LOGIDOC_OLLAMA_CONNECT_TIMEOUT,
+# LOGIDOC_EMBED_TIMEOUT or LOGIDOC_LLM_TIMEOUT to change them; where Ollama
+# runs is the ollama library's OLLAMA_HOST.
+OLLAMA_CONNECT_TIMEOUT = max(float(os.environ.get("LOGIDOC_OLLAMA_CONNECT_TIMEOUT") or 5), 1.0)
+EMBED_TIMEOUT = max(float(os.environ.get("LOGIDOC_EMBED_TIMEOUT") or 60), 1.0)
+LLM_TIMEOUT = max(float(os.environ.get("LOGIDOC_LLM_TIMEOUT") or 120), 1.0)
+
 # ChromaDB collection
 COLLECTION_NAME = "logistics_documents"
 

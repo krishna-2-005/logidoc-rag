@@ -8,6 +8,9 @@ administrator role. The routes only enforce size limits and shape
 responses.
 """
 
+import anyio
+import anyio.to_thread
+from anyio.lowlevel import RunVar
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
@@ -23,6 +26,31 @@ from ingestion_register import IngestionRegister, STATUSES
 router = APIRouter(prefix="/api")
 
 ViewIngestion = Depends(require(authz.INGESTION_VIEW))
+
+# Uploads and replacements embed every chunk and hold the ingestion lock
+# while they do, so they run in a worker thread: the event loop keeps
+# answering every other request. One at a time (the lock serialises them
+# anyway): the rest wait here without taking a thread from the shared pool
+# the other routes run in. One limiter per event loop, as anyio keeps its own.
+INGESTION_SLOT = RunVar("ingestion_slot")
+
+
+def ingestion_slot():
+
+    try:
+        return INGESTION_SLOT.get()
+    except LookupError:
+        INGESTION_SLOT.set(anyio.CapacityLimiter(1))
+        return INGESTION_SLOT.get()
+
+
+async def in_worker(function, *args):
+    """
+    function(*args) in a worker thread. The operation always runs to its own
+    end (success or rollback), even if the client goes away meanwhile.
+    """
+
+    return await anyio.to_thread.run_sync(function, *args, limiter=ingestion_slot())
 
 
 class ResolveBody(BaseModel):
@@ -108,7 +136,9 @@ async def upload(
 ):
     """
     Ingests PDFs (administrators). Every file gets a status in the
-    register; one bad file does not stop the others.
+    register; one bad file does not stop the others. A failed model service
+    does: the files after it are recorded as not tried, each with a copy
+    kept for a retry.
     """
 
     try:
@@ -123,7 +153,7 @@ async def upload(
 
     uploads = [service.Upload(item.filename or "", await read_limited(item, limit)) for item in files]
 
-    summary = run_ingestion(state, principal, uploads)
+    summary = await in_worker(run_ingestion, state, principal, uploads)
 
     return shape_summary(summary)
 
@@ -237,7 +267,7 @@ async def replace(
     data = await read_limited(file, state.settings.max_upload_mb * 1024 * 1024)
     locations = state.locations
 
-    return lifecycle_call(state, lambda: lifecycle.replace(
+    return await in_worker(lifecycle_call, state, lambda: lifecycle.replace(
         principal, register_of(state, create=True), name, data, locations.raw_dir, locations.chroma_dir,
         locations.archive_dir,
     ))

@@ -1,12 +1,12 @@
 from pathlib import Path
 import sys
-import ollama
 import chromadb
 
 # Add project root to Python path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import model_client
 from config import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL
 
 
@@ -31,7 +31,7 @@ def create_query_embedding(query):
     Convert the user's question into an embedding.
     """
 
-    response = ollama.embeddings(
+    response = model_client.embeddings(
         model=EMBEDDING_MODEL,
         prompt=query
     )

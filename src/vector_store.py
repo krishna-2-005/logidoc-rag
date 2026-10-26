@@ -1,12 +1,12 @@
 from pathlib import Path
 import sys
 import chromadb
-import ollama
 
 # Add project root to Python path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import model_client
 from config import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL
 from chunker import create_all_chunks
 
@@ -32,7 +32,7 @@ def create_embedding(text):
     Generate an embedding using Ollama.
     """
 
-    response = ollama.embeddings(
+    response = model_client.embeddings(
         model=EMBEDDING_MODEL,
         prompt=text
     )

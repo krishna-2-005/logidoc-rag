@@ -31,6 +31,7 @@ from datetime import datetime
 
 import pymupdf
 
+import pdf_access
 from audit_export import NOT_AVAILABLE, check_exportable, export_filename
 
 
@@ -461,6 +462,15 @@ class Report:
 
         return data
 
+    def close(self):
+        """
+        Closes the document unless finish() already did, so it is safe to
+        call after finish() and after a failure part-way through.
+        """
+
+        if not self.document.is_closed:
+            self.document.close()
+
 
 # ============================================================
 # REPORT
@@ -477,6 +487,25 @@ def audit_pdf(result, selected_shipment=None, generated_at=None):
 
     shipment_id = check_exportable(result, selected_shipment)
 
+    # PyMuPDF is single-threaded: the report's document and the shared fonts
+    # are used by one thread at a time (pdf_access), and the document is
+    # closed even when writing the report fails
+    with pdf_access.PDF_LOCK:
+
+        report = Report(shipment_id)
+
+        try:
+            return write_audit_pdf(report, result, shipment_id, generated_at)
+        finally:
+            report.close()
+
+
+def write_audit_pdf(report, result, shipment_id, generated_at=None):
+    """
+    Writes the report of one shipment into report and returns the PDF
+    bytes; audit_pdf holds the PDF lock and closes the document.
+    """
+
     generated_at = generated_at or datetime.now()
 
     final_status = shown(result.get("final_status"))
@@ -487,8 +516,6 @@ def audit_pdf(result, selected_shipment=None, generated_at=None):
     invoice = result.get("invoice") or {}
     discrepancies = result.get("discrepancies") or []
     review_items = result.get("review_items") or []
-
-    report = Report(shipment_id)
 
     report.title(TITLE)
 

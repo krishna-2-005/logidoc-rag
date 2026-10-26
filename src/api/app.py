@@ -33,6 +33,7 @@ from api.core import ApiSettings, ApiState, csrf_guard
 from audit_service import Locations
 from auth import ConfigError
 from extraction_store import STORE_STATE_ERRORS
+from model_client import ModelRejected, ModelServiceError, ModelTimeout
 from review_store import Policy
 
 
@@ -125,6 +126,17 @@ def create_app(state=None, settings=None):
 
     for kind in STORE_STATE_ERRORS:
         app.add_exception_handler(kind, store_not_usable)
+
+    @app.exception_handler(ModelServiceError)
+    async def model_not_usable(request: Request, error: ModelServiceError):
+
+        # Ollama stopped, too slow, misconfigured or refusing (model_client): the message names no host or
+        # library; the cause is logged without a stack trace (it holds no document text)
+        log.warning("Model service error in %s %s: %s (%s)", request.method, request.url.path, error, error.__cause__)
+
+        status = 504 if isinstance(error, ModelTimeout) else 422 if isinstance(error, ModelRejected) else 503
+
+        return JSONResponse(status_code=status, content={"detail": str(error)})
 
     @app.exception_handler(ConfigError)
     async def misconfigured(request: Request, error: ConfigError):
