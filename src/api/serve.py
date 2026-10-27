@@ -16,6 +16,14 @@ Environment variables (all optional):
                            (default: the Vite dev server on localhost:5173)
     LOGIDOC_COOKIE_SECURE  1 to mark the session cookie Secure (behind HTTPS)
     LOGIDOC_FRONTEND_DIR   the React build to serve (default frontend/dist)
+    LOGIDOC_DATA_DIR       documents and databases (default data/)
+    LOGIDOC_CHROMA_DIR     the vector index (default chroma_db/)
+    LOGIDOC_EMBED_TIMEOUT, LOGIDOC_LLM_TIMEOUT, LOGIDOC_OLLAMA_CONNECT_TIMEOUT
+                           seconds one Ollama call may take (60, 120, 5)
+
+GET /api/health says the server answers; GET /api/ready says whether the
+document folder, the databases, the extraction store and the Ollama models
+are usable (ready, degraded or not_ready).
 """
 
 import sys
@@ -46,6 +54,10 @@ def main():
         return 2
 
     print(f"LogiDoc-RAG API on http://{settings.host}:{settings.port} (sign-in mode: {mode})")
+
+    # The ingestion lock works inside one process only
+    print("One writer at a time: do not upload or change documents from the Streamlit app (app.py) while this "
+          "server runs on the same data folder.")
 
     uvicorn.run(create_app(settings=settings), host=settings.host, port=settings.port, log_level="info")
 
