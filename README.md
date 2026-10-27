@@ -588,7 +588,13 @@ npm test                                     # frontend tests (Vitest)
 | `LOGIDOC_CORS_ORIGINS` | Comma-separated origins allowed to call the API (`*` is refused: cookies are used) |
 | `LOGIDOC_COOKIE_SECURE` | `1` to mark the session cookie Secure (implied by `LOGIDOC_ENV=production`) |
 | `LOGIDOC_FRONTEND_DIR` | The React build to serve (default `frontend/dist`) |
-| `LOGIDOC_AUTH_DB`, `LOGIDOC_REVIEW_DB`, `LOGIDOC_HISTORY_DB`, `LOGIDOC_INGESTION_DB` | Database locations |
+| `LOGIDOC_DATA_DIR` | Documents and databases (default `data/`); the demo runbook points it at an empty folder |
+| `LOGIDOC_CHROMA_DIR` | The vector index (default `chroma_db/`) |
+| `LOGIDOC_AUTH_DB`, `LOGIDOC_REVIEW_DB`, `LOGIDOC_HISTORY_DB`, `LOGIDOC_INGESTION_DB`, `LOGIDOC_EXTRACTION_DB` | Single database locations (each wins over `LOGIDOC_DATA_DIR`) |
+| `LOGIDOC_OLLAMA_CONNECT_TIMEOUT`, `LOGIDOC_EMBED_TIMEOUT`, `LOGIDOC_LLM_TIMEOUT` | Seconds one Ollama call may take (5, 60, 120) |
+
+`.env.example` lists every variable with its default. The app reads the
+process environment only; nothing loads a `.env` file.
 
 Security of the API: HttpOnly + SameSite=Strict session cookie; every change
 needs the `X-LogiDoc-Client` header (CSRF); CORS limited to the configured
@@ -606,7 +612,14 @@ Endpoints, all under `/api`: `session`, `auth/login`, `auth/logout`,
 `ingestion/register`, `ingestion/errors`, `ingestion/upload`,
 `ingestion/{id}/retry`, `ingestion/{id}/resolve`, `documents/reprocess`,
 `documents/replace`, `documents/remove`, `chat`, `settings`, `admin/users`,
-`admin/events`, `admin/verify-history`, `health`.
+`admin/events`, `admin/verify-history`, `health`, `ready`.
+
+`GET /api/health` only says the server answers. `GET /api/ready` checks what a
+demo or a deployment needs: the document folder can be listed, the data
+folders are writable, the extraction store is absent or current, and Ollama
+answers with both models installed. It returns `ready` or `degraded` (200;
+degraded means documents can be read but a model or the store is missing) or
+`not_ready` (503), with status words only, never paths or error text.
 
 React screens: Overview, Shipment Explorer (and detail), Document
 Intelligence (documents, ingestion, ask), Freight Audit, Exception Center,
@@ -623,7 +636,7 @@ returns; it never calculates an audit.
 | `audit_history.sqlite3` | v3 (migrates v1, v2) | append-only runs, snapshots (with carrier, currency), findings, and per run the consumed `run_inputs`, `run_input_sets` and `run_supersessions` |
 | `auth.sqlite3` | v1 | `users` (password hashes), `sessions` (token hashes), `auth_events` |
 | `ingestion_register.sqlite3` | v1 | `ingestion_files`, append-only `ingestion_events` and `ingestion_actions`; metadata only, never file contents |
-| `extractions.sqlite3` | v4 (migrates v1-v3 step by step, each step one transaction) | `extractions` (typed fields per file hash and extractor version, no raw text, payload hash; no update/delete), append-only hash-chained `field_corrections` (proposals) and `correction_decisions` (one approval or rejection each) |
+| `extractions.sqlite3` | v5 (an older file is never upgraded by opening it: it reads as "migration pending" until `python scripts/migrate_extraction_store.py` makes a verified backup and migrates in one transaction; `--dry-run` first) | `extractions` (typed fields per file hash and extractor version, no raw text, payload hash; no update/delete), append-only hash-chained `field_corrections` (proposals) and `correction_decisions` (one approval or rejection each), append-only `extraction_aliases` (every file name a content was seen under) |
 
 All databases are local runtime data and are git-ignored, as are
 `data/quarantine/` and `data/archive/`. A database with a newer schema than
@@ -631,7 +644,7 @@ the code is refused, not guessed at.
 
 ### Deploying
 
-1. Python 3.10, `pip install -r requirements.txt`, Ollama running with both models.
+1. Python 3.10 (3.12 is also tested), `pip install -r requirements.txt`, Ollama running with both models.
 2. `npm ci && npm run build` in `frontend/`.
 3. Set `LOGIDOC_ENV=production`, `LOGIDOC_AUTH_MODE=required`,
    `LOGIDOC_CORS_ORIGINS` (only if the UI is served from another origin) and
@@ -645,7 +658,8 @@ the code is refused, not guessed at.
 
 ## Setup (Windows, PowerShell)
 
-Requires Python 3.10 and [Ollama](https://ollama.com/download).
+Requires Python 3.10 and [Ollama](https://ollama.com/download). The same
+pinned requirements also install and pass the test suite on Python 3.12.
 
 ```powershell
 cd D:\LogiDoc-RAG
@@ -669,6 +683,28 @@ python -m streamlit run app.py
 Use `python -m streamlit` so the venv's Streamlit (with `chromadb`) is
 used. Upload PDFs in the sidebar and click **Process Documents**.
 
+The React interface is served by `python src/api/serve.py` (see "HTTP API"
+above). Run one of the two writers at a time on one data folder: do not
+upload or change documents in Streamlit while the API server runs.
+
+For a presentation, follow [docs/DEMO_RUNBOOK.md](docs/DEMO_RUNBOOK.md): it
+runs the API on an empty demo folder (`LOGIDOC_DATA_DIR`,
+`LOGIDOC_CHROMA_DIR`), so your own documents are never touched.
+
+### Smoke test
+
+```powershell
+.\venv\Scripts\python.exe scripts\smoke_test.py
+```
+
+Starts the real server on a temporary folder and a free port, then checks
+health, readiness, the React build, the upload of the six sample PDFs, the
+audit result of both sample shipments, an extraction, a cited assistant answer
+and the PDF report, and stops the server. Exit `0` = everything passed (a
+check that needs Ollama is a warning when Ollama is not running), `1` = a
+check failed, `2` = the server could not be started. It never reads or writes
+`data/` or `chroma_db/`.
+
 ## Tests
 
 All tests use temporary folders and indexes; `data/raw` and `chroma_db`
@@ -687,10 +723,15 @@ address: `$env:OLLAMA_HOST = "http://127.0.0.1:9"; python -m pytest -q`.
 Three tests need Ollama (real embeddings in ingestion, the full rebuild
 and the upload workflow); everything else, including all RAG scoping,
 grounding and calculation tests, runs offline with deterministic stand-in
-embeddings and a fake language model. Results on 2026-10-21: 853 passed
-with Ollama (574 before the production-readiness work); with Ollama
-unreachable the same three tests skip. Frontend: `cd frontend; npm test`
-(53 tests), `npm run build`.
+embeddings and a fake language model. Results on 2026-10-26: 1723 passed
+with Ollama on Python 3.10, and 1723 passed on Python 3.12 (853 on 2026-10-21;
+574 before the production-readiness work); with Ollama unreachable the
+same three tests skip. Frontend: `cd frontend; npm test` (199 tests),
+`npm run typecheck`, `npm run build`.
+
+CI (`.github/workflows/ci.yml`) runs the suite on Python 3.10 and 3.12 with
+Ollama unreachable, `pip check`, the deterministic evaluation, and the
+frontend typecheck, tests, build and `npm audit`.
 
 ## Real-document extraction evaluation
 
@@ -888,6 +929,12 @@ The PDFs are in `tests/fixtures/`; SHJ-2026-001 is also the sample in
 - **No OCR:** scanned PDFs without a text layer cannot be read.
 - **Shipment identity** comes from the `Shipment Number` printed in each
   document. Documents without one are never attributed to a shipment.
+  Identifiers are compared without case, spaces or separators
+  (`shipment_identity.identifier_key`), so `SHJ-2026-001` and `SHJ2026001`
+  are one shipment, but so are two different identifiers that differ only
+  in where their separators fall (`AB-12-3` and `AB-1-23`): their documents
+  would be audited together. The sample data has no such pair; a safeguard
+  that reports the collision instead of merging is planned, not built.
 - **Single machine, single writer.** Authentication is local accounts only
   (no SSO or MFA, and it needs HTTPS in front); no locking across
   processes, backups or monitoring; ChromaDB caches indexes
