@@ -21,6 +21,7 @@ import type {
   IngestionRecord,
   IngestionRegister,
   Overview,
+  Readiness,
   Session,
   Settings,
   ShipmentDetail,
@@ -75,7 +76,18 @@ export const useCompleteness = (search: string, incompleteOnly: boolean) =>
     placeholderData: (previous) => previous,
   })
 
-export const useExposure = () => useQuery({ queryKey: [AUDIT, "exposure"], queryFn: () => get<Exposure>("/api/exposure") })
+export interface ExposureFilters {
+  search?: string
+  /** verified, mismatch or unverifiable; the server filters, the interface only asks */
+  classification?: string[]
+}
+
+export const useExposure = (filters: ExposureFilters = {}) =>
+  useQuery({ queryKey: [AUDIT, "exposure", filters], queryFn: () => get<Exposure>("/api/exposure", { ...filters }), placeholderData: (previous) => previous })
+
+/** GET /api/ready: whether documents, data folders, the extraction store and the models are usable. A 503 means not ready. */
+export const useReadiness = () =>
+  useQuery({ queryKey: ["ready"], queryFn: () => get<Readiness>("/api/ready"), retry: false, refetchInterval: 60_000, staleTime: 30_000 })
 
 export interface ExceptionFilters {
   search?: string

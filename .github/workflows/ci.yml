@@ -1,0 +1,121 @@
+# LogiDoc-RAG quality gates. No secrets and no Ollama: tests that need a model
+# skip with the reason (the model service points at a dead address), and the
+# evaluation guard is the deterministic one. Live-model evaluation is not run here.
+
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} tests
+    # The test suite has been verified on Windows, where the project is developed
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    defaults:
+      run:
+        shell: bash
+    env:
+      OLLAMA_HOST: http://127.0.0.1:9
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # A clean virtual environment, as the project is run locally. The runner's own
+      # Python can hold tools of its own (Python 3.12 is the image default and carries
+      # pipx), and pip check would report those tools' requirements, not the project's.
+      - name: Create a clean virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/Scripts" >> "$GITHUB_PATH"
+
+      - name: Install the pinned dependencies
+        run: |
+          python -c "import sys; assert sys.prefix != sys.base_prefix, 'python is not the virtual environment'"
+          python -m pip install -r requirements-dev.txt
+
+      - name: Dependencies are consistent
+        run: python -m pip check
+
+      - name: Test suite
+        run: python -m pytest -q -p no:cacheprovider
+
+      - name: Deterministic evaluation guard (no language model)
+        run: python scripts/evaluate_assistant.py --json "$RUNNER_TEMP/evaluation.json"
+
+  frontend:
+    name: Frontend typecheck, tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Known vulnerabilities in the runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  hygiene:
+    name: Whitespace and authorship checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: No whitespace errors in the changes
+        if: github.event_name == 'pull_request'
+        run: git diff --check "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+
+      - name: Commits carry only the owner's identity
+        run: |
+          # Every author and committer is the repository owner (GitHub itself commits merges)
+          if git log --format='%ae%n%ce' | grep -viE '^(kuchurusaikrishnareddy@gmail\.com|noreply@github\.com)$'; then
+            echo "::error::A commit has an author or committer other than the repository owner"
+            exit 1
+          fi
+          # No co-author lines and no "generated with / by" lines in any commit message
+          # ([-] matches a hyphen; written this way, no tracked file, this one included, holds the phrase itself)
+          if git log --format='%B' | grep -iE 'co-authored[-]by|generated (with|by)'; then
+            echo "::error::A commit message carries a co-author or generated-by line"
+            exit 1
+          fi
+          if git grep -IilE 'co-authored[-]by'; then
+            echo "::error::A tracked file carries a co-author line"
+            exit 1
+          fi

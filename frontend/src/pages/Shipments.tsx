@@ -1,6 +1,6 @@
 import { FilterX, Search } from "lucide-react"
-import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/common/states"
 import { PageHeader } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
@@ -13,13 +13,22 @@ import { money, NA } from "@/lib/format"
 
 export function Shipments() {
   const navigate = useNavigate()
-  const [search, setSearch] = useState("")
+  // A link can open the list already filtered: the Overview's cards and charts (?status=, ?category=,
+  // ?invoice=mismatch, ?delayed=1, ?review=1) and the search box in the top bar (?search=)
+  const [params] = useSearchParams()
+  const [search, setSearch] = useState(params.get("search") ?? "")
   const [carrier, setCarrier] = useState("")
-  const [status, setStatus] = useState("")
-  const [category, setCategory] = useState("")
-  const [invoiceMismatch, setInvoiceMismatch] = useState(false)
-  const [delayed, setDelayed] = useState(false)
-  const [needsReview, setNeedsReview] = useState(false)
+  const [status, setStatus] = useState(params.get("status") ?? "")
+  const [category, setCategory] = useState(params.get("category") ?? "")
+  const [invoiceMismatch, setInvoiceMismatch] = useState(params.get("invoice") === "mismatch")
+  const [delayed, setDelayed] = useState(params.get("delayed") === "1")
+  const [needsReview, setNeedsReview] = useState(params.get("review") === "1")
+
+  // The top bar can search again while this page is open
+  const searched = params.get("search")
+  useEffect(() => {
+    if (searched !== null) setSearch(searched)
+  }, [searched])
 
   const debounced = useDebounced(search)
 
@@ -153,13 +162,13 @@ export function Shipments() {
             <TableBody>
               {data.shipments.map((row) => (
                 <TableRow key={row.shipment_key} className="cursor-pointer" onClick={() => navigate(`/shipments/${encodeURIComponent(row.shipment_id)}`)}>
-                  <TableCell className="font-medium">
+                  <TableCell className="whitespace-nowrap font-medium">
                     <Link to={`/shipments/${encodeURIComponent(row.shipment_id)}`} className="text-primary underline-offset-2 hover:underline" onClick={(event) => event.stopPropagation()}>
                       {row.shipment_id}
                     </Link>
                   </TableCell>
                   <TableCell>{row.carrier ?? NA}</TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">{row.origin && row.destination ? `${row.origin} → ${row.destination}` : NA}</TableCell>
+                  <TableCell className="min-w-[10rem] text-muted-foreground">{row.origin && row.destination ? `${row.origin} → ${row.destination}` : NA}</TableCell>
                   <TableCell>{row.quantity_status ? <StatusBadge status={row.quantity_status} /> : NA}</TableCell>
                   <TableCell>{row.delivery_status ? <StatusBadge status={row.delivery_status} /> : NA}</TableCell>
                   <TableCell>{row.invoice_status ? <StatusBadge status={row.invoice_status} /> : NA}</TableCell>

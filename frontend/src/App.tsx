@@ -12,6 +12,7 @@ import { Documents } from "@/pages/Documents"
 import { Exceptions } from "@/pages/Exceptions"
 import { FreightAudit } from "@/pages/FreightAudit"
 import { AuditHistory } from "@/pages/History"
+import { Invoices } from "@/pages/Invoices"
 import { Login } from "@/pages/Login"
 import { Overview } from "@/pages/Overview"
 import { Reports } from "@/pages/Reports"
@@ -62,6 +63,7 @@ export default function App() {
         <Route path="documents" element={<Documents />} />
         <Route path="freight-audit" element={<FreightAudit />} />
         <Route path="freight-audit/:id" element={<FreightAudit />} />
+        <Route path="invoices" element={<Invoices />} />
         <Route path="exceptions" element={<Exceptions />} />
         <Route path="history" element={<AuditHistory />} />
         <Route path="corrections" element={<Corrections />} />

@@ -1,6 +1,6 @@
 import { AlertTriangle, FileX2 } from "lucide-react"
 import { useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { PageHeader, Section } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/common/states"
@@ -25,8 +25,10 @@ function Presence({ files }: { files: string[] }) {
 }
 
 export function Completeness() {
+  // The Overview's readiness cards open this page with ?incomplete=1
+  const [params] = useSearchParams()
   const [search, setSearch] = useState("")
-  const [incompleteOnly, setIncompleteOnly] = useState(false)
+  const [incompleteOnly, setIncompleteOnly] = useState(params.get("incomplete") === "1")
   const debounced = useDebounced(search)
   const completeness = useCompleteness(debounced, incompleteOnly)
 

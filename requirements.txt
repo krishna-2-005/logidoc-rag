@@ -88,6 +88,7 @@ shellingham==1.5.4
 six==1.17.0
 starlette==1.7.0
 streamlit==1.64.0
+streamlit-pdf==2.1.0
 sympy==1.14.0
 tenacity==9.1.4
 tokenizers==0.23.2
