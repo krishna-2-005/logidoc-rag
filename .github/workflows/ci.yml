@@ -43,8 +43,18 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
+      # A clean virtual environment, as the project is run locally. The runner's own
+      # Python can hold tools of its own (Python 3.12 is the image default and carries
+      # pipx), and pip check would report those tools' requirements, not the project's.
+      - name: Create a clean virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/Scripts" >> "$GITHUB_PATH"
+
       - name: Install the pinned dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: |
+          python -c "import sys; assert sys.prefix != sys.base_prefix, 'python is not the virtual environment'"
+          python -m pip install -r requirements-dev.txt
 
       - name: Dependencies are consistent
         run: python -m pip check
