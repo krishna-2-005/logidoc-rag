@@ -186,3 +186,29 @@ def chat(model, messages):
     """
 
     return call(LANGUAGE_MODEL, model, lambda service: service.chat(model=model, messages=messages))
+
+
+def installed_models(limit=2.0):
+    """
+    The names of the models the service holds, from its model list (nothing
+    is loaded, embedded or generated), or None when it does not answer within
+    limit seconds or answers with an error. Used by the readiness check.
+    """
+
+    try:
+        with ollama.Client(timeout=httpx.Timeout(limit)) as service:
+            listing = service.list()
+    except (ConnectionError, httpx.HTTPError, ollama.ResponseError) as error:
+        log.warning("The model list could not be read: %s: %s", type(error).__name__, error)
+        return None
+
+    return {item.model for item in listing.models if item.model}
+
+
+def has_model(installed, name):
+    """
+    Whether name is in installed. Ollama lists names with a tag
+    (nomic-embed-text:latest); config may leave the tag out.
+    """
+
+    return name in installed or (":" not in name and f"{name}:latest" in installed)

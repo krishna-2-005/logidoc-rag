@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
+import readiness
 from api import routes_assistant, routes_audit, routes_auth, routes_extraction, routes_ingestion, routes_workflow
 from api.core import ApiSettings, ApiState, csrf_guard
 from audit_service import Locations
@@ -107,6 +108,15 @@ def create_app(state=None, settings=None):
     def health():
 
         return {"status": "ok"}
+
+    @app.get("/api/ready")
+    def ready():
+
+        # /api/health says the process answers; this says whether the work can be done (src/readiness.py).
+        # Status words only, never a path, host or model name; 503 only when a folder is unusable
+        report = readiness.readiness(state.locations)
+
+        return JSONResponse(status_code=503 if report["status"] == readiness.NOT_READY else 200, content=report)
 
     @app.exception_handler(RequestValidationError)
     async def invalid(request: Request, error: RequestValidationError):
