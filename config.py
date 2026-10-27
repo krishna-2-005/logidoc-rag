@@ -8,13 +8,16 @@ from pathlib import Path
 # Project directory
 BASE_DIR = Path(__file__).resolve().parent
 
-# Data directories
-DATA_DIR = BASE_DIR / "data"
+# Data directories: documents (raw/), the databases, the archive and the
+# quarantine. Set LOGIDOC_DATA_DIR to keep them elsewhere (default: data/ in
+# the project).
+DATA_DIR = Path(os.environ.get("LOGIDOC_DATA_DIR") or BASE_DIR / "data")
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
-# Vector database
-CHROMA_DIR = BASE_DIR / "chroma_db"
+# Vector database. Set LOGIDOC_CHROMA_DIR to keep it elsewhere (default:
+# chroma_db/ in the project).
+CHROMA_DIR = Path(os.environ.get("LOGIDOC_CHROMA_DIR") or BASE_DIR / "chroma_db")
 
 # Application logs
 LOG_DIR = BASE_DIR / "logs"
