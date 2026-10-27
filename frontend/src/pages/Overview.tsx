@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query"
-import { AlertTriangle, ArrowRight, ClipboardCheck, DollarSign, Eye, FileX2, PackageCheck, Percent, RefreshCw, Truck } from "lucide-react"
+import { AlertTriangle, ArrowRight, CheckCircle2, ClipboardCheck, DollarSign, Eye, FileCheck2, FileWarning, FileX2, PackageCheck, Percent, Receipt, RefreshCw, Truck } from "lucide-react"
 import type { ReactNode } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { BarList, Columns, Donut, Legend, ProportionBar, type Segment } from "@/components/common/Charts"
@@ -9,7 +9,7 @@ import { PageHeader, Section } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card, ChartCard } from "@/components/ui/card"
+import { ChartCard } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useDocuments, useExposure, useOverview, useShipments } from "@/hooks/queries"
 import { CHART, REVIEW_COLOURS, REVIEW_ORDER, SERIES, STATUS_COLOURS, STATUS_ORDER, sentence } from "@/lib/chart"
@@ -56,14 +56,21 @@ export function Overview() {
       title="Overview"
       description="Where your shipments stand: what the audit found, what still needs a person, and what the invoices say."
       actions={
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => [overview, shipments, exposureRows, documents].forEach((query) => query.refetch())}
-          disabled={overview.isFetching}
-        >
-          <RefreshCw className={overview.isFetching ? "animate-spin" : ""} /> Refresh
-        </Button>
+        <>
+          {overview.dataUpdatedAt > 0 && (
+            <span className="text-xs text-muted-foreground" aria-live="polite">
+              Updated {new Date(overview.dataUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => [overview, shipments, exposureRows, documents].forEach((query) => query.refetch())}
+            disabled={overview.isFetching}
+          >
+            <RefreshCw className={overview.isFetching ? "animate-spin" : ""} /> Refresh
+          </Button>
+        </>
       }
     />
   )
@@ -149,7 +156,15 @@ export function Overview() {
       </div>
 
       <section aria-label="Key figures" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Shipments" value={count(kpis.identified)} detail={`${count(kpis.reconciled)} reconciled`} icon={<Truck />} definition={data.metric_definitions.identified} />
+        <KpiCard
+          title="Shipments"
+          value={count(kpis.identified)}
+          detail={`${count(kpis.reconciled)} reconciled`}
+          icon={<Truck />}
+          definition={data.metric_definitions.identified}
+          to="/shipments"
+          cta="View all shipments"
+        />
         <KpiCard
           title="With discrepancies"
           value={count(kpis.with_discrepancies)}
@@ -157,14 +172,28 @@ export function Overview() {
           icon={<Percent />}
           tone={kpis.with_discrepancies > 0 ? "bad" : "ok"}
           definition={data.metric_definitions.with_discrepancies}
+          to={`/shipments?status=${encodeURIComponent("DISCREPANCIES DETECTED")}`}
+          cta="View these shipments"
         />
-        <KpiCard title="Needs review" value={count(kpis.needs_review)} detail={`${count(kpis.no_discrepancies)} with no discrepancies`} icon={<Eye />} tone={kpis.needs_review > 0 ? "warn" : "ok"} definition={data.metric_definitions.needs_review} />
+        <KpiCard
+          title="Needs review"
+          value={count(kpis.needs_review)}
+          detail={`${count(kpis.no_discrepancies)} with no discrepancies`}
+          icon={<Eye />}
+          tone={kpis.needs_review > 0 ? "warn" : "ok"}
+          definition={data.metric_definitions.needs_review}
+          to="/shipments?review=1"
+          cta="View shipments to review"
+        />
         <KpiCard
           title="Invoice variance"
           value={money(kpis.invoice_variance)}
           detail={kpis.invoice_variance === null ? "No invoice could be checked" : `Across ${kpis.invoice_variance_covered} invoice${kpis.invoice_variance_covered === 1 ? "" : "s"}`}
           icon={<DollarSign />}
+          tone={(kpis.invoice_variance ?? 0) > 0 ? "bad" : "default"}
           definition={data.metric_definitions.invoice_variance}
+          to="/invoices?check=mismatch"
+          cta="View mismatched invoices"
         />
       </section>
 
@@ -418,38 +447,66 @@ export function Overview() {
 
       <Section title="Financial exposure" description={data.exposure_note}>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard title="Stated invoice total" value={exposure.mixed_currency ? NA : money(exposure.stated_total)} detail={exposure.mixed_currency ? "Amounts in different currencies are never added" : `${exposure.totals_read} of ${exposure.invoices} invoices have a readable total`} />
-          <KpiCard title="Arithmetic mismatches" value={count(exposure.mismatches)} detail={exposure.absolute_variance === null ? "None confirmed" : `${money(exposure.absolute_variance)} absolute variance`} tone={exposure.mismatches > 0 ? "bad" : "ok"} icon={<PackageCheck />} />
-          <KpiCard title="Verified invoices" value={count(exposure.verified)} detail="Line items add up to the stated total" tone="ok" />
-          <KpiCard title="Could not be verified" value={count(exposure.unverifiable)} detail={exposure.amount_under_review === null ? "No total to show" : `${money(exposure.amount_under_review)} under review`} icon={<ClipboardCheck />} tone={exposure.unverifiable > 0 ? "warn" : "ok"} />
+          <KpiCard
+            title="Stated invoice total"
+            value={exposure.mixed_currency ? NA : money(exposure.stated_total)}
+            detail={exposure.mixed_currency ? "Amounts in different currencies are never added" : `${exposure.totals_read} of ${exposure.invoices} invoices have a readable total`}
+            icon={<Receipt />}
+            to="/invoices"
+            cta="Open the invoice register"
+          />
+          <KpiCard
+            title="Arithmetic mismatches"
+            value={count(exposure.mismatches)}
+            detail={exposure.absolute_variance === null ? "None confirmed" : `${money(exposure.absolute_variance)} absolute variance`}
+            tone={exposure.mismatches > 0 ? "bad" : "ok"}
+            icon={<PackageCheck />}
+            to="/invoices?check=mismatch"
+            cta="View mismatched invoices"
+          />
+          <KpiCard title="Verified invoices" value={count(exposure.verified)} detail="Line items add up to the stated total" icon={<CheckCircle2 />} tone="ok" to="/invoices?check=verified" cta="View verified invoices" />
+          <KpiCard
+            title="Could not be verified"
+            value={count(exposure.unverifiable)}
+            detail={exposure.amount_under_review === null ? "No total to show" : `${money(exposure.amount_under_review)} under review`}
+            icon={<ClipboardCheck />}
+            tone={exposure.unverifiable > 0 ? "warn" : "ok"}
+            to="/invoices?check=unverifiable"
+            cta="View these invoices"
+          />
         </div>
       </Section>
 
-      <Section title="Document readiness">
-        <Card className="grid divide-y sm:grid-cols-[1fr_1fr_1fr_auto] sm:divide-x sm:divide-y-0">
-          <div className="p-5">
-            <StatusBadge status="ready" />
-            <p className="tabular mt-3 text-2xl font-semibold">{count(data.completeness.ready)}</p>
-            <p className="mt-1 text-[13px] text-muted-foreground">shipment{data.completeness.ready === 1 ? "" : "s"} with a BOL, invoice and POD</p>
-          </div>
-          <div className="p-5">
-            <StatusBadge status="incomplete" />
-            <p className="tabular mt-3 text-2xl font-semibold">{count(data.completeness.incomplete)}</p>
-            <p className="mt-1 text-[13px] text-muted-foreground">missing a document</p>
-          </div>
-          <div className="p-5">
-            <span className="text-[13px] font-medium text-muted-foreground">Files not used</span>
-            <p className="tabular mt-3 text-2xl font-semibold">{count(data.completeness.unusable_files + data.completeness.unidentified_files)}</p>
-            <p className="mt-1 text-[13px] text-muted-foreground">
-              {data.completeness.unusable_files} unusable, {data.completeness.unidentified_files} unidentified
-            </p>
-          </div>
-          <div className="flex items-center p-5">
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/completeness">Open completeness</Link>
-            </Button>
-          </div>
-        </Card>
+      <Section title="Document readiness" description="A shipment is audited only when its BOL, invoice and POD are all present and readable.">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <KpiCard
+            title="Ready"
+            value={count(data.completeness.ready)}
+            detail={`shipment${data.completeness.ready === 1 ? "" : "s"} with a BOL, invoice and POD`}
+            icon={<FileCheck2 />}
+            tone="ok"
+            to="/completeness"
+            cta="Open document completeness"
+          />
+          <KpiCard
+            title="Incomplete"
+            value={count(data.completeness.incomplete)}
+            detail="missing a document"
+            icon={<FileWarning />}
+            tone={data.completeness.incomplete > 0 ? "warn" : "ok"}
+            to="/completeness?incomplete=1"
+            cta="View incomplete shipments"
+          />
+          <KpiCard
+            title="Files not used"
+            value={count(data.completeness.unusable_files + data.completeness.unidentified_files)}
+            detail={`${data.completeness.unusable_files} unusable, ${data.completeness.unidentified_files} unidentified`}
+            icon={<FileX2 />}
+            tone={data.completeness.unusable_files + data.completeness.unidentified_files > 0 ? "bad" : "ok"}
+            to="/completeness"
+            cta="See which files"
+          />
+        </div>
       </Section>
     </>
   )

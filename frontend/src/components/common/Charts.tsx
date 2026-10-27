@@ -254,12 +254,15 @@ export function Columns<Row extends object>({
     ...(ticks && { ticks, domain: [0, ticks[ticks.length - 1]] }),
   }
   const categoryAxis = { dataKey: (row: Row) => String(field(row, category)), tick: axis, tickLine: false, axisLine: { stroke: CHART.grid }, interval: 0 as const }
+  // Many columns: their labels are tilted (and the chart made taller for them) instead of running into each other
+  const tilted = !horizontal && data.length > 6
+  const LABEL_ROOM = 56
 
   return (
     <figure aria-label={label} className="min-w-0">
       {series.length > 1 && <Legend className="mb-3" items={series.map((item) => ({ key: item.key, label: item.label, colour: item.colour }))} />}
 
-      <div style={{ height }} aria-hidden="true">
+      <div style={{ height: tilted ? height + LABEL_ROOM : height }} aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} layout={horizontal ? "vertical" : "horizontal"} margin={{ top: labels ? 20 : 8, right: horizontal ? 24 : 8, left: 0, bottom: 0 }} barGap={4} barCategoryGap="30%">
             <CartesianGrid stroke={CHART.grid} horizontal={!horizontal} vertical={horizontal} />
@@ -270,7 +273,7 @@ export function Columns<Row extends object>({
               </>
             ) : (
               <>
-                <XAxis {...categoryAxis} tickMargin={8} />
+                {tilted ? <XAxis {...categoryAxis} angle={-40} textAnchor="end" height={LABEL_ROOM + 30} tickMargin={4} /> : <XAxis {...categoryAxis} tickMargin={8} />}
                 <YAxis {...valueAxis} width={64} />
               </>
             )}

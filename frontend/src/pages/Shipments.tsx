@@ -1,5 +1,5 @@
 import { FilterX, Search } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/common/states"
 import { PageHeader } from "@/components/common/PageHeader"
@@ -13,15 +13,22 @@ import { money, NA } from "@/lib/format"
 
 export function Shipments() {
   const navigate = useNavigate()
-  // A link can open the list already filtered (the Overview's charts do: ?status= and ?category=)
+  // A link can open the list already filtered: the Overview's cards and charts (?status=, ?category=,
+  // ?invoice=mismatch, ?delayed=1, ?review=1) and the search box in the top bar (?search=)
   const [params] = useSearchParams()
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(params.get("search") ?? "")
   const [carrier, setCarrier] = useState("")
   const [status, setStatus] = useState(params.get("status") ?? "")
   const [category, setCategory] = useState(params.get("category") ?? "")
-  const [invoiceMismatch, setInvoiceMismatch] = useState(false)
-  const [delayed, setDelayed] = useState(false)
-  const [needsReview, setNeedsReview] = useState(false)
+  const [invoiceMismatch, setInvoiceMismatch] = useState(params.get("invoice") === "mismatch")
+  const [delayed, setDelayed] = useState(params.get("delayed") === "1")
+  const [needsReview, setNeedsReview] = useState(params.get("review") === "1")
+
+  // The top bar can search again while this page is open
+  const searched = params.get("search")
+  useEffect(() => {
+    if (searched !== null) setSearch(searched)
+  }, [searched])
 
   const debounced = useDebounced(search)
 
