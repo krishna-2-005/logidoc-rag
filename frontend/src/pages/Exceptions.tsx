@@ -1,18 +1,21 @@
 import { FilterX, History as HistoryIcon, UserCheck } from "lucide-react"
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { useSearchParams } from "react-router-dom"
+import { BarList, ProportionBar } from "@/components/common/Charts"
 import { PageHeader } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
 import { EmptyState, ErrorState, LoadingBlock, errorMessage } from "@/components/common/states"
 import { useToast } from "@/components/common/toast"
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, ChartCard } from "@/components/ui/card"
 import { Input, Label, Select, Textarea } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useDebounced } from "@/hooks/useDebounced"
 import { useExceptionAction, useExceptionDetail, useExceptions, useSession, useSettings } from "@/hooks/queries"
-import { dateTime, label, NA } from "@/lib/format"
+import { CHART, REVIEW_COLOURS, REVIEW_ORDER, sentence } from "@/lib/chart"
+import { count, dateTime, label, NA } from "@/lib/format"
+import { SEVERITY_ORDER, tally } from "@/lib/insights"
 import type { ExceptionDetail, ExceptionListItem, ReviewEvent, WorkflowAction } from "@/lib/types"
 
 export const ACTION_LABELS: Record<WorkflowAction, string> = {
@@ -295,6 +298,59 @@ function Panel({ item, assignees }: { item: ExceptionListItem; assignees: string
   )
 }
 
+const SEVERITY_COLOURS: Record<string, string> = { HIGH: CHART.bad, MEDIUM: CHART.warn, LOW: CHART.info }
+
+/**
+ * The listed exceptions at a glance, counted from the same list the table shows (so
+ * it follows the filters). Selecting a category filters the list by it.
+ */
+function ExceptionSummary({ items, category, onCategory }: { items: ExceptionListItem[]; category: string; onCategory: (value: string) => void }) {
+  const categories = tally(items, "category")
+  const severities = tally(items, "severity", SEVERITY_ORDER)
+  const states = tally(items, "status", REVIEW_ORDER)
+  const stateCounts = new Map(states.map((item) => [item.key, item.value]))
+  const unit = (n: number) => (n === 1 ? "exception" : "exceptions")
+
+  return (
+    <div className="mb-4 grid gap-4 lg:grid-cols-3">
+      <ChartCard title="By category" description={category ? "Showing one category: select it again to show all." : "Select a category to list only its exceptions."}>
+        <BarList
+          label="Exceptions by category"
+          rows={categories.map((item) => ({
+            key: item.key,
+            name: item.key,
+            label: (
+              <button type="button" aria-pressed={category === item.key} onClick={() => onCategory(category === item.key ? "" : item.key)} className="rounded-sm text-left hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {item.key}
+              </button>
+            ),
+            display: count(item.value),
+            parts: [{ key: "value", label: "Exceptions", value: item.value, colour: CHART.bad }],
+          }))}
+        />
+      </ChartCard>
+
+      <ChartCard title="By severity" description="As the audit rates each finding.">
+        <ProportionBar
+          segments={severities.map((item) => ({ key: item.key, label: sentence(item.key), value: item.value, colour: SEVERITY_COLOURS[item.key] ?? CHART.neutral }))}
+          unit={unit(items.length)}
+          label="Exceptions by severity"
+        />
+      </ChartCard>
+
+      <ChartCard title="By review state" description="What reviewers have done so far. It never changes what the audit found.">
+        <ProportionBar
+          segments={[...REVIEW_ORDER, ...states.map((item) => item.key).filter((key) => !REVIEW_ORDER.includes(key))].map((key) => ({
+            key, label: sentence(key), value: stateCounts.get(key) ?? 0, colour: REVIEW_COLOURS[key] ?? CHART.neutral,
+          }))}
+          unit={unit(items.length)}
+          label="Exceptions by review state"
+        />
+      </ChartCard>
+    </div>
+  )
+}
+
 export function Exceptions() {
   const [params, setParams] = useSearchParams()
   const [search, setSearch] = useState(params.get("search") ?? "")
@@ -405,6 +461,8 @@ export function Exceptions() {
         </div>
       </form>
 
+      {list.data && list.data.exceptions.length > 0 && <ExceptionSummary items={list.data.exceptions} category={category} onCategory={setCategory} />}
+
       {list.isPending && <LoadingBlock rows={5} label="Loading exceptions" />}
       {list.isError && <ErrorState error={list.error} onRetry={() => list.refetch()} title="Exceptions could not be loaded" />}
 
@@ -425,6 +483,7 @@ export function Exceptions() {
                 <tr>
                   <TableHead>Shipment</TableHead>
                   <TableHead>Category</TableHead>
+                  <TableHead>Severity</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead>Assignee</TableHead>
                   <TableHead className="text-right">Age</TableHead>
@@ -442,6 +501,7 @@ export function Exceptions() {
                       {item.category}
                       {!item.detected && <span className="block text-xs text-muted-foreground">no longer detected</span>}
                     </TableCell>
+                    <TableCell>{item.severity ? <StatusBadge status={item.severity} /> : <span className="text-muted-foreground">{NA}</span>}</TableCell>
                     <TableCell className="space-x-1">
                       <StatusBadge status={item.status} />
                       {item.approval_state === "pending" && <StatusBadge status="pending" />}
