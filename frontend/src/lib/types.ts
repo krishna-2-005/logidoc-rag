@@ -387,6 +387,12 @@ export interface Trends {
   options: { carriers: string[]; statuses: string[]; categories: string[]; first: string | null; last: string | null }
 }
 
+/** GET /api/ready (status words only, never paths or error text) */
+export interface Readiness {
+  status: "ready" | "degraded" | "not_ready"
+  checks: Record<string, { ok: boolean; [key: string]: unknown }>
+}
+
 /** One invoice of GET /api/exposure */
 export interface InvoiceExposure {
   shipment_id: string
