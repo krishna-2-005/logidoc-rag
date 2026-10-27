@@ -75,7 +75,14 @@ export const useCompleteness = (search: string, incompleteOnly: boolean) =>
     placeholderData: (previous) => previous,
   })
 
-export const useExposure = () => useQuery({ queryKey: [AUDIT, "exposure"], queryFn: () => get<Exposure>("/api/exposure") })
+export interface ExposureFilters {
+  search?: string
+  /** verified, mismatch or unverifiable; the server filters, the interface only asks */
+  classification?: string[]
+}
+
+export const useExposure = (filters: ExposureFilters = {}) =>
+  useQuery({ queryKey: [AUDIT, "exposure", filters], queryFn: () => get<Exposure>("/api/exposure", { ...filters }), placeholderData: (previous) => previous })
 
 export interface ExceptionFilters {
   search?: string

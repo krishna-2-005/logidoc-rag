@@ -387,6 +387,22 @@ export interface Trends {
   options: { carriers: string[]; statuses: string[]; categories: string[]; first: string | null; last: string | null }
 }
 
+/** One invoice of GET /api/exposure */
+export interface InvoiceExposure {
+  shipment_id: string
+  shipment_key: string
+  carrier: string | null
+  invoice_status: string | null
+  classification: "verified" | "mismatch" | "unverifiable" | string
+  stated_total: number | null
+  line_item_sum: number | null
+  signed_difference: number | null
+  absolute_difference: number | null
+  amount_under_review: number | null
+  currency: string | null
+  discrepancy_categories: string[]
+}
+
 export interface Exposure {
   rows: Record<string, unknown>[]
   summary: ExposureSummary
