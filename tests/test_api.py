@@ -13,9 +13,11 @@ Run from the project root:
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 
+import chromadb
 import pytest
 from fastapi.testclient import TestClient
 
@@ -27,6 +29,7 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
         sys.path.insert(0, str(path))
 
 import audit_analytics as analytics  # noqa: E402
+import config  # noqa: E402
 import ingestion_manager  # noqa: E402
 from api.app import create_app  # noqa: E402
 from api.core import CLIENT_HEADER, SESSION_COOKIE, ApiSettings, ApiState  # noqa: E402
@@ -129,7 +132,7 @@ DATA_ROUTES = (
     "/api/exceptions", "/api/exceptions/activity", "/api/history/runs", "/api/trends", "/api/ingestion/register",
     "/api/ingestion/errors", "/api/settings", "/api/reports/register.csv", "/api/reports/exceptions.csv",
     f"/api/reports/shipments/{A}.csv", f"/api/reports/shipments/{A}.pdf", "/api/admin/users", "/api/admin/events",
-    "/api/documents/file?name=BOL_SHJ-2026-001.pdf",
+    "/api/documents/file?name=BOL_SHJ-2026-001.pdf", "/api/documents/pipeline?name=BOL_SHJ-2026-001.pdf",
 )
 
 
@@ -838,6 +841,52 @@ def test_an_administrator_uploads_and_every_file_gets_a_status(rig, admin, embed
 
     # The new document shows up in the audit data without a restart
     assert "SHJ-2026-555" in {row["shipment_id"] for row in admin.get("/api/shipments").json()["shipments"]}
+
+
+def test_an_uploaded_document_can_be_followed_step_by_step(rig, admin, embeddings, tmp_path, caplog):
+
+    # While it runs: one line per step in the pipeline log (the server window prints it)
+    with caplog.at_level(logging.INFO, logger="logidoc.pipeline"):
+        assert admin.post("/api/ingestion/upload", files=[pdf_upload(tmp_path)]).json()["indexed"] == 1
+
+    lines = [record.getMessage() for record in caplog.records if record.name == "logidoc.pipeline"]
+
+    for step in ("received", "text extracted (PyMuPDF)", "classified: BOL, shipment SHJ-2026-555", "chunked", "embedded", "indexed"):
+        assert any(f"BOL_NEW.pdf | {step}" in line for line in lines), step
+
+    # Afterwards: what each step produced, read back without changing anything
+    def stored():
+        found = chromadb.PersistentClient(path=str(rig.locations.chroma_dir)).get_collection(name=config.COLLECTION_NAME).get(
+            include=["embeddings", "metadatas", "documents"]
+        )
+        return sorted(zip(found["ids"], [list(map(float, values)) for values in found["embeddings"]], [sorted(item.items()) for item in found["metadatas"]], found["documents"]))
+
+    before = {path.name: path.read_bytes() for path in rig.raw.glob("*.pdf")}
+    vectors_before = stored()
+    trace = admin.get("/api/documents/pipeline", params={"name": "BOL_NEW.pdf"}).json()
+
+    assert trace["validation"]["ok"] and trace["ingestion"]["status"] == "indexed"
+    assert (trace["classification"]["document_type"], trace["classification"]["shipment_id"]) == ("BOL", "SHJ-2026-555")
+    assert "SHJ-2026-555" in trace["extraction"]["pages"][0]["text"]
+    assert (trace["chunking"]["chunk_size"], trace["chunking"]["overlap"]) == (1000, 200)
+
+    # The vectors shown are the ones ingestion stored for exactly these chunks
+    assert [vector["id"] for vector in trace["index"]["vectors"]] == [
+        f"{trace['sha256']}:{chunk['page']}:{chunk['chunk']}" for chunk in trace["chunking"]["chunks"]
+    ]
+    assert trace["index"]["vectors"][0]["dimensions"] == len(fake_embedding("x"))
+    assert trace["index"]["vectors"][0]["metadata"]["shipment_id"] == "SHJ-2026-555"
+    assert {path.name: path.read_bytes() for path in rig.raw.glob("*.pdf")} == before
+    assert stored() == vectors_before
+    assert str(rig.tmp) not in json.dumps(trace)
+
+
+def test_the_processing_steps_are_found_by_name_in_the_servers_own_listing(rig, admin):
+
+    assert admin.get("/api/documents/pipeline", params={"name": "BOL_SHJ-2026-001.pdf"}).status_code == 200
+
+    for name in ("../chroma", "..\\reviews.sqlite3", "/etc/passwd", "nothing.pdf", "", "a" * 300):
+        assert admin.get("/api/documents/pipeline", params={"name": name}).status_code in (404, 422), name
 
 
 def test_an_open_ingestion_error_keeps_every_shipment_from_being_clean_until_resolved(rig, admin):

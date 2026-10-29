@@ -1,7 +1,8 @@
 import { ExternalLink, FileText, RotateCcw, Trash2, Upload as UploadIcon } from "lucide-react"
 import { useRef, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { AskPanel } from "@/components/common/AskPanel"
+import { ProcessingTab } from "@/components/documents/ProcessingTrace"
 import { PageHeader, Section } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/common/states"
@@ -20,6 +21,9 @@ import { dateTime, NA } from "@/lib/format"
 import type { DocumentFile, UploadSummary } from "@/lib/types"
 
 const AUDIT_LABEL: Record<string, string> = { quantity: "Quantity", delivery: "Delivery", invoice: "Invoice" }
+
+/** The Processing tab, following one stored document */
+const processingLink = (filename: string) => `/documents?tab=processing&file=${encodeURIComponent(filename)}`
 
 function formatSize(bytes: number): string {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
@@ -81,6 +85,9 @@ function DocumentsTab() {
                   <ExternalLink className="size-3 shrink-0" aria-label="opens the PDF in a new tab" />
                 </a>
                 <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">sha256 {file.sha256}…</p>
+                <Link to={processingLink(file.filename)} className="mt-0.5 inline-block text-xs font-medium text-primary hover:underline">
+                  See how it was processed
+                </Link>
               </TableCell>
               <TableCell>{file.document_type ?? NA}</TableCell>
               <TableCell>
@@ -152,6 +159,11 @@ function UploadResult({ result }: { result: UploadSummary }) {
             </div>
             {file.message && <p className="mt-1 text-xs text-muted-foreground">{file.message}</p>}
             {file.action && <p className="mt-0.5 text-xs">Next step: {file.action}</p>}
+            {(file.status === "indexed" || file.status === "partial") && (
+              <Link to={processingLink(file.filename)} className="mt-1 inline-block text-xs font-medium text-primary hover:underline">
+                See how it was processed
+              </Link>
+            )}
           </li>
         ))}
       </ul>
@@ -479,8 +491,13 @@ function IngestionTab() {
   )
 }
 
+const TABS = ["documents", "ingestion", "processing", "ask"]
+
 export function Documents() {
-  const [tab, setTab] = useState("documents")
+  // The tab (and the document followed in Processing) live in the address, so other screens can link to them
+  const [params, setParams] = useSearchParams()
+  const tab = TABS.includes(params.get("tab") ?? "") ? (params.get("tab") as string) : "documents"
+  const file = params.get("file")
 
   return (
     <>
@@ -489,15 +506,17 @@ export function Documents() {
       <Tabs
         label="Document views"
         value={tab}
-        onChange={setTab}
+        onChange={(next) => setParams(next === "documents" ? {} : { tab: next }, { replace: true })}
         items={[
           { id: "documents", label: "Documents" },
           { id: "ingestion", label: "Ingestion" },
+          { id: "processing", label: "How it was processed" },
           { id: "ask", label: "Ask the documents" },
         ]}
       >
         {tab === "documents" && <DocumentsTab />}
         {tab === "ingestion" && <IngestionTab />}
+        {tab === "processing" && <ProcessingTab file={file} onFile={(name) => setParams({ tab: "processing", file: name }, { replace: true })} />}
         {tab === "ask" && <AskPanel />}
       </Tabs>
     </>

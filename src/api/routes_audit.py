@@ -7,6 +7,7 @@ audit_service; this file only selects, filters and shapes it. Nothing is
 recalculated, and nothing a client sends can change an audit result.
 """
 
+import hashlib
 from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,6 +17,7 @@ import audit_analytics as analytics
 import audit_explanations as explanations
 import authz
 import financial_exposure as exposure
+import processing_trace
 from api.core import ApiState, get_state, require
 from audit_export import ExportError, audit_csv, export_filename
 from audit_pdf_export import audit_pdf, pdf_filename
@@ -282,6 +284,26 @@ def document_file(name: str = Query(max_length=200), principal=ViewAudit, state:
 
     return FileResponse(found, media_type="application/pdf", filename=found.name, content_disposition_type="inline",
                         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/documents/pipeline")
+def document_pipeline(name: str = Query(max_length=200), principal=ViewAudit, state: ApiState = Depends(get_state)):
+    """
+    How one stored PDF was processed: checks, extracted text, document type and
+    shipment, chunks, and the vectors stored for it (processing_trace, read-only).
+    Found by name in the server's own listing, like /documents/file.
+    """
+
+    found = next((path for path in sorted(state.locations.raw_dir.glob("*.pdf")) if path.name == name), None)
+
+    if found is None:
+        raise HTTPException(status_code=404, detail="No such document.")
+
+    sha256 = hashlib.sha256(found.read_bytes()).hexdigest()
+    register_db = state.locations.register_db
+    record = processing_trace.register_record(IngestionRegister(register_db), found.name, sha256) if register_db.is_file() else None
+
+    return processing_trace.trace(found, state.locations.chroma_dir, record=record)
 
 
 @router.get("/completeness")

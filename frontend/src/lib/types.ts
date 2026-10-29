@@ -393,6 +393,27 @@ export interface Readiness {
   checks: Record<string, { ok: boolean; [key: string]: unknown }>
 }
 
+/** A stretch of text, cut by the server to a readable length */
+export interface CutText {
+  text: string
+  characters: number
+  truncated: boolean
+}
+
+/** GET /api/documents/pipeline: how one stored PDF was processed (read back, nothing re-written) */
+export interface PipelineTrace {
+  filename: string
+  size: number
+  sha256: string
+  ingestion: { status: string | null; message: string | null; chunks_indexed: number | null; attempts: number | null; received_at: string | null; finished_at: string | null; seconds: number | null } | null
+  validation: { ok: boolean; code: string | null; pages: number | null; text_pages: number | null; warnings: string[]; ms: number }
+  extraction: { engine: string; ms: number; characters: number; pages: ({ page: number } & CutText)[] } | null
+  classification: { document_type: string | null; shipment_id: string | null; identifiers: Record<string, string> } | null
+  chunking: { chunk_size: number; overlap: number; ms: number; chunks: ({ page: number; chunk: number } & CutText)[] } | null
+  embedding: { model: string }
+  index: { collection: string; available: boolean; vectors: { id: string; dimensions: number; preview: number[]; norm: number; metadata: Record<string, string | number> }[] } | null
+}
+
 /** One invoice of GET /api/exposure */
 export interface InvoiceExposure {
   shipment_id: string

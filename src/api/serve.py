@@ -26,6 +26,7 @@ document folder, the databases, the extraction store and the Ollama models
 are usable (ready, degraded or not_ready).
 """
 
+import logging
 import sys
 from pathlib import Path
 
@@ -58,6 +59,14 @@ def main():
     # The ingestion lock works inside one process only
     print("One writer at a time: do not upload or change documents from the Streamlit app (app.py) while this "
           "server runs on the same data folder.")
+
+    # Each uploaded file's steps (received, text, type, chunks, embeddings, index) in this window
+    pipeline = logging.getLogger("logidoc.pipeline")
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s  [pipeline] %(message)s", datefmt="%H:%M:%S"))
+    pipeline.addHandler(handler)
+    pipeline.setLevel(logging.INFO)
+    pipeline.propagate = False
 
     uvicorn.run(create_app(settings=settings), host=settings.host, port=settings.port, log_level="info")
 
