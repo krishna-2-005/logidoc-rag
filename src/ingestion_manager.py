@@ -49,11 +49,13 @@ operation would let Streamlit stop the script half-way.
 
 import argparse
 import hashlib
+import logging
 import os
 import shutil
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -97,6 +99,11 @@ STATUS_FAILED = "failed"
 # Metadata key recording which file content a vector came from.
 # Vectors from a full rebuild do not have it.
 HASH_METADATA_KEY = "content_sha256"
+
+# One line per step of each file (received, text, type, chunks, embeddings,
+# index), so the server window shows the pipeline while it runs. Logging only:
+# nothing here changes what is ingested. src/api/serve.py prints these lines.
+PIPELINE = logging.getLogger("logidoc.pipeline")
 
 # How the vectors stored under a filename relate to a PDF
 INDEX_VERIFIED = "indexed"
@@ -677,6 +684,8 @@ def ingest_file(
 
         outcome["sha256"] = content_hash
 
+        PIPELINE.info("%s | received: %s bytes, SHA-256 %s", input_path.name, f"{staged_path.stat().st_size:,}", content_hash[:12])
+
         # ----------------------------------------------------
         # Duplicate / inconsistent / changed
         # ----------------------------------------------------
@@ -694,6 +703,8 @@ def ingest_file(
             outcome.update(existing)
 
             if existing["status"] == STATUS_DUPLICATE:
+
+                PIPELINE.info("%s | duplicate: the same content is already stored, nothing added", input_path.name)
 
                 journal_event(
                     raw_dir,
@@ -714,6 +725,8 @@ def ingest_file(
 
         outcome["stage"] = "load"
 
+        started = time.perf_counter()
+
         document = load_document(staged_path)
 
         outcome["document_type"] = document.get(
@@ -724,6 +737,13 @@ def ingest_file(
             document.get("identifiers") or {}
         ).get("shipment_id")
 
+        pages = document.get("pages") or []
+        PIPELINE.info(
+            "%s | text extracted (PyMuPDF): %d page(s), %s characters, %.0f ms",
+            input_path.name, len(pages), f"{sum(len(page.get('text') or '') for page in pages):,}", (time.perf_counter() - started) * 1000,
+        )
+        PIPELINE.info("%s | classified: %s, shipment %s", input_path.name, outcome["document_type"], outcome["shipment_id"] or "not found")
+
         chunks = create_document_chunks(document)
 
         if not chunks:
@@ -731,16 +751,25 @@ def ingest_file(
                 "No extractable text was found in the PDF."
             )
 
+        PIPELINE.info("%s | chunked: %d chunk(s) of up to 1,000 characters, 200 overlap", input_path.name, len(chunks))
+
         # ----------------------------------------------------
         # Embed every chunk before writing anything
         # ----------------------------------------------------
 
         outcome["stage"] = "embed"
 
+        started = time.perf_counter()
+
         embeddings = [
             embed_text(chunk["text"])
             for chunk in chunks
         ]
+
+        PIPELINE.info(
+            "%s | embedded: %d vector(s) of %d numbers, %.0f ms",
+            input_path.name, len(embeddings), len(embeddings[0]) if embeddings else 0, (time.perf_counter() - started) * 1000,
+        )
 
         vector_ids = [
             f"{content_hash}:"
@@ -815,6 +844,8 @@ def ingest_file(
                 "chunks were found in the index after writing."
             )
 
+        PIPELINE.info("%s | indexed: %d vector(s) written to ChromaDB and read back", input_path.name, len(stored_ids))
+
         # ----------------------------------------------------
         # Store the PDF only after indexing succeeded, then
         # verify the stored copy
@@ -844,6 +875,8 @@ def ingest_file(
             error=describe_error(error),
             service_down=bool(getattr(error, "service_down", False)),
         )
+
+        PIPELINE.info("%s | failed at the %s step: %s", input_path.name, outcome.get("stage"), outcome["error"])
 
         if written_ids:
 

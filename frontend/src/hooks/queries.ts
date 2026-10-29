@@ -21,6 +21,7 @@ import type {
   IngestionRecord,
   IngestionRegister,
   Overview,
+  PipelineTrace,
   Readiness,
   Session,
   Settings,
@@ -68,6 +69,10 @@ export const useShipment = (id: string | undefined) =>
   useQuery({ queryKey: [AUDIT, "shipment", id], queryFn: () => get<ShipmentDetail>(`/api/shipments/${encodeURIComponent(id ?? "")}`), enabled: !!id })
 
 export const useDocuments = () => useQuery({ queryKey: [AUDIT, "documents"], queryFn: () => get<DocumentsPayload>("/api/documents") })
+
+/** How one stored document was processed, step by step (read-only on the server) */
+export const usePipeline = (name: string | undefined) =>
+  useQuery({ queryKey: [AUDIT, "pipeline", name], queryFn: () => get<PipelineTrace>("/api/documents/pipeline", { name }), enabled: !!name })
 
 export const useCompleteness = (search: string, incompleteOnly: boolean) =>
   useQuery({

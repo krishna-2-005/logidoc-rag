@@ -4,6 +4,7 @@ import { Route, Routes, useLocation } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import App from "@/App"
 import { AskPanel } from "@/components/common/AskPanel"
+import { Documents } from "@/pages/Documents"
 import { Invoices } from "@/pages/Invoices"
 import { Overview } from "@/pages/Overview"
 import { Shipments } from "@/pages/Shipments"
@@ -178,6 +179,50 @@ describe("Ask the documents", () => {
 
     expect(await screen.findByText(/searched: Shipment SHJ-2026-001/)).toBeInTheDocument()
     expect(calls.map((call) => call.url.pathname)).toEqual(["/api/chat"])
+  })
+})
+
+describe("How a document was processed", () => {
+  const file = (filename: string, shipment: string) => ({
+    filename, document_type: "BOL", status: "parsed", status_text: "parsed", shipment_id: shipment, shipment_key: shipment.replace(/-/g, ""),
+    total_pages: 1, text_pages: 1, size: 4096, sha256: "abc", error: null, references: [], ingestion: null,
+  })
+  const DOCUMENTS = { files: [file("BOL_SHJ-2026-003.pdf", "SHJ-2026-003"), file("BOL_SHJ-2026-004.pdf", "SHJ-2026-004")], completeness: { shipments: [], unidentified: [], unusable: [], duplicates: [] } }
+  const trace = (name: string) => ({
+    filename: name, size: 4096, sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    ingestion: { status: "indexed", message: "Indexed 1 chunk(s).", chunks_indexed: 1, attempts: 1, received_at: "2026-10-28T09:00:00+00:00", finished_at: "2026-10-28T09:00:01+00:00", seconds: 1 },
+    validation: { ok: true, code: null, pages: 1, text_pages: 1, warnings: [], ms: 4.2 },
+    extraction: { engine: "PyMuPDF", ms: 8.6, characters: 120, pages: [{ page: 1, text: `BILL OF LADING\nShipment Number: ${name.slice(4, 16)}`, characters: 120, truncated: false }] },
+    classification: { document_type: "BOL", shipment_id: name.slice(4, 16), identifiers: { shipment_id: name.slice(4, 16) } },
+    chunking: { chunk_size: 1000, overlap: 200, ms: 0.1, chunks: [{ page: 1, chunk: 0, text: "Shipment Number chunk text", characters: 120, truncated: false }] },
+    embedding: { model: "nomic-embed-text" },
+    index: { collection: "logistics_documents", available: true, vectors: [{ id: "9f86d081:1:0", dimensions: 768, preview: [0.12, -0.4, 1.5, -2, 0.3, 0.01, -0.7, 0.9], norm: 19.5, metadata: { page: 1, document_type: "BOL", shipment_id: name.slice(4, 16), source: name } }] },
+  })
+
+  it("shows every step with what it produced, for the document in the address", async () => {
+    const { calls } = mockApi({ "/api/documents": DOCUMENTS, "/api/documents/pipeline": (url: URL) => ({ body: trace(url.searchParams.get("name") ?? "") }) })
+    renderPage(<Documents />, "/documents?tab=processing&file=BOL_SHJ-2026-004.pdf")
+
+    expect(await screen.findByText("1. Upload and checks")).toBeInTheDocument()
+    for (const step of ["2. Text extraction", "3. Classification and identifiers", "4. Chunking", "5. Embedding", "6. Vector index", "7. Ready for questions"]) {
+      expect(screen.getByText(step)).toBeInTheDocument()
+    }
+    expect(screen.getByText(/Shipment Number: SHJ-2026-004/)).toBeInTheDocument()
+    expect(screen.getByText(/\[0\.1200, -0\.4000, 1\.5000, -2\.0000/)).toHaveTextContent("768 numbers")
+    expect(screen.getByRole("img", { name: /First 8 of 768 numbers/ })).toBeInTheDocument()
+    expect(screen.getByText("9f86d081:1:0")).toBeInTheDocument()
+    expect(calls.filter((call) => call.url.pathname === "/api/documents/pipeline").map((call) => call.url.searchParams.get("name"))).toEqual(["BOL_SHJ-2026-004.pdf"])
+
+    await userEvent.selectOptions(screen.getByLabelText("Document"), "BOL_SHJ-2026-003.pdf")
+    expect(await screen.findByText(/Shipment Number: SHJ-2026-003/)).toBeInTheDocument()
+  })
+
+  it("links every stored document to its processing steps", async () => {
+    mockApi({ "/api/documents": DOCUMENTS })
+    renderPage(<Documents />, "/documents")
+
+    const links = await screen.findAllByRole("link", { name: "See how it was processed" })
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(["/documents?tab=processing&file=BOL_SHJ-2026-003.pdf", "/documents?tab=processing&file=BOL_SHJ-2026-004.pdf"])
   })
 })
 
