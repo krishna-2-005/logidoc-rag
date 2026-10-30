@@ -44,6 +44,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 
 from audit_export import NOT_AVAILABLE, ExportError, check_exportable, safe_cell
@@ -364,6 +365,96 @@ def discrepancy_text(result, category, fallback):
     return fallback
 
 
+FREIGHT_ACTIONS = {
+    "over": "Dispute or short-pay the difference with the carrier, citing the rate confirmation.",
+    "under": "Billed below the contract: confirm the charge with the carrier before paying; nothing is recovered.",
+    "INSUFFICIENT_EVIDENCE": "Request supporting documents (for example a signed detention or lumper receipt) before approving payment.",
+    "PENDING_REVIEW": "Review the evidence and approve or dispute the charge.",
+    "DUPLICATE": "Hold payment and confirm with the carrier that this invoice was not already paid.",
+    "reference": "Confirm the contract terms with the carrier before paying; the rate confirmation and the shipment documents disagree.",
+}
+
+
+def slug(text):
+
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-") or "charge"
+
+
+def freight_evidence(item):
+    """A freight audit line's sources and passages in evidence_references form."""
+
+    found = []
+
+    for role in ("expected_source", "billed_source"):
+        src = item.get(role)
+
+        if src:
+            found.append({"source": src.get("file"), "page": src.get("page"), "document_type": src.get("document_type"),
+                          "text": "contract" if role == "expected_source" else "invoice"})
+
+    for value in item.get("values") or []:
+        found.append({"source": value.get("file"), "page": value.get("page"), "document_type": value.get("document_type"),
+                      "text": str(value.get("value"))})
+
+    return found + list(item.get("evidence") or [])
+
+
+def add_freight_exceptions(shipment, add):
+    """
+    Exceptions from the shipment's freight audit (freight_audit), raised only
+    when a rate confirmation makes the three-way match possible. One per
+    charge or reference (exception_key shipment|freight-...), so an
+    unresolved issue is never duplicated; the arithmetic and total lines are
+    covered by the reconciliation's own exceptions and are not repeated.
+    """
+
+    audit = shipment.get("freight_audit") or {}
+
+    if not (audit.get("documents") or {}).get("contract"):
+        return
+
+    currency = audit.get("currency") or "amount"
+
+    for item in audit.get("charges") or []:
+
+        outcome = item["outcome"]
+
+        if item["kind"] != "charge" or outcome not in ("DISCREPANCY", "INSUFFICIENT_EVIDENCE", "PENDING_REVIEW"):
+            continue
+
+        variance = item.get("variance")
+        over = outcome == "DISCREPANCY" and variance is not None and variance > 0
+        at_stake = variance if outcome == "DISCREPANCY" else item.get("billed")
+
+        add(shipment, f"freight-{slug(item['charge'])}", DISCREPANCY if outcome == "DISCREPANCY" else REVIEW,
+            f"Freight audit: {item['charge']}", HIGH if over else MEDIUM, item["explanation"],
+            variance if variance is not None else item.get("billed"),
+            f"{currency} (billed - contract)" if variance is not None else f"{currency} billed",
+            freight_evidence(item),
+            audit_outcome=outcome,
+            financial_impact={"amount": max(at_stake, 0) if at_stake is not None else None, "currency": audit.get("currency")},
+            recommended_action=FREIGHT_ACTIONS["over" if over else "under"] if outcome == "DISCREPANCY" else FREIGHT_ACTIONS[outcome])
+
+    for item in audit.get("checks") or []:
+
+        outcome = item["outcome"]
+        values = item.get("values") or []
+        contract = {str(v.get("value")).casefold() for v in values if v.get("document_type") == "RATE_CONFIRMATION"}
+        execution = {str(v.get("value")).casefold() for v in values if v.get("document_type") != "RATE_CONFIRMATION"}
+
+        if outcome == "DUPLICATE":
+            add(shipment, "freight-duplicate-invoice", DISCREPANCY, "Freight audit: duplicate invoice", HIGH,
+                item["explanation"], evidence=freight_evidence(item), audit_outcome=outcome,
+                financial_impact=None, recommended_action=FREIGHT_ACTIONS["DUPLICATE"])
+
+        # The contract against documents that agree with each other (BOL/invoice differences have their own exceptions)
+        elif (outcome == "DISCREPANCY" and item["check"] in ("Carrier", "Origin", "Destination", "Currency", "Payment terms")
+              and contract and len(execution) == 1 and contract != execution):
+            add(shipment, f"freight-{slug(item['check'])}", DISCREPANCY, f"Freight audit: {item['check'].lower()}", MEDIUM,
+                item["explanation"], evidence=freight_evidence(item), audit_outcome=outcome,
+                financial_impact=None, recommended_action=FREIGHT_ACTIONS["reference"])
+
+
 def build_exceptions(snapshot):
     """
     The exceptions of every shipment: detected discrepancies (kind
@@ -374,7 +465,7 @@ def build_exceptions(snapshot):
     exceptions = []
 
     def add(shipment, code, kind, category, severity, description,
-            difference=None, unit=None, evidence=()):
+            difference=None, unit=None, evidence=(), **extra):
 
         exception = {
             "exception_key": f"{shipment['shipment_key']}|{code}",
@@ -387,12 +478,15 @@ def build_exceptions(snapshot):
             "difference": difference,
             "unit": unit,
             "evidence": evidence_references(evidence),
+            **extra,
         }
 
         exception["signature"] = signature(exception)
         exceptions.append(exception)
 
     for shipment in snapshot["shipments"]:
+
+        add_freight_exceptions(shipment, add)
 
         result = shipment["result"]
 

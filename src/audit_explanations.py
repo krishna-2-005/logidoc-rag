@@ -158,6 +158,42 @@ def sources(result, audit, shipment_key):
     return rows, foreign
 
 
+def freight_line(shipment, category):
+    """The freight audit line ("Freight audit: <charge or check>") an exception was raised from, or None."""
+
+    audit = shipment.get("freight_audit") or {}
+    name = str(category).split(": ", 1)[-1].casefold()
+
+    for item in (audit.get("charges") or []) + (audit.get("checks") or []):
+        label = str(item.get("charge") or item.get("check")).casefold()
+
+        if label == name or (name == "duplicate invoice" and label == "invoice number" and item["outcome"] == "DUPLICATE"):
+            return item
+
+    return None
+
+
+def freight_sources(line, shipment):
+    """The documents behind a freight audit line, as source rows of this shipment."""
+
+    rows = []
+
+    for role, src in (("contract", line.get("expected_source")), ("invoice", line.get("billed_source"))):
+        if src:
+            rows.append({"source": src.get("file"), "page": src.get("page"), "document_type": src.get("document_type"),
+                         "shipment_id": shipment["shipment_id"], "text": f"{role}: {', '.join(src.get('lines') or []) or role}"})
+
+    for value in line.get("values") or []:
+        rows.append({"source": value.get("file"), "page": value.get("page"), "document_type": value.get("document_type"),
+                     "shipment_id": shipment["shipment_id"], "text": clip(str(value.get("value")))})
+
+    for item in line.get("evidence") or []:
+        rows.append({"source": item.get("source"), "page": item.get("page"), "document_type": item.get("document_type"),
+                     "shipment_id": shipment["shipment_id"], "text": clip(item.get("text"))})
+
+    return rows
+
+
 def review_kind(reason):
     """
     Why a value needs review, from the reconciliation's reason text.
@@ -290,6 +326,32 @@ def explain(exception, shipment):
             rule=RULES["reconciliation"],
             next_step=NEXT_STEPS["reconciliation"],
         )
+
+    elif code.startswith("freight-"):
+
+        line = freight_line(shipment, exception["category"])
+        currency = (shipment.get("freight_audit") or {}).get("currency") or ""
+
+        def amount_text(value):
+            return f"{currency} {value:,.2f}".strip() if value is not None else None
+
+        if line is not None and "charge" in line:
+            explanation.update(
+                expected=f"Contract (rate confirmation): {amount_text(line['expected'])}" if line.get("expected") is not None else None,
+                observed=f"Billed (invoice): {amount_text(line['billed'])}" if line.get("billed") is not None else None,
+                rule=f"Freight audit, tolerance rule '{line['rule']}': the outcome is {line['outcome']}.",
+            )
+        elif line is not None:
+            explanation.update(rule=f"Freight audit, {line['check'].lower()} check: the outcome is {line['outcome']}.")
+
+        explanation.update(
+            reason=exception["description"],
+            next_step=exception.get("recommended_action"),
+            caveat="A freight audit finding is for a person to decide on: no amount is approved, disputed or paid automatically.",
+        )
+
+        if line is not None:
+            explanation["sources"] = freight_sources(line, shipment)
 
     elif code.startswith("review-"):
 

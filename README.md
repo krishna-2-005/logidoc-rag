@@ -371,6 +371,54 @@ never changes a reconciliation result, and a resolved exception is reopened
 if the audited values change.
 
 Server-side settings only: `LOGIDOC_REQUIRE_APPROVAL`, `LOGIDOC_MIN_NOTE_LENGTH`.
+
+### Freight audit (invoice against contract and execution)
+
+`src/freight_audit.py` matches each shipment's carrier invoice against its
+rate confirmation (the contract) and its BOL and POD (the execution), using
+the typed fields of `document_extraction`. It is shown on the shipment page
+("Freight audit: invoice against contract") and returned as `freight_audit`
+by `GET /api/shipments/{id}`.
+
+- **Charges.** Each invoice line is classified as base freight, fuel
+  surcharge or an accessorial. Base freight and fuel are compared with the
+  agreed rate and fuel surcharge (expected, billed, variance, currency,
+  source file and page). An accessorial the rate confirmation does not list
+  is never called invalid: if the rate confirmation's text or the BOL/POD
+  mentions it, it is PENDING_REVIEW with that passage; with no evidence it is
+  INSUFFICIENT_EVIDENCE. A rate confirmation with one rate and no separate
+  fuel surcharge is read as all-in or line haul only when the amounts show
+  which; otherwise the line is PENDING_REVIEW. The invoice total is compared
+  with the contract, and the line items with the stated total.
+- **References.** Shipment reference, carrier, origin, destination, pickup
+  and delivery dates, weight, currency and payment terms; an invoice number
+  that appears on another invoice gives DUPLICATE.
+- **Outcomes.** MATCHED, MATCHED_WITH_TOLERANCE, DISCREPANCY,
+  INSUFFICIENT_EVIDENCE, DUPLICATE, PENDING_REVIEW. Every line and the
+  overall outcome say why. A missing, unreadable or conflicting value is
+  never treated as zero or as a match.
+- **Tolerances** are set in one place, `LOGIDOC_FREIGHT_TOLERANCES` (JSON;
+  rules `default`, `base_freight`, `fuel_surcharge`, `accessorial`,
+  `invoice_total`, `invoice_arithmetic`, `weight`, each with `absolute`
+  and/or `percent`), for example
+  `{"fuel_surcharge": {"absolute": 5}, "weight": {"percent": 2}}`. The
+  default is exact matching. A setting that cannot be used is reported on
+  every shipment instead of being guessed.
+- **Exceptions.** When a rate confirmation makes the three-way match
+  possible, each actionable charge (and a duplicate invoice, or a contract
+  carrier, route, currency or payment terms the shipment documents disagree
+  with) becomes an exception in the workflow above, with its outcome,
+  financial impact and a recommended action. There is one exception per
+  issue (`shipment|freight-...`), and its review history is kept as for
+  every exception. Without a rate confirmation no freight exception is
+  raised.
+- **Limits.** It reads the documents as printed: approved extraction
+  corrections are applied to the reconciliation, not yet to the freight
+  audit (the shipment says so when it has any). Weights in different units
+  are not converted. Accessorial evidence is a text search for the charge's
+  name in the BOL, POD and rate confirmation, shown to the reviewer, not a
+  proof that the service was performed.
+
 In `local` mode the Streamlit analytics tabs keep the original quick review
 form (free-typed reviewer name, marked unauthenticated and not subject to the
 evidence rule); in `required` mode it is replaced by the full workflow.

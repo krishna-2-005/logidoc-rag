@@ -171,6 +171,62 @@ describe("Shipment detail", () => {
     expect(screen.queryByText(/SHJ-2026-002/)).not.toBeInTheDocument()
   })
 
+  const FREIGHT = {
+    outcome: "DISCREPANCY",
+    explanation: ["Fuel surcharge: Billed USD 200.00 is USD 20.00 above the contracted USD 180.00, outside the tolerance (exact match)."],
+    documents: { contract: ["RATE_CONFIRMATION_SHJ-2026-001.pdf"], execution: ["BOL_SHJ-2026-001.pdf", "POD_SHJ-2026-001.pdf"], invoice: ["INVOICE_SHJ-2026-001.pdf"] },
+    currency: "USD",
+    charges: [
+      { charge: "Fuel surcharge", kind: "charge", rule: "fuel_surcharge", expected: 180, billed: 200, variance: 20, currency: "USD",
+        expected_source: { file: "RATE_CONFIRMATION_SHJ-2026-001.pdf", page: 1, document_type: "RATE_CONFIRMATION" },
+        billed_source: { file: "INVOICE_SHJ-2026-001.pdf", page: 1, document_type: "INVOICE", lines: ["Fuel Surcharge"] },
+        outcome: "DISCREPANCY", explanation: "Billed USD 200.00 is USD 20.00 above the contracted USD 180.00.", evidence: [] },
+      { charge: "Detention Charge", kind: "charge", rule: "accessorial", expected: null, billed: 75, variance: null, currency: "USD",
+        expected_source: null, billed_source: { file: "INVOICE_SHJ-2026-001.pdf", page: 1, document_type: "INVOICE" },
+        outcome: "PENDING_REVIEW", explanation: "Not on the rate confirmation; the POD mentions it.",
+        evidence: [{ source: "POD_SHJ-2026-001.pdf", page: 1, document_type: "POD", text: "detention 2 hours" }] },
+    ],
+    checks: [{ check: "Carrier", outcome: "MATCHED", explanation: "Every document gives the same carrier.", values: [] }],
+    financial_impact: { currency: "USD", billed_above_contract: 20, without_evidence: 0, pending_review: 75 },
+    tolerances: { default: { absolute: 0, percent: 0 } },
+  }
+
+  it("shows the freight audit charge by charge, with why and the evidence", async () => {
+    mockApi({ "/api/shipments/SHJ-2026-001": { ...DETAIL("SHJ-2026-001"), freight_audit: FREIGHT } })
+    renderPage(
+      <Routes>
+        <Route path="/shipments/:id" element={<ShipmentDetailPage />} />
+      </Routes>,
+      "/shipments/SHJ-2026-001",
+    )
+
+    const panel = await screen.findByLabelText("Freight audit")
+    const table = within(panel).getByRole("table", { name: "Charge-level comparison" })
+    const fuel = within(table).getByText("Fuel surcharge").closest("tr") as HTMLElement
+
+    expect(within(panel).getAllByText("Discrepancy").length).toBeGreaterThan(0)
+    expect(within(fuel).getByText("USD 180.00")).toBeInTheDocument()
+    expect(within(fuel).getByText("USD 200.00")).toBeInTheDocument()
+    expect(within(fuel).getByText("+USD 20.00")).toBeInTheDocument()
+    expect(within(fuel).getByText("RATE_CONFIRMATION_SHJ-2026-001.pdf, page 1")).toBeInTheDocument()
+    expect(within(table).getByText(/detention 2 hours/)).toBeInTheDocument()
+    expect(within(panel).getByText(/USD 20.00 billed above the contract/)).toBeInTheDocument()
+    expect(within(panel).getByRole("table", { name: "Reference checks" })).toHaveTextContent("Every document gives the same carrier.")
+  })
+
+  it("shows no freight audit section when the response has none", async () => {
+    mockApi({ "/api/shipments/SHJ-2026-001": DETAIL("SHJ-2026-001") })
+    renderPage(
+      <Routes>
+        <Route path="/shipments/:id" element={<ShipmentDetailPage />} />
+      </Routes>,
+      "/shipments/SHJ-2026-001",
+    )
+
+    await screen.findByRole("heading", { name: "SHJ-2026-001" })
+    expect(screen.queryByLabelText("Freight audit")).toBeNull()
+  })
+
   it("says so when the shipment does not exist", async () => {
     mockApi({ "/api/shipments/SHJ-9": () => ({ status: 404, body: { detail: "No such shipment." } }) })
     renderPage(

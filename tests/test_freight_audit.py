@@ -3,7 +3,8 @@ Freight audit: three-way matching of the carrier invoice against the rate
 confirmation (contract) and the BOL/POD (execution), charge by charge.
 
 The extractions are built directly (the extractor itself is tested in
-test_document_extraction.py).
+test_document_extraction.py); the last tests run the audit on extractions
+of real generated PDFs through the audit service and the API.
 
 Run from the project root:
     python -m pytest tests/test_freight_audit.py
@@ -461,3 +462,134 @@ def test_colliding_shipment_references():
 
     assert checked(result, "Shipment reference")["outcome"] == fa.DISCREPANCY
     assert result["outcome"] == fa.DISCREPANCY
+
+
+# ============================================================
+# THE APPLICATION: real PDFs, the audit service, exceptions, the API
+# ============================================================
+
+def pairs(**values):
+
+    lines = []
+
+    for label, value in values.items():
+        lines += [f"{label.replace('_', ' ')}:", str(value), ""]
+
+    return lines
+
+
+def write_contracted_shipment(folder, fuel_billed="$200.00"):
+    """SHJ-2026-101: fuel billed above the rate confirmation, detention billed and mentioned on the POD."""
+
+    from test_ingestion_manager import make_pdf
+
+    common = dict(Carrier="Swift Lines", Origin="Chicago, Illinois", Destination="Atlanta, Georgia")
+
+    make_pdf(folder / "BOL_SHJ-2026-101.pdf", "BILL OF LADING", [f"Shipment Number: {SHIPMENT}", ""] + pairs(
+        **common, Pickup_Date="October 1, 2026", Expected_Delivery_Date="October 3, 2026", Number_of_Pieces=48))
+    make_pdf(folder / "POD_SHJ-2026-101.pdf", "PROOF OF DELIVERY", [f"Shipment Number: {SHIPMENT}", ""] + pairs(
+        Carrier="Swift Lines", Delivery_Date="October 3, 2026", Number_of_Pieces_Delivered=48,
+        Delivery_Status="Delivered", Remarks="Driver held at consignee, detention 2 hours"))
+    make_pdf(folder / "INVOICE_SHJ-2026-101.pdf", "FREIGHT INVOICE", ["Invoice Number: INV-101", f"Shipment Number: {SHIPMENT}", ""] + pairs(
+        **common, Base_Freight="$1,400.00", Fuel_Surcharge=fuel_billed, Detention_Charge="$75.00",
+        Total_Invoice_Amount="$1,675.00", Payment_Terms="Net 30"))
+    make_pdf(folder / "RATE_CONFIRMATION_SHJ-2026-101.pdf", "RATE CONFIRMATION", [f"Shipment Number: {SHIPMENT}", ""] + pairs(
+        **common, Pickup_Date="October 1, 2026", Delivery_Date="October 3, 2026", Line_Haul="$1,400.00",
+        Fuel_Surcharge="$180.00", Payment_Terms="Net 30"))
+
+
+@pytest.fixture
+def rig(tmp_path):
+
+    from test_api import Rig
+
+    result = Rig(tmp_path, "required")
+    write_contracted_shipment(result.raw)
+    result.state.service.invalidate()
+
+    return result
+
+
+def test_the_audit_service_runs_the_freight_audit_on_real_pdfs(rig):
+
+    shipment = rig.state.service.shipment(SHIPMENT)
+    result = shipment["freight_audit"]
+
+    assert result["documents"]["contract"] == ["RATE_CONFIRMATION_SHJ-2026-101.pdf"]
+    assert result["outcome"] == fa.DISCREPANCY
+
+    fuel = charge(result, "Fuel surcharge")
+    assert (fuel["expected"], fuel["billed"], fuel["variance"], fuel["outcome"]) == (180.0, 200.0, 20.0, fa.DISCREPANCY)
+    assert fuel["expected_source"]["file"] == "RATE_CONFIRMATION_SHJ-2026-101.pdf"
+    assert charge(result, "Base freight")["outcome"] == fa.MATCHED
+
+    detention = charge(result, "Detention Charge")
+    assert detention["outcome"] == fa.PENDING_REVIEW
+    assert detention["evidence"][0]["source"] == "POD_SHJ-2026-101.pdf"
+
+
+def test_the_sample_shipments_without_a_contract_are_unchanged(rig):
+
+    service = rig.state.service
+    result = service.shipment("SHJ-2026-001")["freight_audit"]
+
+    # No contract: nothing is compared with one
+    assert result["documents"]["contract"] == []
+    assert charge(result, "Base freight")["outcome"] == fa.INSUFFICIENT_EVIDENCE
+    assert result["explanation"][0].startswith("No rate confirmation belongs to this shipment")
+    # The sample invoice's line items do not add up to its total (its known invoice discrepancy)
+    assert charge(result, "Line items against the invoice total")["outcome"] == fa.DISCREPANCY
+    assert result["outcome"] == fa.DISCREPANCY
+
+    # And no freight exception is raised without a contract: the existing exceptions are unchanged
+    assert not [item for item in service.exceptions() if item["shipment_key"] == "SHJ2026001"
+                and item["category"].startswith("Freight audit")]
+
+
+def test_audit_results_become_exceptions_once(rig):
+
+    service = rig.state.service
+
+    first = {item["exception_key"]: item for item in service.exceptions() if item["shipment_key"] == "SHJ2026101"}
+    service.invalidate()
+    again = [item for item in service.exceptions() if item["shipment_key"] == "SHJ2026101"]
+
+    fuel = first["SHJ2026101|freight-fuel-surcharge"]
+    assert fuel["category"] == "Freight audit: Fuel surcharge" and fuel["severity"] == "HIGH"
+    assert fuel["audit_outcome"] == fa.DISCREPANCY
+    assert fuel["financial_impact"]["amount"] == 20.0
+    assert "Dispute or short-pay" in fuel["recommended_action"]
+    assert any("RATE_CONFIRMATION_SHJ-2026-101.pdf" in reference for reference in fuel["evidence"])
+
+    detention = first["SHJ2026101|freight-detention-charge"]
+    assert detention["kind"] == "Needs review" and detention["audit_outcome"] == fa.PENDING_REVIEW
+
+    # No duplicate for the same unresolved issue on a second audit
+    assert sorted(item["exception_key"] for item in again) == sorted(first)
+
+
+def test_the_api_returns_the_audit_and_explains_its_exceptions(rig):
+
+    body = rig.client("alice").get(f"/api/shipments/{SHIPMENT}").json()
+
+    assert body["freight_audit"]["outcome"] == fa.DISCREPANCY
+    assert any(reason.startswith("Fuel surcharge:") for reason in body["freight_audit"]["explanation"])
+
+    explanation = next(item for item in body["explanations"] if item["category"] == "Freight audit: Fuel surcharge")
+    assert "180.00" in explanation["expected"] and "200.00" in explanation["observed"]
+    assert explanation["next_step"].startswith("Dispute or short-pay")
+    assert {row["source"] for row in explanation["sources"]} >= {"RATE_CONFIRMATION_SHJ-2026-101.pdf", "INVOICE_SHJ-2026-101.pdf"}
+
+
+def test_a_broken_tolerance_setting_is_reported_not_crashed(rig, monkeypatch):
+
+    import config
+
+    monkeypatch.setattr(config, "FREIGHT_TOLERANCES", "{not json")
+    rig.state.service.invalidate()
+
+    shipment = rig.state.service.shipment(SHIPMENT)
+
+    assert shipment["result"]["success"] is True
+    assert shipment["freight_audit"]["outcome"] is None
+    assert "tolerances cannot be used" in shipment["freight_audit"]["explanation"][0]

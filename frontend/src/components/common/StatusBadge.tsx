@@ -29,6 +29,14 @@ const LOOKS: Record<string, Look> = {
   EARLY: { tone: "info", icon: <Clock />, text: "Early" },
   DELAYED: { tone: "bad", icon: <Clock />, text: "Delayed" },
 
+  // Freight audit (invoice against contract and execution)
+  MATCHED: { tone: "ok", icon: <CheckCircle2 />, text: "Matched" },
+  MATCHED_WITH_TOLERANCE: { tone: "ok", icon: <CheckCircle2 />, text: "Matched within tolerance" },
+  DISCREPANCY: { tone: "bad", icon: <XCircle />, text: "Discrepancy" },
+  INSUFFICIENT_EVIDENCE: { tone: "warn", icon: <FileWarning />, text: "Insufficient evidence" },
+  DUPLICATE: { tone: "bad", icon: <AlertTriangle />, text: "Duplicate" },
+  PENDING_REVIEW: { tone: "warn", icon: <Eye />, text: "Pending review" },
+
   // Exception workflow
   open: { tone: "info", icon: <CircleDashed />, text: "Open" },
   in_review: { tone: "warn", icon: <Eye />, text: "In review" },
