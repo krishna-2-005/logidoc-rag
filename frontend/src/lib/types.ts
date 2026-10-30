@@ -547,9 +547,19 @@ export interface ExtractionAlias {
   seen_by: string | null
 }
 
+/** A finding of the cross-document checks of one shipment (report-only; no value is chosen) */
+export interface CrossDocumentIssue {
+  code: string
+  severity: "error" | "warning" | "info"
+  message: string
+  sources: string[]
+}
+
 export interface ExtractionList {
   extractions: ExtractionSummary[]
   extractor_version: string
+  /** Present when the list is asked for one shipment */
+  cross_document_issues?: CrossDocumentIssue[]
 }
 
 export type CorrectionStatus = "legacy" | "pending" | "approved" | "rejected"

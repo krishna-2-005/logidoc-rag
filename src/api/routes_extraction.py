@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Path as PathParam
 from pydantic import BaseModel, Field
 
+import audit_inputs
 import authz
 import document_extraction as de
 import extraction_store as store_module
@@ -124,8 +125,30 @@ def list_extractions(principal=View, state: ApiState = Depends(get_state), shipm
 
     key = identifier_key(shipment_id) if shipment_id else None
     rows = store.list(key) if (key or not shipment_id) else []
+    response = {"extractions": [summary(row, store) for row in rows], "extractor_version": de.EXTRACTOR_VERSION}
 
-    return {"extractions": [summary(row, store) for row in rows], "extractor_version": de.EXTRACTOR_VERSION}
+    if key:
+        response["cross_document_issues"] = cross_document_issues(store, key, state.locations.raw_dir)
+
+    return response
+
+
+def cross_document_issues(store, key, raw_dir):
+    """
+    validate_shipment on one shipment's documents as they are now: the newest
+    stored extraction of each current file. Report-only; a payload an older
+    extractor wrote that cannot be rebuilt is left out.
+    """
+
+    extractions = []
+
+    for item in store.current_extractions(key, audit_inputs.file_hashes(raw_dir)).values():
+        try:
+            extractions.append(de.DocumentExtraction.from_dict(item["payload"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+
+    return de.validate_shipment(extractions)
 
 
 @router.get("/integrity")
