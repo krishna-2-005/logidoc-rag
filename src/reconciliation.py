@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from chunker import describe_problems, read_chunks
-from shipment_identity import identifier_key
+from shipment_identity import collision_message, identifier_collisions, identifier_key
 from shipment_calculations import (
     DELIVERY_DELAYED,
     NEEDS_REVIEW,
@@ -334,6 +334,22 @@ def reconcile_shipment(shipment_id=None, chunks=None, unreadable_files=None, ove
             excluded_unidentified = len(chunks) - len(identified)
 
             chunks = identified
+
+    # IDs that share a key but are split differently ("AB-12-3" and
+    # "AB-1-23") may be two shipments: never reconciled as one
+    collisions = identifier_collisions(
+        chunk["metadata"].get("shipment_id")
+        for chunk in chunks
+    )
+
+    if collisions:
+        forms = sorted({form for pair in collisions for form in pair})
+        return {
+            "success": False,
+            "error": collision_message(collisions) + unreadable_note,
+            "identity_collision": {"key": identifier_key(forms[0]), "forms": forms},
+            "unreadable_files": [item["filename"] for item in unreadable_files],
+        }
 
     documents = extract_document_data(chunks)
 

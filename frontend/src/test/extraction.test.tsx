@@ -1002,3 +1002,32 @@ describe("recorded runs", () => {
     expect(await screen.findByText("This could not be loaded")).toBeInTheDocument()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Checks across the shipment's documents
+// ---------------------------------------------------------------------------
+
+describe("extraction panel: checks across documents", () => {
+  const ISSUES = [
+    { code: "invoice_below_rate_confirmation", severity: "info", message: "The invoice total is below the agreed rate.", sources: ["INVOICE.pdf", "RATE.pdf"] },
+    { code: "delivery_before_pickup", severity: "error", message: "The POD delivery date is before the pickup date.", sources: ["POD.pdf", "BOL.pdf"] },
+  ]
+
+  it("lists each finding with its severity and documents, the most serious first", async () => {
+    await panelFor(REVIEWER, { "/api/extractions": { extractions: [SUMMARY], extractor_version: EXTRACTOR, cross_document_issues: ISSUES } })
+
+    const block = screen.getByLabelText("Checks across documents")
+    const items = within(block).getAllByRole("listitem")
+
+    expect(items).toHaveLength(2)
+    expect(items[0]).toHaveTextContent("Error: The POD delivery date is before the pickup date.")
+    expect(items[0]).toHaveTextContent("Documents: POD.pdf, BOL.pdf")
+    expect(items[1]).toHaveTextContent("Note: The invoice total is below the agreed rate.")
+  })
+
+  it("shows nothing when the documents agree", async () => {
+    await panelFor(REVIEWER, { "/api/extractions": { extractions: [SUMMARY], extractor_version: EXTRACTOR, cross_document_issues: [] } })
+
+    expect(screen.queryByLabelText("Checks across documents")).toBeNull()
+  })
+})

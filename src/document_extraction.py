@@ -56,7 +56,7 @@ from document_loader import classify_document
 from identifier_extractor import extract_all_identifiers
 from logistics_fields import IDENTIFIER_ALIASES
 from shipment_calculations import VALUES, parse_date
-from shipment_identity import identifier_key
+from shipment_identity import collision_message, identifier_collisions, identifier_key
 
 # The stored-extraction cache key (extraction_store: file hash + version) must
 # change whenever the parsing changes. A hand-maintained number is easy to
@@ -297,6 +297,16 @@ class DocumentExtraction:
 
     def to_dict(self):
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload):
+        """The extraction to_dict() wrote (a stored payload), rebuilt; unknown keys are ignored."""
+
+        known = {name: payload[name] for name in cls.__dataclass_fields__ if name in payload}
+        known["fields"] = {name: ExtractedField(**item) for name, item in (payload.get("fields") or {}).items()}
+        known["line_items"] = [LineItem(**item) for item in payload.get("line_items") or []]
+
+        return cls(**known)
 
 
 def validate_extraction(extraction):
@@ -1183,6 +1193,14 @@ def validate_shipment(extractions):
     if len(keys) > 1:
         issue("shipment_mismatch", "error", "The documents name different shipments.", [e.filename for e in usable])
 
+    # Same key, separators in different places ("AB-12-3" / "AB-1-23"): maybe two shipments
+    collisions = identifier_collisions(e.shipment_id for e in usable)
+
+    if collisions:
+        forms = {form for pair in collisions for form in pair}
+        issue("shipment_id_collision", "error", collision_message(collisions),
+              sorted(e.filename for e in usable if e.shipment_id and e.shipment_id.strip() in forms))
+
     for name in ("carrier", "origin", "destination"):
         values = {}
 
@@ -1228,6 +1246,74 @@ def validate_shipment(extractions):
                   f"{extraction.filename}: line items{' and tax' if extraction.fields.get('tax') and extraction.fields['tax'].state == EXTRACTED else ''} "
                   f"add up to {computed} but the stated total is {money(total.value)} (difference {money(total.value) - computed}). "
                   "This is an arithmetic finding, not proof of overbilling.", [extraction.filename])
+
+    def extracted(document_type, name):
+        """[(filename, value)] of a field read (EXTRACTED) from the shipment's documents of one type."""
+
+        return [
+            (e.filename, e.fields[name].value)
+            for e in usable
+            if e.document_type == document_type and name in e.fields and e.fields[name].state == EXTRACTED
+        ]
+
+    # --- invoice against the rate confirmation ------------------------
+    totals, rates = extracted(INVOICE, "invoice_total"), extracted(RATE, "agreed_rate")
+
+    if len(totals) == 1 and len(rates) == 1 and len(currencies) <= 1:
+        fuel = extracted(RATE, "fuel_surcharge")
+        agreed_amount = money(rates[0][1]) + (money(fuel[0][1]) if len(fuel) == 1 else Decimal("0"))
+        billed = money(totals[0][1])
+        basis = "agreed rate" + (" plus fuel surcharge" if len(fuel) == 1 else "")
+
+        if billed > agreed_amount:
+            issue("invoice_above_rate_confirmation", "warning",
+                  f"{totals[0][0]}: the invoice total {billed} is {billed - agreed_amount} above the rate confirmation's "
+                  f"{basis} ({agreed_amount}, {rates[0][0]}). Accessorial charges not on the rate confirmation may explain "
+                  "it; check them before paying. This is not proof of overbilling.",
+                  sorted({totals[0][0], rates[0][0]}))
+        elif billed < agreed_amount:
+            issue("invoice_below_rate_confirmation", "info",
+                  f"{totals[0][0]}: the invoice total {billed} is {agreed_amount - billed} below the rate confirmation's "
+                  f"{basis} ({agreed_amount}, {rates[0][0]}).", sorted({totals[0][0], rates[0][0]}))
+
+    terms = extracted(INVOICE, "payment_terms") + extracted(RATE, "payment_terms")
+
+    if len({comparable(value) for _, value in terms}) > 1:
+        issue("payment_terms_mismatch", "warning",
+              "The documents give different payment terms: " + "; ".join(f"{value} ({name})" for name, value in terms) + ".",
+              sorted({name for name, _ in terms}))
+
+    # --- dates: a delivery cannot come before the pickup --------------
+    pickups = extracted(BOL, "pickup_date") + extracted(RATE, "pickup_date")
+
+    if len({value for _, value in pickups}) > 1:
+        issue("pickup_date_mismatch", "warning",
+              "The documents give different pickup dates: " + "; ".join(f"{value} ({name})" for name, value in pickups) + ".",
+              sorted({name for name, _ in pickups}))
+
+    if pickups:
+        earliest_name, earliest = min(pickups, key=lambda item: item[1])
+
+        for name, label in (("delivery_date", "POD delivery date"), ("expected_delivery_date", "BOL expected delivery date")):
+            for filename, value in extracted(POD if name == "delivery_date" else BOL, name):
+                if value < earliest:
+                    issue("delivery_before_pickup", "error",
+                          f"{filename}: the {label} {value} is before the pickup date {earliest} ({earliest_name}), "
+                          "so one of the dates is wrong.", sorted({filename, earliest_name}))
+
+    # --- the same invoice number on different invoices ---------------
+    numbers = {}
+
+    for extraction in usable:
+        if extraction.document_type == INVOICE and extraction.value("invoice_number"):
+            numbers.setdefault(comparable(extraction.value("invoice_number")), []).append(extraction)
+
+    for same in numbers.values():
+        if len({e.sha256 for e in same}) > 1:
+            issue("duplicate_invoice_number", "warning",
+                  f"Invoice number {same[0].value('invoice_number')} appears on {len(same)} different invoices "
+                  f"({', '.join(sorted(e.filename for e in same))}); it may be billed twice.",
+                  sorted(e.filename for e in same))
 
     digests = {}
 

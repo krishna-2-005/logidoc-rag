@@ -60,6 +60,82 @@ log = logging.getLogger(__name__)
 UNAVAILABLE_TOKEN = (-1, -1, -1)
 
 
+def freight_skipped(reason):
+    """A freight audit that did not run, saying why (it never blocks the reconciliation)."""
+
+    return {"outcome": None, "explanation": [reason], "documents": {"contract": [], "execution": [], "invoice": []},
+            "currency": None, "charges": [], "checks": [], "financial_impact": None, "tolerances": {}}
+
+
+def add_freight_audits(snapshot, by_key, raw_dir, plans):
+    """
+    Adds item["freight_audit"] to every shipment of the snapshot: its carrier
+    invoice matched against its rate confirmation and BOL/POD (freight_audit).
+    Each PDF is extracted once, read-only. Shipments whose documents print
+    colliding IDs are not audited (their documents are never used together).
+    """
+
+    import freight_audit
+
+    try:
+        policy = freight_audit.load_policy()
+    except freight_audit.PolicyError as error:
+        for item in snapshot["shipments"]:
+            item["freight_audit"] = freight_skipped(f"The freight audit tolerances cannot be used: {error}")
+        return
+
+    extracted = {}
+
+    def extraction_of(name):
+        if name not in extracted:
+            path = Path(raw_dir) / str(name)
+            try:
+                extracted[name] = document_extraction.extract_document(path) if path.is_file() else None
+            except Exception as error:  # one unreadable file must not hide the other shipments' audits
+                log.warning("freight audit: %s could not be extracted: %s", name, error)
+                extracted[name] = None
+        return extracted[name]
+
+    sources = {
+        key: sorted({str((chunk.get("metadata") or {}).get("source")) for chunk in chunks if (chunk.get("metadata") or {}).get("source")})
+        for key, chunks in by_key.items() if key
+    }
+
+    for item in snapshot["shipments"]:
+        key = item["shipment_key"]
+
+        if (item.get("result") or {}).get("identity_collision"):
+            item["freight_audit"] = freight_skipped(item["result"]["error"])
+            continue
+
+        try:
+            own = [e for e in (extraction_of(name) for name in sources.get(key, [])) if e is not None]
+            others = [
+                e for other, names in sources.items() if other != key
+                for e in (extraction_of(name) for name in names)
+                if e is not None and e.document_type == document_extraction.INVOICE
+            ]
+            texts = [
+                {**{k: (chunk.get("metadata") or {}).get(k) for k in ("source", "page", "document_type")},
+                 "text": chunk.get("text")}
+                for chunk in by_key.get(key, [])
+            ]
+
+            result = freight_audit.audit_freight(own, texts=texts, policy=policy, other_invoices=others)
+
+            if plans.get(key):
+                result["explanation"].append(
+                    "Approved extraction corrections of this shipment are applied to the reconciliation, "
+                    "not yet to the freight audit, which reads the documents as printed."
+                )
+
+            item["freight_audit"] = result
+
+        except Exception as error:  # reported on the shipment, never breaks the reconciliation
+            log.exception("freight audit of %s failed", key)
+            item["freight_audit"] = freight_skipped(f"The freight audit could not be completed: {error}")
+
+
 @dataclass(frozen=True)
 class Locations:
     """
@@ -251,6 +327,8 @@ class AuditService:
             if flags["unavailable"]:
                 for item in snapshot["shipments"]:
                     audit_inputs.mark_corrections_unavailable(item["inputs"])
+
+            add_freight_audits(snapshot, by_key, self.locations.raw_dir, plans)
 
             return snapshot
 

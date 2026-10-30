@@ -176,6 +176,8 @@ def shipment_detail(shipment_id: str, principal=ViewAudit, state: ApiState = Dep
         ]),
         "documents": [item for item in service.scan() if item["shipment_key"] == key],
         "history": history_of(state, key),
+        # The invoice matched against the rate confirmation and BOL/POD, charge by charge
+        "freight_audit": shipment.get("freight_audit"),
     }
 
 

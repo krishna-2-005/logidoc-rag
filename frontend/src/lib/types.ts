@@ -329,6 +329,51 @@ export interface TimelineEntry {
   changes: SnapshotChanges
 }
 
+export type FreightOutcome = "MATCHED" | "MATCHED_WITH_TOLERANCE" | "DISCREPANCY" | "INSUFFICIENT_EVIDENCE" | "DUPLICATE" | "PENDING_REVIEW"
+
+export interface FreightSource {
+  file: string
+  page: number | null
+  document_type: string
+  lines?: string[]
+}
+
+/** One charge-level comparison: contract (rate confirmation) against the invoice */
+export interface FreightCharge {
+  charge: string
+  kind: "charge" | "total" | "arithmetic"
+  rule: string
+  expected: number | null
+  billed: number | null
+  variance: number | null
+  currency: string | null
+  expected_source: FreightSource | null
+  billed_source: FreightSource | null
+  outcome: FreightOutcome
+  explanation: string
+  evidence: { source: string; page: number | null; document_type: string; text: string }[]
+}
+
+/** One reference comparison (carrier, route, dates, weight, invoice number, ...) */
+export interface FreightCheck {
+  check: string
+  outcome: FreightOutcome
+  explanation: string
+  values: { document_type: string; file: string; page?: number | null; value: unknown }[]
+}
+
+/** GET /api/shipments/{id} freight_audit: the invoice matched against contract and execution evidence */
+export interface FreightAudit {
+  outcome: FreightOutcome | null
+  explanation: string[]
+  documents: { contract: string[]; execution: string[]; invoice: string[] }
+  currency: string | null
+  charges: FreightCharge[]
+  checks: FreightCheck[]
+  financial_impact: { currency: string | null; billed_above_contract: number; without_evidence: number; pending_review: number } | null
+  tolerances: Record<string, { absolute: number; percent: number }>
+}
+
 export interface ShipmentDetail {
   shipment_id: string
   shipment_key: string
@@ -337,6 +382,7 @@ export interface ShipmentDetail {
   explanations: Explanation[]
   documents: DocumentFile[]
   history: TimelineEntry[]
+  freight_audit?: FreightAudit | null
 }
 
 export interface Proportion {
@@ -547,9 +593,19 @@ export interface ExtractionAlias {
   seen_by: string | null
 }
 
+/** A finding of the cross-document checks of one shipment (report-only; no value is chosen) */
+export interface CrossDocumentIssue {
+  code: string
+  severity: "error" | "warning" | "info"
+  message: string
+  sources: string[]
+}
+
 export interface ExtractionList {
   extractions: ExtractionSummary[]
   extractor_version: string
+  /** Present when the list is asked for one shipment */
+  cross_document_issues?: CrossDocumentIssue[]
 }
 
 export type CorrectionStatus = "legacy" | "pending" | "approved" | "rejected"

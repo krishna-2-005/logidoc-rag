@@ -57,7 +57,9 @@ rag_grounding.ground_answer  cite only chunks that support the answer;
   `audit_delivery`, `audit_invoice` in `src/shipment_calculations.py`). An
   early delivery is EARLY, not a discrepancy. A missing, unreadable or
   conflicting essential value is **NEEDS REVIEW**, never a match, on time
-  or CLEAR.
+  or CLEAR. So is a delivery date (BOL expected or POD actual) before the
+  BOL pickup date: one of the dates is wrong, and the chat abstains with the
+  same reason.
 
 ## Calculations
 
@@ -196,7 +198,12 @@ from what extraction did: `parsed`, `partial` (some pages without
 text), `no_text` (an image-only scan; there is no OCR), `empty` (no
 pages) or `unreadable` (it could not be opened or analysed; the error is
 shown). A file is usable when it is parsed or partial and its content
-shows a document type and a shipment ID.
+shows a document type and a shipment ID. The type a document names in its
+heading (its first lines: "Rate Confirmation", "Bill of Lading", "Proof of
+Delivery", "Invoice") decides its type, so a rate confirmation that lists
+freight, fuel and payment terms is not taken for an invoice; a reference
+such as "Bill of Lading No: 123" is not a heading. Without such a heading,
+keyword counts decide (`src/document_classifier.py`).
 
 - A shipment is **ready** when a usable BOL, invoice and POD are all
   present, otherwise **incomplete**, and the register says which are
@@ -364,6 +371,54 @@ never changes a reconciliation result, and a resolved exception is reopened
 if the audited values change.
 
 Server-side settings only: `LOGIDOC_REQUIRE_APPROVAL`, `LOGIDOC_MIN_NOTE_LENGTH`.
+
+### Freight audit (invoice against contract and execution)
+
+`src/freight_audit.py` matches each shipment's carrier invoice against its
+rate confirmation (the contract) and its BOL and POD (the execution), using
+the typed fields of `document_extraction`. It is shown on the shipment page
+("Freight audit: invoice against contract") and returned as `freight_audit`
+by `GET /api/shipments/{id}`.
+
+- **Charges.** Each invoice line is classified as base freight, fuel
+  surcharge or an accessorial. Base freight and fuel are compared with the
+  agreed rate and fuel surcharge (expected, billed, variance, currency,
+  source file and page). An accessorial the rate confirmation does not list
+  is never called invalid: if the rate confirmation's text or the BOL/POD
+  mentions it, it is PENDING_REVIEW with that passage; with no evidence it is
+  INSUFFICIENT_EVIDENCE. A rate confirmation with one rate and no separate
+  fuel surcharge is read as all-in or line haul only when the amounts show
+  which; otherwise the line is PENDING_REVIEW. The invoice total is compared
+  with the contract, and the line items with the stated total.
+- **References.** Shipment reference, carrier, origin, destination, pickup
+  and delivery dates, weight, currency and payment terms; an invoice number
+  that appears on another invoice gives DUPLICATE.
+- **Outcomes.** MATCHED, MATCHED_WITH_TOLERANCE, DISCREPANCY,
+  INSUFFICIENT_EVIDENCE, DUPLICATE, PENDING_REVIEW. Every line and the
+  overall outcome say why. A missing, unreadable or conflicting value is
+  never treated as zero or as a match.
+- **Tolerances** are set in one place, `LOGIDOC_FREIGHT_TOLERANCES` (JSON;
+  rules `default`, `base_freight`, `fuel_surcharge`, `accessorial`,
+  `invoice_total`, `invoice_arithmetic`, `weight`, each with `absolute`
+  and/or `percent`), for example
+  `{"fuel_surcharge": {"absolute": 5}, "weight": {"percent": 2}}`. The
+  default is exact matching. A setting that cannot be used is reported on
+  every shipment instead of being guessed.
+- **Exceptions.** When a rate confirmation makes the three-way match
+  possible, each actionable charge (and a duplicate invoice, or a contract
+  carrier, route, currency or payment terms the shipment documents disagree
+  with) becomes an exception in the workflow above, with its outcome,
+  financial impact and a recommended action. There is one exception per
+  issue (`shipment|freight-...`), and its review history is kept as for
+  every exception. Without a rate confirmation no freight exception is
+  raised.
+- **Limits.** It reads the documents as printed: approved extraction
+  corrections are applied to the reconciliation, not yet to the freight
+  audit (the shipment says so when it has any). Weights in different units
+  are not converted. Accessorial evidence is a text search for the charge's
+  name in the BOL, POD and rate confirmation, shown to the reviewer, not a
+  proof that the service was performed.
+
 In `local` mode the Streamlit analytics tabs keep the original quick review
 form (free-typed reviewer name, marked unauthenticated and not subject to the
 evidence rule); in `required` mode it is replaced by the full workflow.
@@ -931,10 +986,15 @@ The PDFs are in `tests/fixtures/`; SHJ-2026-001 is also the sample in
   document. Documents without one are never attributed to a shipment.
   Identifiers are compared without case, spaces or separators
   (`shipment_identity.identifier_key`), so `SHJ-2026-001` and `SHJ2026001`
-  are one shipment, but so are two different identifiers that differ only
-  in where their separators fall (`AB-12-3` and `AB-1-23`): their documents
-  would be audited together. The sample data has no such pair; a safeguard
-  that reports the collision instead of merging is planned, not built.
+  are one shipment. Two identifiers that share that key but split it at
+  different places (`AB-12-3` and `AB-1-23`) may be different shipments:
+  their documents are never used together. The audit reports the shipment
+  as not reconciled with the reason, a question about it abstains, and the
+  extraction cross-check reports `shipment_id_collision`
+  (`shipment_identity.identifier_collisions`). Forms that only leave out or
+  add separators (`SHJ2026001`, `shj 2026 001`) are not collisions. The key
+  itself is unchanged, so stored data keeps its keys; correcting the printed
+  ID and uploading the document again resolves a collision.
 - **Single machine, single writer.** Authentication is local accounts only
   (no SSO or MFA, and it needs HTTPS in front); no locking across
   processes, backups or monitoring; ChromaDB caches indexes

@@ -29,7 +29,7 @@ explains why.
 
 import re
 
-from shipment_identity import identifier_key
+from shipment_identity import collision_message, identifier_collisions, identifier_key
 
 
 # ============================================================
@@ -277,6 +277,25 @@ def resolve_scope(question, selected_shipment, records):
 
         keys = None
         source = None
+
+    # --------------------------------------------------------
+    # IDs that share a key but are split differently ("AB-12-3"
+    # and "AB-1-23") may be two shipments: never answered from both
+    # --------------------------------------------------------
+
+    for key in sorted(keys or []):
+
+        collisions = identifier_collisions(shipments[key])
+
+        if collisions:
+
+            return make_scope(
+                SCOPE_ABSTAINED,
+                collision_message(collisions),
+                mode="shipment",
+                keys=sorted(keys),
+                source=source,
+            )
 
     # --------------------------------------------------------
     # Other identifier-like references must exist in scope

@@ -87,6 +87,86 @@ def identifier_key(value):
     return key or None
 
 
+def separator_positions(value):
+    """
+    Where a printed identifier is split by separators, as positions in
+    its key: "AB-12-3" -> {2, 4}, "SHJ 2026-001" -> {3, 7},
+    "SHJ2026001" -> set(). Leading and trailing separators do not count.
+    """
+
+    positions = set()
+    count = 0
+    pending = False
+
+    for character in normalize_identifier(value) or "":
+
+        if character.isalnum():
+            if pending and count:
+                positions.add(count)
+            pending = False
+            count += 1
+        else:
+            pending = True
+
+    return positions
+
+
+def identifier_collisions(values):
+    """
+    Pairs of printed identifiers that share a key (identifier_key) but
+    split it at different places, such as "AB-12-3" and "AB-1-23" (both
+    AB123): they may be two different shipments, so they must not be
+    treated as one.
+
+    Forms that only leave out or add separators ("SHJ-2026-001",
+    "shj 2026 001", "SHJ2026001", "SHJ2026-001", "SHJ - 2026 - 001")
+    are the same identifier written differently and never collide: one
+    form's separator positions contain the other's.
+
+    Returns the colliding (a, b) pairs, sorted; empty when the values
+    agree. The key itself is unchanged, so stored data keeps its keys.
+    """
+
+    forms = sorted({
+        str(value).strip()
+        for value in values
+        if identifier_key(value)
+    })
+
+    pairs = []
+
+    for index, first in enumerate(forms):
+
+        for second in forms[index + 1:]:
+
+            if identifier_key(first) != identifier_key(second):
+                continue
+
+            a, b = separator_positions(first), separator_positions(second)
+
+            if not (a <= b or b <= a):
+                pairs.append((first, second))
+
+    return pairs
+
+
+def collision_message(pairs):
+    """
+    Why documents with colliding shipment IDs are not used together.
+    """
+
+    forms = sorted({form for pair in pairs for form in pair})
+    key = identifier_key(forms[0]) if forms else ""
+
+    return (
+        f"Documents print the shipment IDs {', '.join(forms)}, which differ "
+        f"only in where the separators are and so cannot be told apart "
+        f"(all become {key}). They may be different shipments, so their "
+        "documents are not used together. Correct the shipment ID on the "
+        "documents that are wrong and upload them again."
+    )
+
+
 def belongs_to_shipment(metadata, text, shipment_id):
     """
     Whether a chunk belongs to a shipment. A chunk with a shipment_id

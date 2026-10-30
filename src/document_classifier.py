@@ -114,12 +114,57 @@ def score_document_type(text, document_type):
 
 
 # ============================================================
+# DOCUMENT TITLE
+# ============================================================
+
+# The name a document gives itself. A rate confirmation lists freight,
+# fuel and payment terms like an invoice, so counting keywords alone
+# calls it an invoice; its title says what it is.
+TITLE_PHRASES = {
+    "RATE_CONFIRMATION": ("rate confirmation", "load confirmation"),
+    "BOL": ("bill of lading",),
+    "POD": ("proof of delivery", "delivery receipt"),
+    "INVOICE": ("invoice",),
+}
+
+# Lines read as the heading
+HEADING_LINES = 3
+
+
+def title_type(text):
+    """
+    (document type, phrase) named in the document's heading, or (None, None).
+    The type named first wins; a phrase followed by a colon, "number",
+    "no" or "#" is a reference to another document ("Bill of Lading No:
+    123"), not a title.
+    """
+
+    lines = [line.strip().lower() for line in str(text or "").splitlines() if line.strip()][:HEADING_LINES]
+    heading = " | ".join(lines)
+
+    found = []
+
+    for document_type, phrases in TITLE_PHRASES.items():
+        for phrase in phrases:
+            for match in re.finditer(rf"\b{re.escape(phrase)}\b(?!\s*(?::|#|number\b|no\b|no\.))", heading):
+                found.append((match.start(), document_type, phrase))
+
+    if not found:
+        return None, None
+
+    _, document_type, phrase = min(found)
+
+    return document_type, phrase
+
+
+# ============================================================
 # DOCUMENT CLASSIFICATION
 # ============================================================
 
 def classify_document(text):
     """
-    Classify a document based on its content.
+    Classify a document based on its content: by the type its heading
+    names (title_type), otherwise by keyword counts.
 
     Returns:
 
@@ -139,6 +184,19 @@ def classify_document(text):
             text,
             document_type
         )
+
+    titled, phrase = title_type(text)
+
+    if titled:
+
+        return {
+            "document_type": titled,
+            "confidence": 1.0,
+            "score": scores[titled]["score"],
+            "matched_keywords": [phrase] + [k for k in scores[titled]["matched_keywords"] if k != phrase],
+            "all_scores": scores,
+            "basis": "title",
+        }
 
     # Sort document types by score
     ranked = sorted(

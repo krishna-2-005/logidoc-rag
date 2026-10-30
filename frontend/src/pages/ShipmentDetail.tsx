@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom"
 import { AskPanel } from "@/components/common/AskPanel"
 import { DeliveryCard, InvoiceCard, QuantityCard } from "@/components/common/AuditComparison"
 import { Explanations } from "@/components/common/Explanations"
+import { FreightAuditPanel } from "@/components/common/FreightAuditPanel"
 import { ExtractionsSection } from "@/components/extraction/ExtractionPanel"
 import { PageHeader, Section } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
@@ -124,6 +125,8 @@ export function ShipmentDetailPage() {
           </div>
         </Section>
       )}
+
+      <FreightAuditPanel audit={shipment.data.freight_audit} />
 
       <Section
         title="Findings and explanations"

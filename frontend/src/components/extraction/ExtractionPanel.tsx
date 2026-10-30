@@ -15,7 +15,7 @@ import { Card } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { can, useExtraction, useExtractions, useRunExtraction, useSession, useStaleness } from "@/hooks/queries"
 import { dateTime, label } from "@/lib/format"
-import type { Correction, DocumentFile, ExtractionAlias, ExtractionDetail, ExtractionSummary } from "@/lib/types"
+import type { Correction, CrossDocumentIssue, DocumentFile, ExtractionAlias, ExtractionDetail, ExtractionSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const TONE_BORDER = { plain: "border-border", ok: "border-ok", warn: "border-warn", bad: "border-bad" } as const
@@ -389,6 +389,37 @@ function NotExtracted({ documents, heading }: { documents: DocumentFile[]; headi
   )
 }
 
+const SEVERITY_TONE = { error: "bad", warning: "warn", info: "info" } as const
+const SEVERITY_LABEL = { error: "Error", warning: "Warning", info: "Note" } as const
+
+/** What the stored extractions of the shipment's documents say when compared with each other */
+function CrossDocumentFindings({ issues }: { issues: CrossDocumentIssue[] }) {
+  if (issues.length === 0) return null
+
+  const order = ["error", "warning", "info"]
+  const sorted = [...issues].sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity))
+
+  return (
+    <div className="space-y-2" aria-label="Checks across documents">
+      <h3 className="text-sm font-semibold">Checks across documents</h3>
+      <p className="text-xs text-muted-foreground">Findings from comparing the extracted fields of this shipment's documents. They are reports only: no value is chosen or changed.</p>
+      <ul className="space-y-2">
+        {sorted.map((issue, index) => (
+          <li key={`${issue.code}-${index}`}>
+            <Alert tone={SEVERITY_TONE[issue.severity] ?? "info"}>
+              <p className="text-sm">
+                <span className="font-semibold">{SEVERITY_LABEL[issue.severity] ?? issue.severity}: </span>
+                {issue.message}
+              </p>
+              {issue.sources.length > 0 && <p className="mt-1 text-xs">Documents: {issue.sources.join(", ")}</p>}
+            </Alert>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /**
  * The typed fields read from each document of a shipment, where each came from,
  * and what has been proposed, approved or rejected for it. Nothing here changes
@@ -417,6 +448,7 @@ export function ExtractionsSection({ shipmentId, shipmentKey, documents }: { shi
 
     body = (
       <div className="space-y-4">
+        <CrossDocumentFindings issues={list.data?.cross_document_issues ?? []} />
         {rows.length === 0 && missing.length === 0 && (
           <EmptyState title="No extraction stored for this shipment">Extracting a document reads its fields into typed values with their source. Nothing is changed by viewing them.</EmptyState>
         )}
