@@ -931,10 +931,15 @@ The PDFs are in `tests/fixtures/`; SHJ-2026-001 is also the sample in
   document. Documents without one are never attributed to a shipment.
   Identifiers are compared without case, spaces or separators
   (`shipment_identity.identifier_key`), so `SHJ-2026-001` and `SHJ2026001`
-  are one shipment, but so are two different identifiers that differ only
-  in where their separators fall (`AB-12-3` and `AB-1-23`): their documents
-  would be audited together. The sample data has no such pair; a safeguard
-  that reports the collision instead of merging is planned, not built.
+  are one shipment. Two identifiers that share that key but split it at
+  different places (`AB-12-3` and `AB-1-23`) may be different shipments:
+  their documents are never used together. The audit reports the shipment
+  as not reconciled with the reason, a question about it abstains, and the
+  extraction cross-check reports `shipment_id_collision`
+  (`shipment_identity.identifier_collisions`). Forms that only leave out or
+  add separators (`SHJ2026001`, `shj 2026 001`) are not collisions. The key
+  itself is unchanged, so stored data keeps its keys; correcting the printed
+  ID and uploading the document again resolves a collision.
 - **Single machine, single writer.** Authentication is local accounts only
   (no SSO or MFA, and it needs HTTPS in front); no locking across
   processes, backups or monitoring; ChromaDB caches indexes
