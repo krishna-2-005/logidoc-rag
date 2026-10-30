@@ -198,7 +198,12 @@ from what extraction did: `parsed`, `partial` (some pages without
 text), `no_text` (an image-only scan; there is no OCR), `empty` (no
 pages) or `unreadable` (it could not be opened or analysed; the error is
 shown). A file is usable when it is parsed or partial and its content
-shows a document type and a shipment ID.
+shows a document type and a shipment ID. The type a document names in its
+heading (its first lines: "Rate Confirmation", "Bill of Lading", "Proof of
+Delivery", "Invoice") decides its type, so a rate confirmation that lists
+freight, fuel and payment terms is not taken for an invoice; a reference
+such as "Bill of Lading No: 123" is not a heading. Without such a heading,
+keyword counts decide (`src/document_classifier.py`).
 
 - A shipment is **ready** when a usable BOL, invoice and POD are all
   present, otherwise **incomplete**, and the register says which are
