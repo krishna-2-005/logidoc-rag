@@ -61,6 +61,14 @@ MIN_NOTE_LENGTH = max(int(os.environ.get("LOGIDOC_MIN_NOTE_LENGTH") or 10), 1)
 # Upload limit for one PDF (MB)
 MAX_UPLOAD_MB = max(int(os.environ.get("LOGIDOC_MAX_UPLOAD_MB") or 25), 1)
 
+# Freight audit tolerances (src/freight_audit.py), the only place they are set:
+# JSON of rules, each the absolute amount and/or the percentage of the expected
+# amount a billed value may differ by and still be MATCHED_WITH_TOLERANCE, e.g.
+# {"fuel_surcharge": {"absolute": 5}, "weight": {"percent": 2}}. Rules: default,
+# base_freight, fuel_surcharge, accessorial, invoice_total, invoice_arithmetic,
+# weight. Empty means exact matching everywhere. Server-side only.
+FREIGHT_TOLERANCES = os.environ.get("LOGIDOC_FREIGHT_TOLERANCES") or ""
+
 
 def ingestion_locations(raw_dir=RAW_DATA_DIR):
     """
