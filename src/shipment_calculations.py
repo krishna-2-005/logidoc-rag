@@ -1063,6 +1063,39 @@ def days(count):
     return f"{count:,} day" + ("" if count == 1 else "s")
 
 
+def chronology_problem(records, readings):
+    """
+    (reason, pickup evidence) when a delivery date read in readings
+    (BOL expected, POD actual) is before the BOL pickup date: that is
+    impossible, so one of the dates was read or printed wrong and none
+    is trusted. (None, []) when the order is possible, or when the
+    pickup date is missing, unreadable or differs between copies (then
+    nothing is checked and the answer is unchanged).
+    """
+
+    pickup_readings, _ = read_fields(records, "pickup_date")
+    pickup = agreed(pickup_readings, "pickup_date")
+
+    if pickup is None:
+        return None, []
+
+    before = [
+        f"the {label} ({readings[name][0].raw}) is before the BOL pickup "
+        f"date ({pickup_readings['pickup_date'][0].raw})"
+        for name, label in (
+            ("expected_date", "BOL expected delivery date"),
+            ("actual_date", "POD delivery date"),
+        )
+        if name in readings and agreed(readings, name) is not None
+        and agreed(readings, name) < pickup
+    ]
+
+    if not before:
+        return None, []
+
+    return "; ".join(before) + ", so one of the dates is wrong", evidence_of(pickup_readings, "pickup_date")
+
+
 def date_answer(intent, records, prefix=False):
     """
     prefix: whether the answer starts with Yes or No (on time, late
@@ -1110,6 +1143,12 @@ def date_answer(intent, records, prefix=False):
 
     if problem:
         return problem
+
+    # The audit's rule: a delivery date before the pickup is not trusted
+    impossible, _ = chronology_problem(records, readings)
+
+    if impossible:
+        return abstention(impossible)
 
     expected = raw_of(readings, "expected_date")
     actual = raw_of(readings, "actual_date")
@@ -1558,6 +1597,16 @@ def audit_delivery(records):
             {**shown, "days_late": None},
             "; ".join(problems),
             evidence,
+        )
+
+    problem, pickup_evidence = chronology_problem(records, readings)
+
+    if problem:
+        return Audit(
+            NEEDS_REVIEW,
+            {**shown, "days_late": None},
+            problem,
+            evidence + pickup_evidence,
         )
 
     late = (

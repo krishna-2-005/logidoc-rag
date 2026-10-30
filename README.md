@@ -57,7 +57,9 @@ rag_grounding.ground_answer  cite only chunks that support the answer;
   `audit_delivery`, `audit_invoice` in `src/shipment_calculations.py`). An
   early delivery is EARLY, not a discrepancy. A missing, unreadable or
   conflicting essential value is **NEEDS REVIEW**, never a match, on time
-  or CLEAR.
+  or CLEAR. So is a delivery date (BOL expected or POD actual) before the
+  BOL pickup date: one of the dates is wrong, and the chat abstains with the
+  same reason.
 
 ## Calculations
 
