@@ -67,15 +67,23 @@ def freight_skipped(reason):
             "currency": None, "charges": [], "checks": [], "financial_impact": None, "tolerances": {}}
 
 
-def add_freight_audits(snapshot, by_key, raw_dir, plans):
+def add_freight_audits(snapshot, by_key, raw_dir, corrections_of):
     """
     Adds item["freight_audit"] to every shipment of the snapshot: its carrier
-    invoice matched against its rate confirmation and BOL/POD (freight_audit).
-    Each PDF is extracted once, read-only. Shipments whose documents print
-    colliding IDs are not audited (their documents are never used together).
+    invoice matched against its rate confirmation and BOL/POD (freight_audit),
+    with the shipment's approved extraction corrections applied.
+    corrections_of(shipment_key) gives them, or None when the extraction
+    store cannot be read (the audit then reads the documents as printed and
+    says so). Each PDF is extracted once, read-only. Shipments whose
+    documents print colliding IDs are not audited (their documents are never
+    used together).
     """
 
+    from datetime import datetime, timezone
+
     import freight_audit
+
+    audited_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     try:
         policy = freight_audit.load_policy()
@@ -121,12 +129,16 @@ def add_freight_audits(snapshot, by_key, raw_dir, plans):
                 for chunk in by_key.get(key, [])
             ]
 
-            result = freight_audit.audit_freight(own, texts=texts, policy=policy, other_invoices=others)
+            corrections = corrections_of(key)
 
-            if plans.get(key):
+            result = freight_audit.audit_freight(own, texts=texts, policy=policy, other_invoices=others,
+                                                 corrections=corrections or ())
+            result["audited_at"] = audited_at
+
+            if corrections is None:
                 result["explanation"].append(
-                    "Approved extraction corrections of this shipment are applied to the reconciliation, "
-                    "not yet to the freight audit, which reads the documents as printed."
+                    "The extraction store could not be read, so approved corrections are not applied: "
+                    "the documents are read as printed."
                 )
 
             item["freight_audit"] = result
@@ -328,7 +340,25 @@ class AuditService:
                 for item in snapshot["shipments"]:
                     audit_inputs.mark_corrections_unavailable(item["inputs"])
 
-            add_freight_audits(snapshot, by_key, self.locations.raw_dir, plans)
+            def corrections_of(key):
+                if store is None:
+                    return None
+                try:
+                    return store.approved_corrections(key)
+                except sqlite3.DatabaseError:
+                    return None
+
+            add_freight_audits(snapshot, by_key, self.locations.raw_dir, corrections_of)
+
+            # A correction the freight audit used is consumed by the audit like the
+            # reconciliation's: history records it, staleness and supersession see it
+            for item in snapshot["shipments"]:
+                used = [c["correction_id"] for c in (item.get("freight_audit") or {}).get("corrections_applied") or []]
+
+                if used and item.get("inputs") is not None:
+                    item["inputs"]["applied_correction_ids"] = sorted(
+                        set(item["inputs"].get("applied_correction_ids") or []) | set(used)
+                    )
 
             return snapshot
 
@@ -509,7 +539,11 @@ class AuditService:
         if outcome["decision"] != "approved":
             return {**outcome, "recompute": {"status": "not_needed"}}
 
-        if (outcome["document_type"], outcome["field_name"]) not in audit_inputs.TARGETS:
+        import freight_audit
+
+        consumed = (outcome["document_type"], outcome["field_name"])
+
+        if consumed not in audit_inputs.TARGETS and consumed not in freight_audit.CONSUMED_FIELDS:
             return {**outcome, "recompute": {"status": "no_calculation_consumes_this_field"}}
 
         if outcome["shipment_key"] is None:

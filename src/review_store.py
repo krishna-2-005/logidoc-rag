@@ -80,25 +80,36 @@ OPEN = "open"
 IN_REVIEW = "in_review"
 RESOLVED = "resolved"
 DISMISSED = "dismissed"
+# Raised with the carrier: still unsettled, so it can later be resolved or waived
+DISPUTED = "disputed"
+# A real difference accepted as it is (a financial decision, with its reason)
+WAIVED = "waived"
 
-STATUSES = (OPEN, IN_REVIEW, RESOLVED, DISMISSED)
+STATUSES = (OPEN, IN_REVIEW, RESOLVED, DISMISSED, DISPUTED, WAIVED)
 
 STATUS_LABELS = {
     OPEN: "Open",
     IN_REVIEW: "In review",
     RESOLVED: "Resolved",
     DISMISSED: "Dismissed",
+    DISPUTED: "Disputed",
+    WAIVED: "Waived",
 }
+
+# Closed: nothing is pending; the audit reopens it if what it found changes
+CLOSED = (RESOLVED, DISMISSED, WAIVED)
 
 # Allowed changes: anything handled can be reopened
 TRANSITIONS = {
-    OPEN: {IN_REVIEW, RESOLVED, DISMISSED},
-    IN_REVIEW: {OPEN, RESOLVED, DISMISSED},
+    OPEN: {IN_REVIEW, RESOLVED, DISMISSED, DISPUTED, WAIVED},
+    IN_REVIEW: {OPEN, RESOLVED, DISMISSED, DISPUTED, WAIVED},
+    DISPUTED: {OPEN, RESOLVED, WAIVED},
     RESOLVED: {OPEN, IN_REVIEW},
     DISMISSED: {OPEN, IN_REVIEW},
+    WAIVED: {OPEN, IN_REVIEW},
 }
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -168,6 +179,51 @@ MIGRATION_V2 = (
     "BEGIN SELECT RAISE(ABORT, 'review history is append-only'); END",
 )
 
+
+# Version 3 adds the disputed and waived states. SQLite cannot change a CHECK
+# constraint in place, so exception_reviews is rebuilt with the same columns
+# and every row copied unchanged (review_events, the history, is not touched).
+# A dispute or a waiver needs its reason, like a dismissal.
+REVIEW_COLUMNS = (
+    "exception_key", "shipment_key", "shipment_id", "category", "status", "signature", "reviewer", "note",
+    "needs_recheck", "absent_since", "created_at", "updated_at", "assignee", "assigned_at", "assigned_by",
+    "evidence_refs", "resolved_by", "resolved_at", "resolved_authenticated", "approval_state", "approval_by",
+    "approval_at", "approval_note",
+)
+
+MIGRATION_V3 = (
+    """CREATE TABLE exception_reviews_v3 (
+    exception_key TEXT PRIMARY KEY,
+    shipment_key  TEXT NOT NULL,
+    shipment_id   TEXT NOT NULL,
+    category      TEXT NOT NULL,
+    status        TEXT NOT NULL
+                  CHECK (status IN ('open', 'in_review', 'resolved', 'dismissed', 'disputed', 'waived')),
+    signature     TEXT NOT NULL,
+    reviewer      TEXT,
+    note          TEXT,
+    needs_recheck INTEGER NOT NULL DEFAULT 0 CHECK (needs_recheck IN (0, 1)),
+    absent_since  TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    assignee      TEXT,
+    assigned_at   TEXT,
+    assigned_by   TEXT,
+    evidence_refs TEXT NOT NULL DEFAULT '[]',
+    resolved_by   TEXT,
+    resolved_at   TEXT,
+    resolved_authenticated INTEGER,
+    approval_state TEXT CHECK (approval_state IN ('pending', 'approved', 'rejected')),
+    approval_by   TEXT,
+    approval_at   TEXT,
+    approval_note TEXT,
+    CHECK (status NOT IN ('dismissed', 'disputed', 'waived') OR length(trim(coalesce(note, ''))) > 0)
+)""",
+    "INSERT INTO exception_reviews_v3 ({0}) SELECT {0} FROM exception_reviews".format(", ".join(REVIEW_COLUMNS)),
+    "DROP TABLE exception_reviews",
+    "ALTER TABLE exception_reviews_v3 RENAME TO exception_reviews",
+)
+
 GENESIS = "genesis"
 
 # Event types
@@ -180,6 +236,8 @@ EVENT_NOTE = "note"
 EVENT_RESOLVE = "resolve"
 EVENT_DISMISS = "dismiss"
 EVENT_REOPEN = "reopen"
+EVENT_DISPUTE = "dispute"
+EVENT_WAIVE = "waive"
 EVENT_APPROVE = "approve"
 EVENT_REJECT = "reject"
 
@@ -302,20 +360,47 @@ class ReviewStore:
                 else:
                     version = version["version"]
 
-        if version == 1:
-            self.migrate_to_v2()
-
-        elif version != SCHEMA_VERSION:
+        if version > SCHEMA_VERSION:
             raise ReviewError(
                 f"Review database {self.path} has schema version "
                 f"{version}, expected {SCHEMA_VERSION}."
             )
+
+        if version == 1:
+            self.migrate_to_v2()
+
+        if version < 3:
+            self.migrate_to_v3()
 
     def migrate_to_v2(self):
         """
         Version 1 -> 2 in one transaction: every column, the triggers
         and the version number are applied together or not at all.
         """
+
+        self.migrate_step(1, 2, MIGRATION_V2)
+
+    def migrate_to_v3(self):
+        """
+        Version 2 -> 3 (disputed and waived) in one transaction. A database
+        that already holds reviews is first copied, whole, beside itself
+        (<name>.before-v3.sqlite3), so the rebuild can always be undone by hand.
+        """
+
+        with closing(sqlite3.connect(self.path, timeout=10)) as connection:
+            version = connection.execute("SELECT version FROM schema_info").fetchone()[0]
+            rows = connection.execute("SELECT count(*) FROM exception_reviews").fetchone()[0]
+
+            backup = self.path.with_name(self.path.stem + ".before-v3" + self.path.suffix)
+
+            if version == 2 and rows and not backup.exists():
+                with closing(sqlite3.connect(backup)) as copy:
+                    connection.backup(copy)
+
+        self.migrate_step(2, 3, MIGRATION_V3)
+
+    def migrate_step(self, current_version, target, statements):
+        """One schema step in one transaction; the version is read again inside it."""
 
         connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
 
@@ -325,12 +410,12 @@ class ReviewStore:
 
             current = connection.execute("SELECT version FROM schema_info").fetchone()[0]
 
-            if current == 1:
+            if current == current_version:
 
-                for statement in MIGRATION_V2:
+                for statement in statements:
                     connection.execute(statement)
 
-                connection.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
+                connection.execute("UPDATE schema_info SET version = ?", (target,))
 
             connection.execute("COMMIT")
 
@@ -631,7 +716,7 @@ class ReviewStore:
                 changed = row["signature"] != item["signature"]
                 returned = row["absent_since"] is not None
 
-                if row["status"] in (RESOLVED, DISMISSED) and (changed or returned):
+                if row["status"] in CLOSED and (changed or returned):
 
                     note = (
                         "Reopened: the audited values changed since it was "
@@ -696,6 +781,13 @@ class ReviewStore:
 
         if status == DISMISSED and not note:
             raise ReviewError("A dismissal needs a reason.")
+
+        # The database refuses these without a note too; say why instead of failing there
+        if status == DISPUTED and not note:
+            raise ReviewError("A dispute needs a reason.")
+
+        if status == WAIVED and not note:
+            raise ReviewError("A waiver needs a reason.")
 
         at = at or now_text()
         key = exception["exception_key"]
@@ -834,8 +926,8 @@ class ReviewStore:
 
             if action == EVENT_ASSIGN:
 
-                if status in (RESOLVED, DISMISSED):
-                    raise ReviewError("A resolved or dismissed exception cannot be assigned; reopen it first.")
+                if status in CLOSED:
+                    raise ReviewError(f"A {STATUS_LABELS[status].lower()} exception cannot be assigned; reopen it first.")
 
                 new_assignee = self.check_name(assignee, "The assignee")
                 note = self.check_note(note, "An assignment", required=False)
@@ -879,9 +971,9 @@ class ReviewStore:
 
             elif action in (EVENT_RESOLVE, EVENT_DISMISS):
 
-                if action == EVENT_RESOLVE and status != IN_REVIEW:
+                if action == EVENT_RESOLVE and status not in (IN_REVIEW, DISPUTED):
                     raise ReviewError(
-                        "Only an exception in review can be resolved; start the review first "
+                        "Only an exception in review or disputed can be resolved; start the review first "
                         f"(this one is {STATUS_LABELS[status]})."
                     )
 
@@ -908,11 +1000,46 @@ class ReviewStore:
                 }
                 event_evidence = new_evidence
 
+            elif action == EVENT_DISPUTE:
+
+                if status not in (OPEN, IN_REVIEW):
+                    raise ReviewError(f"A {STATUS_LABELS[status].lower()} exception cannot be disputed.")
+
+                # The dispute reason is what the carrier is told: required
+                note = self.check_note(note, "Disputing", required=True)
+                new_evidence = self.check_evidence(evidence)
+                merged = current_evidence + [item for item in new_evidence if item not in current_evidence]
+
+                # Still open with the carrier: not resolved, nothing to approve yet
+                updates = {"status": DISPUTED, "evidence_refs": json.dumps(merged, ensure_ascii=False),
+                           "needs_recheck": 0}
+                to_status, event_evidence = DISPUTED, new_evidence
+
+            elif action == EVENT_WAIVE:
+
+                if status not in (OPEN, IN_REVIEW, DISPUTED):
+                    raise ReviewError(f"A {STATUS_LABELS[status].lower()} exception cannot be waived.")
+
+                # Accepting a difference is a financial decision: its reason is required,
+                # and with approval switched on it waits for an administrator
+                note = self.check_note(note, "Waiving", required=True)
+                new_evidence = self.check_evidence(evidence)
+                merged = current_evidence + [item for item in new_evidence if item not in current_evidence]
+
+                updates = {
+                    "status": WAIVED, "evidence_refs": json.dumps(merged, ensure_ascii=False),
+                    "resolved_by": actor_name, "resolved_authenticated": int(actor.authenticated),
+                    "resolved_at": at, "needs_recheck": 0,
+                    "approval_state": PENDING if self.policy.require_approval else None,
+                    "approval_by": None, "approval_at": None, "approval_note": None,
+                }
+                to_status, event_evidence = WAIVED, new_evidence
+
             elif action == EVENT_REOPEN:
 
-                if status not in (RESOLVED, DISMISSED):
+                if status not in CLOSED + (DISPUTED,):
                     raise ReviewError(
-                        "Only a resolved or dismissed exception can be reopened; "
+                        "Only a resolved, dismissed, waived or disputed exception can be reopened; "
                         f"this one is {STATUS_LABELS[status]}."
                     )
 

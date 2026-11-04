@@ -2319,7 +2319,7 @@ def show_exception_review(store, exceptions, prefix="an"):
         )
 
         reviewer = st.text_input("Reviewer (optional)")
-        note = st.text_area("Note (required to dismiss)")
+        note = st.text_area("Note (required to dismiss, dispute or waive)")
 
         submitted = st.form_submit_button("Save review state")
 
@@ -2415,7 +2415,7 @@ def show_audit_analytics(shipment_options):
 
     open_exceptions = [
         item for item in exceptions
-        if item["review_status"] not in ("resolved", "dismissed")
+        if item["review_status"] not in ("resolved", "dismissed", "waived")
     ]
 
     chart_status, chart_exceptions = st.columns(2)

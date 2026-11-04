@@ -103,6 +103,7 @@ export interface ExceptionFilters {
   min_age_days?: number
   max_age_days?: number
   pending_approval?: boolean
+  severity?: string[]
 }
 
 export const useExceptions = (filters: ExceptionFilters) =>

@@ -39,9 +39,24 @@ Outcomes
     DUPLICATE, PENDING_REVIEW. Every line, and the shipment's overall
     outcome, says why it received its outcome.
 
+Approved corrections
+    corrections (ExtractionStore.approved_corrections of the shipment) make an
+    approved value the effective value of its document's field: the latest
+    decision of a document and field wins, and a correction made on another
+    version of the file (its hash differs) is not applied. The extraction is
+    copied, never changed; the result lists each correction used with the
+    original and the corrected value, and those it did not apply and why.
+
+Reproducibility
+    The result says what it was computed from: every document considered
+    with its SHA-256 and extractor version and the field values used (with
+    their source page and whether a correction supplied them), the
+    corrections used, and the tolerances.
+
 Read-only: nothing is stored and no PDF is changed.
 """
 
+import copy
 import json
 import re
 from dataclasses import dataclass
@@ -264,7 +279,12 @@ def field_of(extraction, name):
 
 def source(extraction, item):
 
-    return {"file": extraction.filename, "page": item.page if item is not None else None, "document_type": extraction.document_type}
+    found = {"file": extraction.filename, "page": item.page if item is not None else None, "document_type": extraction.document_type}
+
+    if item is not None and item.basis == CORRECTED:
+        found["corrected"] = True
+
+    return found
 
 
 def amount(value):
@@ -307,10 +327,121 @@ def check(name, outcome, explanation, values=()):
 
 
 # ============================================================
+# APPROVED CORRECTIONS
+# ============================================================
+
+CORRECTED = "approved_correction"
+
+# The extracted fields the freight audit reads: an approved correction of one
+# of them changes the audit, so it is recalculated and recorded like the
+# reconciliation's (audit_service.decide_correction).
+CONSUMED_FIELDS = frozenset({
+    (RATE, name) for name in ("agreed_rate", "fuel_surcharge", "carrier", "origin", "destination", "pickup_date",
+                              "delivery_date", "weight", "currency", "payment_terms")
+} | {
+    (INVOICE, name) for name in ("invoice_total", "invoice_number", "carrier", "origin", "destination", "currency",
+                                 "payment_terms")
+} | {
+    (BOL, name) for name in ("carrier", "origin", "destination", "pickup_date", "weight")
+} | {
+    (POD, name) for name in ("carrier", "delivery_date")
+})
+
+
+def plain(value):
+    """A field value as JSON can hold it."""
+
+    return json.loads(json.dumps(value, default=str))
+
+
+def apply_corrections(extractions, corrections):
+    """
+    (extractions with the approved values in place, applied, ignored). The
+    extractions given are not changed: a corrected document is a copy.
+    corrections: ExtractionStore.approved_corrections(shipment_key), oldest
+    decision first.
+    """
+
+    by_file = {e.filename: e for e in extractions}
+    latest, ignored = {}, []
+
+    for correction in corrections:
+
+        target = by_file.get(correction["filename"])
+        reference = {"correction_id": correction["correction_id"], "file": correction["filename"],
+                     "field": correction["field_name"]}
+
+        if target is None:
+            ignored.append({**reference, "reason": "The document is no longer part of this shipment."})
+        elif target.sha256 != correction["sha256"]:
+            ignored.append({**reference, "reason": "It was made on another version of the file; check the field again."})
+        elif correction["field_name"] not in de.SCHEMAS.get(target.document_type, {}):
+            ignored.append({**reference, "reason": f"{correction['field_name']} is not a field of a {target.document_type}."})
+        else:
+            # Ordered by decision: the last of a document and field wins
+            latest[(correction["filename"], correction["field_name"])] = correction
+
+    copies, applied = {}, []
+
+    for (filename, name), correction in sorted(latest.items(), key=lambda item: item[1]["decision_id"]):
+
+        if filename not in copies:
+            copies[filename] = copy.deepcopy(by_file[filename])
+
+        document = copies[filename]
+        original = document.fields.get(name)
+
+        document.fields[name] = de.ExtractedField(
+            name=name, state=EXTRACTED, value=correction["value"],
+            raw_text=original.raw_text if original is not None else None, source_file=filename,
+            page=original.page if original is not None else None, method=CORRECTED, validation=de.VALID,
+            basis=CORRECTED,
+            warnings=[f"approved correction #{correction['correction_id']} by {correction['approved_by']}"],
+        )
+
+        applied.append({
+            "correction_id": correction["correction_id"],
+            "file": filename,
+            "document_type": document.document_type,
+            "field": name,
+            "original_state": original.state if original is not None else de.MISSING,
+            "original_value": plain(original.value) if original is not None else None,
+            "corrected_value": plain(correction["value"]),
+            "proposed_by": correction.get("proposed_by"),
+            "approved_by": correction.get("approved_by"),
+            "decided_at": correction.get("decided_at"),
+        })
+
+    return [copies.get(e.filename, e) for e in extractions], applied, ignored
+
+
+def inputs_of(extractions):
+    """What the audit read: each document with its fingerprint and the field values used."""
+
+    return [
+        {
+            "file": e.filename,
+            "sha256": e.sha256,
+            "document_type": e.document_type,
+            "status": e.status,
+            "extractor_version": e.extractor_version,
+            "fields": {
+                name: {"state": item.state, "value": plain(item.value), "page": item.page,
+                       "corrected": item.basis == CORRECTED}
+                for name, item in sorted(e.fields.items())
+            },
+            "line_items": [{"description": item.description, "amount": item.amount, "page": item.page}
+                           for item in e.line_items],
+        }
+        for e in sorted(extractions, key=lambda e: e.filename)
+    ]
+
+
+# ============================================================
 # THE AUDIT
 # ============================================================
 
-def audit_freight(extractions, texts=(), policy=None, other_invoices=()):
+def audit_freight(extractions, texts=(), policy=None, other_invoices=(), corrections=()):
     """
     The freight audit of one shipment.
 
@@ -319,12 +450,16 @@ def audit_freight(extractions, texts=(), policy=None, other_invoices=()):
     other_invoices: DocumentExtraction of the invoices of OTHER shipments,
     for duplicate invoice numbers.
 
+    corrections: the shipment's approved extraction corrections (see
+    apply_corrections).
+
     Returns {"outcome", "explanation", "documents", "currency", "charges",
-    "checks", "financial_impact", "tolerances"}.
+    "checks", "financial_impact", "tolerances", "corrections_applied",
+    "corrections_ignored", "inputs"}.
     """
 
     policy = policy if policy is not None else load_policy()
-    extractions = list(extractions)
+    extractions, applied, ignored = apply_corrections(list(extractions), list(corrections))
     texts = list(texts)
 
     invoices, rates = usable(extractions, INVOICE), usable(extractions, RATE)
@@ -347,9 +482,20 @@ def audit_freight(extractions, texts=(), policy=None, other_invoices=()):
     ]
     outcome = worst(deciding) if deciding else INSUFFICIENT_EVIDENCE
 
+    explanation = explain(outcome, charges, checks, invoices, rates)
+
+    for item in applied:
+        explanation.append(
+            f"Approved correction #{item['correction_id']} used: {item['field']} of {item['file']} is "
+            f"{item['corrected_value']} (extracted: {item['original_value'] if item['original_state'] == EXTRACTED else item['original_state'].lower()})."
+        )
+
+    for item in ignored:
+        explanation.append(f"Approved correction #{item['correction_id']} ({item['field']} of {item['file']}) not used: {item['reason']}")
+
     return {
         "outcome": outcome,
-        "explanation": explain(outcome, charges, checks, invoices, rates),
+        "explanation": explanation,
         "documents": {
             "contract": [e.filename for e in rates],
             "execution": [e.filename for e in bols + pods],
@@ -361,6 +507,9 @@ def audit_freight(extractions, texts=(), policy=None, other_invoices=()):
         "financial_impact": impact(charges, currency),
         "tolerances": {name: {"absolute": float(value.absolute), "percent": float(value.percent)}
                        for name, value in sorted(policy.items())},
+        "corrections_applied": applied,
+        "corrections_ignored": ignored,
+        "inputs": inputs_of(extractions),
     }
 
 

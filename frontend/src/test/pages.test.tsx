@@ -214,6 +214,39 @@ describe("Shipment detail", () => {
     expect(within(panel).getByRole("table", { name: "Reference checks" })).toHaveTextContent("Every document gives the same carrier.")
   })
 
+  it("reopens a recorded freight audit from the history, with the corrections it used", async () => {
+    const recorded = {
+      ...FREIGHT,
+      outcome: "MATCHED",
+      audited_at: "2026-11-04T10:00:00+00:00",
+      corrections_applied: [{ correction_id: 7, file: "RATE_CONFIRMATION_SHJ-2026-001.pdf", document_type: "RATE_CONFIRMATION", field: "fuel_surcharge",
+        original_state: "EXTRACTED", original_value: 180, corrected_value: 200, proposed_by: "bob", approved_by: "dave", decided_at: "2026-11-04T09:00:00+00:00" }],
+      corrections_ignored: [],
+      inputs: [{ file: "RATE_CONFIRMATION_SHJ-2026-001.pdf", sha256: "a".repeat(64), document_type: "RATE_CONFIRMATION", status: "extracted", extractor_version: "1.1" }],
+    }
+    const entry = {
+      snapshot: { id: 5, created_at: "2026-11-04T10:00:00+00:00", final_status: "NO DISCREPANCIES", discrepancy_count: 0, review_count: 0,
+        runs: [{ run_id: 3, created_at: "2026-11-04T10:00:00+00:00" }], findings: [], freight_audit: recorded },
+      changes: { first: true, status_change: null, input_changed: false, value_changes: [], new: [], reappeared: [], changed: [], resolved: [], unverified: [], persistent: [] },
+    }
+    mockApi({ "/api/shipments/SHJ-2026-001": { ...DETAIL("SHJ-2026-001"), freight_audit: FREIGHT, history: [entry] } })
+    renderPage(
+      <Routes>
+        <Route path="/shipments/:id" element={<ShipmentDetailPage />} />
+      </Routes>,
+      "/shipments/SHJ-2026-001",
+    )
+
+    const body = await screen.findByLabelText("Recorded freight audit of snapshot 5")
+    const corrections = within(body).getByRole("table", { name: "Approved corrections used" })
+
+    expect(within(corrections).getByText("#7")).toBeInTheDocument()
+    expect(within(corrections).getByText("180")).toBeInTheDocument()
+    expect(within(corrections).getByText("200")).toBeInTheDocument()
+    expect(within(corrections).getByText("dave")).toBeInTheDocument()
+    expect(within(body).getByText(/sha256 aaaaaaaaaaaaaaaa/)).toBeInTheDocument()
+  })
+
   it("shows no freight audit section when the response has none", async () => {
     mockApi({ "/api/shipments/SHJ-2026-001": DETAIL("SHJ-2026-001") })
     renderPage(
@@ -272,6 +305,98 @@ describe("Exception Center", () => {
       ...overrides,
     })
   }
+
+  it("asks for a reason before disputing or waiving", () => {
+    expect(validateAction("dispute", "short", [], false, 10, true, "")).toMatch(/Disputing needs a reason/)
+    expect(validateAction("waive", "", [], false, 10, true, "")).toMatch(/Waiving needs a reason/)
+    expect(validateAction("dispute", "Fuel billed above the contract.", [], false, 10, true, "")).toBeNull()
+    expect(validateAction("waive", "Accepted below the write-off threshold.", [], false, 10, true, "")).toBeNull()
+  })
+
+  const FREIGHT_ITEM = {
+    ...ITEM, exception_key: "SHJ2026101|freight-fuel-surcharge", shipment_key: "SHJ2026101", shipment_id: "SHJ-2026-101",
+    category: "Freight audit: Fuel surcharge", status: "open", assignee: null, allowed_actions: ["start", "note", "dispute"],
+    financial_impact: { amount: 20, currency: "USD", basis: "billed above the contract" },
+    recommended_action: "Dispute or short-pay the difference with the carrier, citing the rate confirmation.",
+    audit_outcome: "DISCREPANCY", evidence: ["RATE_CONFIRMATION_SHJ-2026-101.pdf p.1 (RATE_CONFIRMATION): contract"], invoice_numbers: ["INV-101"],
+  }
+  const FREIGHT_KEY = "/api/exceptions/SHJ2026101%7Cfreight-fuel-surcharge"
+
+  function freightSetup(overrides: Record<string, unknown> = {}) {
+    return mockApi({
+      "/api/session": REVIEWER_SESSION,
+      "/api/settings": SETTINGS,
+      "/api/exceptions": { exceptions: [FREIGHT_ITEM, { ...ITEM, financial_impact: null, recommended_action: null, audit_outcome: null, evidence: [], invoice_numbers: [] }], total: 2, assignees: ["bob"],
+        categories: ["Freight audit: Fuel surcharge", "Invoice mismatch"], statuses: ["open", "in_review", "disputed", "resolved", "dismissed", "waived"] },
+      [FREIGHT_KEY]: { ...FREIGHT_ITEM, review: FREIGHT_ITEM, history: [] },
+      ...overrides,
+    })
+  }
+
+  it("lists the financial impact and the recommended action, and shows them for the selected exception", async () => {
+    freightSetup()
+    renderPage(<Exceptions />, "/exceptions?key=SHJ2026101%7Cfreight-fuel-surcharge")
+
+    const row = (await screen.findByRole("button", { name: "Open Freight audit: Fuel surcharge of SHJ-2026-101" })).closest("tr") as HTMLElement
+    expect(within(row).getByText("USD 20.00")).toBeInTheDocument()
+    expect(within(row).getByText(/Next: Dispute or short-pay/)).toBeInTheDocument()
+
+    // An exception whose amount cannot be determined shows none, never 0
+    const other = screen.getByRole("button", { name: "Open Invoice mismatch of SHJ-2026-001" }).closest("tr") as HTMLElement
+    expect(within(other).queryByText(/0\.00/)).toBeNull()
+
+    const facts = await screen.findByLabelText("Exception facts")
+    expect(facts).toHaveTextContent("USD 20.00 (billed above the contract)")
+    expect(facts).toHaveTextContent("Recommended action")
+    expect(facts).toHaveTextContent("INV-101")
+    expect(within(facts).getByText("Discrepancy")).toBeInTheDocument()
+  })
+
+  it("filters by severity and searches invoice numbers on the server", async () => {
+    const { calls } = freightSetup()
+    renderPage(<Exceptions />, "/exceptions")
+
+    await userEvent.selectOptions(await screen.findByLabelText("Severity"), "HIGH")
+    await userEvent.type(screen.getByLabelText("Search shipment or invoice"), "INV-101")
+
+    await waitFor(() => {
+      const lists = calls.filter((call) => call.url.pathname === "/api/exceptions")
+      const last = lists[lists.length - 1]
+      expect(last.url.searchParams.getAll("severity")).toEqual(["HIGH"])
+      expect(last.url.searchParams.get("search")).toBe("INV-101")
+    })
+  })
+
+  it("disputes with the carrier, sending the reason", async () => {
+    const { calls } = freightSetup({ [`${FREIGHT_KEY}/actions`]: () => ({ body: { review: { ...FREIGHT_ITEM, status: "disputed" }, allowed_actions: [] } }) })
+    renderPage(<Exceptions />, "/exceptions?key=SHJ2026101%7Cfreight-fuel-surcharge")
+
+    await userEvent.selectOptions(await screen.findByLabelText("What do you want to do?"), "dispute")
+
+    const submit = screen.getByRole("button", { name: "Dispute with the carrier" })
+    expect(submit).toBeDisabled()
+
+    await userEvent.type(screen.getByLabelText(/dispute reason/i), "Fuel billed $20 above the rate confirmation.")
+    expect(submit).toBeEnabled()
+    await userEvent.click(submit)
+
+    await waitFor(() => {
+      const post = calls.find((call) => call.init?.method === "POST")
+      expect(JSON.parse(String(post!.init!.body))).toMatchObject({ action: "dispute", note: "Fuel billed $20 above the rate confirmation." })
+    })
+  })
+
+  it("shows the disputed and waived states", () => {
+    renderPage(
+      <>
+        <StatusBadge status="disputed" />
+        <StatusBadge status="waived" />
+      </>,
+    )
+
+    expect(screen.getByText("Disputed")).toBeInTheDocument()
+    expect(screen.getByText("Waived")).toBeInTheDocument()
+  })
 
   it("keeps Resolve disabled until the note and evidence are valid, then sends them", async () => {
     const { calls } = setup({ "/api/exceptions/SHJ2026001%7Cinvoice/actions": () => ({ body: { review: ITEM, allowed_actions: [] } }) })

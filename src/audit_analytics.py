@@ -432,7 +432,13 @@ def add_freight_exceptions(shipment, add):
             f"{currency} (billed - contract)" if variance is not None else f"{currency} billed",
             freight_evidence(item),
             audit_outcome=outcome,
-            financial_impact={"amount": max(at_stake, 0) if at_stake is not None else None, "currency": audit.get("currency")},
+            financial_impact=(
+                {"amount": max(at_stake, 0), "currency": audit.get("currency"),
+                 "basis": ("billed above the contract" if over else "billed below the contract") if outcome == "DISCREPANCY"
+                 else "billed without enough supporting evidence" if outcome == "INSUFFICIENT_EVIDENCE"
+                 else "billed and waiting for a decision"}
+                if at_stake is not None else None
+            ),
             recommended_action=FREIGHT_ACTIONS["over" if over else "under"] if outcome == "DISCREPANCY" else FREIGHT_ACTIONS[outcome])
 
     for item in audit.get("checks") or []:
@@ -445,14 +451,14 @@ def add_freight_exceptions(shipment, add):
         if outcome == "DUPLICATE":
             add(shipment, "freight-duplicate-invoice", DISCREPANCY, "Freight audit: duplicate invoice", HIGH,
                 item["explanation"], evidence=freight_evidence(item), audit_outcome=outcome,
-                financial_impact=None, recommended_action=FREIGHT_ACTIONS["DUPLICATE"])
+                recommended_action=FREIGHT_ACTIONS["DUPLICATE"])
 
         # The contract against documents that agree with each other (BOL/invoice differences have their own exceptions)
         elif (outcome == "DISCREPANCY" and item["check"] in ("Carrier", "Origin", "Destination", "Currency", "Payment terms")
               and contract and len(execution) == 1 and contract != execution):
             add(shipment, f"freight-{slug(item['check'])}", DISCREPANCY, f"Freight audit: {item['check'].lower()}", MEDIUM,
                 item["explanation"], evidence=freight_evidence(item), audit_outcome=outcome,
-                financial_impact=None, recommended_action=FREIGHT_ACTIONS["reference"])
+                recommended_action=FREIGHT_ACTIONS["reference"])
 
 
 def build_exceptions(snapshot):
@@ -478,6 +484,10 @@ def build_exceptions(snapshot):
             "difference": difference,
             "unit": unit,
             "evidence": evidence_references(evidence),
+            # {amount, currency, basis} when an amount is determinable; None otherwise (never 0 for unknown)
+            "financial_impact": None,
+            "recommended_action": None,
+            "audit_outcome": None,
             **extra,
         }
 
@@ -521,7 +531,12 @@ def build_exceptions(snapshot):
 
             add(shipment, "invoice", DISCREPANCY, "Invoice mismatch", HIGH,
                 discrepancy_text(result, "Invoice", "Invoice line items do not add up to the total."),
-                invoice.get("difference"), "USD (total - line items)", invoice.get("evidence"))
+                invoice.get("difference"), "USD (total - line items)", invoice.get("evidence"),
+                financial_impact=(
+                    {"amount": abs(invoice["difference"]), "currency": invoice.get("currency") or "USD",
+                     "basis": "the stated total differs from the sum of its line items by this amount"}
+                    if known(invoice.get("difference")) else None
+                ))
 
         for code, status, label in (
             ("carrier-invoice", carrier.get("bol_invoice_status"), "Carrier differs between BOL and Invoice."),

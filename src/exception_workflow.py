@@ -15,7 +15,9 @@ Lifecycle
 
     Open -> In review -> Resolved
                       -> Dismissed
-    Resolved / Dismissed -> Open (reopen)
+                      -> Disputed (raised with the carrier) -> Resolved / Waived
+                      -> Waived (the difference accepted as it is)
+    Resolved / Dismissed / Waived / Disputed -> Open (reopen)
 
     With approval switched on (review_store.Policy.require_approval) a
     resolution or dismissal waits for an administrator, who approves it
@@ -23,9 +25,13 @@ Lifecycle
 
 Permissions
 
-    reviewer   view; assign to self; start; note; resolve; reopen
-    admin      everything: also assign to anyone, dismiss, approve or
-               reject, and verify the history chain
+    reviewer   view; assign to self; start; note; resolve; dispute; reopen
+    admin      everything: also assign to anyone, dismiss, waive, approve
+               or reject, and verify the history chain
+
+    Disputing and waiving need a reason. Waiving accepts a financial
+    difference, so only an administrator may do it, and with approval
+    switched on it waits for a second administrator like a resolution.
 
     An exception assigned to someone else can only be started or
     resolved by its assignee or an administrator.
@@ -44,11 +50,13 @@ from review_store import (
     EVENT_APPROVE,
     EVENT_ASSIGN,
     EVENT_DISMISS,
+    EVENT_DISPUTE,
     EVENT_NOTE,
     EVENT_REJECT,
     EVENT_REOPEN,
     EVENT_RESOLVE,
     EVENT_START,
+    EVENT_WAIVE,
     OPEN,
     RESOLVED,
     ReviewError,
@@ -167,6 +175,26 @@ class ExceptionWorkflow:
         return self.store.apply(exception, EVENT_DISMISS, actor_of(principal),
                                 note=note, evidence=evidence)
 
+    def dispute(self, principal, exception, note, evidence=()):
+        """Raises the exception with the carrier; the reason is required."""
+
+        require(principal, authz.EXCEPTIONS_UPDATE)
+
+        row = self.current(exception)
+        self.check_owner(principal, row)
+
+        return self.store.apply(exception, EVENT_DISPUTE, actor_of(principal),
+                                note=note, evidence=evidence)
+
+    def waive(self, principal, exception, note, evidence=()):
+        """Accepts the difference as it is (administrators); the reason is required."""
+
+        require(principal, authz.EXCEPTIONS_WAIVE)
+        self.current(exception)
+
+        return self.store.apply(exception, EVENT_WAIVE, actor_of(principal),
+                                note=note, evidence=evidence)
+
     def reopen(self, principal, exception, note):
 
         require(principal, authz.EXCEPTIONS_REOPEN)
@@ -217,13 +245,19 @@ class ExceptionWorkflow:
 
             actions.append(EVENT_NOTE)
 
-            if status == "in_review" and mine:
+            if status in ("in_review", "disputed") and mine:
                 actions.append(EVENT_RESOLVE)
+
+            if status in (OPEN, "in_review") and mine:
+                actions.append(EVENT_DISPUTE)
 
         if status in (OPEN, "in_review") and principal.can(authz.EXCEPTIONS_DISMISS):
             actions.append(EVENT_DISMISS)
 
-        if status in (RESOLVED, DISMISSED) and principal.can(authz.EXCEPTIONS_REOPEN):
+        if status in (OPEN, "in_review", "disputed") and principal.can(authz.EXCEPTIONS_WAIVE):
+            actions.append(EVENT_WAIVE)
+
+        if status in (RESOLVED, DISMISSED, "waived", "disputed") and principal.can(authz.EXCEPTIONS_REOPEN):
             actions.append(EVENT_REOPEN)
 
         if row.get("approval_state") == "pending" and principal.can(authz.EXCEPTIONS_APPROVE):

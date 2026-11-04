@@ -315,11 +315,23 @@ def test_a_corrected_date_is_used_by_the_delivery_audit(rig):
 
 def test_a_field_no_calculation_consumes_has_no_effect_and_says_so(rig):
     before = results(rig)
-    correction = propose(rig, extract(rig, BOL_A), "weight", "13,000 lbs")
+    correction = propose(rig, extract(rig, BOL_A), "equipment", "53 ft dry van")
     outcome = approve(rig, correction["id"])
 
     assert outcome["recompute"] == {"status": "no_calculation_consumes_this_field"} and results(rig) == before
+    assert store_of(rig).effective(correction["extraction_id"])["equipment"]["value"] == "53 ft dry van"
+
+
+def test_a_field_only_the_freight_audit_reads_is_recalculated_and_leaves_the_reconciliation_alone(rig):
+    # The BOL weight is compared with the rate confirmation's by the freight audit (freight_audit.CONSUMED_FIELDS)
+    before = results(rig)
+    correction = propose(rig, extract(rig, BOL_A), "weight", "13,000 lbs")
+    outcome = approve(rig, correction["id"])
+
+    assert outcome["recompute"]["status"] != "no_calculation_consumes_this_field"
+    assert results(rig) == before
     assert store_of(rig).effective(correction["extraction_id"])["weight"]["value"] == {"amount": 13000.0, "unit": "lb"}
+    assert [c["field"] for c in rig.state.service.shipment(A)["freight_audit"]["corrections_applied"]] == ["weight"]
 
 
 # ---- audit inputs: provenance of consumed values ---------------------------------------------------------------------------
