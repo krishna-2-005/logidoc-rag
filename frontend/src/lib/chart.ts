@@ -34,9 +34,11 @@ export const REVIEW_COLOURS: Record<string, string> = {
   in_review: CHART.warn,
   resolved: CHART.ok,
   dismissed: CHART.neutral,
+  disputed: CHART.bad,
+  waived: CHART.neutral,
 }
 
-export const REVIEW_ORDER = ["open", "in_review", "resolved", "dismissed"]
+export const REVIEW_ORDER = ["open", "in_review", "disputed", "resolved", "dismissed", "waived"]
 
 /** Categorical slots for series that are identities (carriers, line series), in a fixed order. */
 export const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"] as const

@@ -104,12 +104,23 @@ export const HINTS: Record<Kind, string> = {
  * mirrors audit_inputs.TARGETS on the server, for explanation only: the server
  * decides what an audit reads.
  */
+const FREIGHT = "the freight audit"
+
+// Mirrors audit_inputs.TARGETS and freight_audit.CONSUMED_FIELDS on the server
 const CONSUMERS: Record<string, string> = {
   "BOL.piece_count": "the quantity audit",
   "POD.delivered_pieces": "the quantity audit",
   "BOL.expected_delivery_date": "the delivery audit",
-  "POD.delivery_date": "the delivery audit",
-  "INVOICE.invoice_total": "the invoice audit and the financial exposure",
+  "POD.delivery_date": "the delivery audit and the freight audit",
+  "INVOICE.invoice_total": "the invoice audit, the financial exposure and the freight audit",
+  ...Object.fromEntries(
+    [
+      ...["agreed_rate", "fuel_surcharge", "carrier", "origin", "destination", "pickup_date", "delivery_date", "weight", "currency", "payment_terms"].map((f) => `RATE_CONFIRMATION.${f}`),
+      ...["invoice_number", "carrier", "origin", "destination", "currency", "payment_terms"].map((f) => `INVOICE.${f}`),
+      ...["carrier", "origin", "destination", "pickup_date", "weight"].map((f) => `BOL.${f}`),
+      "POD.carrier",
+    ].map((key) => [key, FREIGHT]),
+  ),
 }
 
 export const consumerOf = (documentType: string, field: string): string | null => CONSUMERS[`${documentType}.${field}`] ?? null

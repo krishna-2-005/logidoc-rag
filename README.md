@@ -350,14 +350,19 @@ front of the app; `authz.Principal` is the one interface to connect it to.
 
 ### Exception workflow (`src/review_store.py`, `src/exception_workflow.py`)
 
-`Open -> In review -> Resolved | Dismissed`, and back to `Open` by reopening.
-Rules (enforced inside the database transaction, not only in the screen):
+`Open -> In review -> Resolved | Dismissed | Disputed | Waived`, a dispute
+then `-> Resolved | Waived`, and back to `Open` by reopening. *Disputed* means
+the difference is raised with the carrier and still unsettled; *Waived* means
+a real difference is accepted as it is. Rules (enforced inside the database
+transaction, not only in the screen):
 
 | Action | Rule |
 |---|---|
 | Start review | Only an open exception; assigns it to you unless already assigned |
-| Resolve | Only from *In review*; a note (default 10+ characters) **and** at least one evidence reference |
+| Resolve | From *In review* or *Disputed*; a note (default 10+ characters) **and** at least one evidence reference |
 | Dismiss | Administrators only; a reason note |
+| Dispute | From *Open* or *In review*, by its assignee (or an administrator); the dispute reason (what the carrier is told) |
+| Waive | Administrators only (`exceptions.waive`: accepting a financial difference); from *Open*, *In review* or *Disputed*; the reason it is accepted; with approval on, it waits for a second administrator like a resolution |
 | Reopen | A note |
 | Approve / reject | Only with `LOGIDOC_REQUIRE_APPROVAL=1`; administrators; never the person who resolved it (the single `local-dev` user excepted); rejecting needs a note |
 
@@ -367,8 +372,23 @@ role and whether they signed in. `review_events` cannot be updated or deleted
 (triggers) and the events form a hash chain (`verify_integrity`,
 Administration). The chain detects accidental or naive edits; it cannot
 protect against someone who can rewrite the whole database file. Resolving
-never changes a reconciliation result, and a resolved exception is reopened
-if the audited values change.
+never changes a reconciliation result, and a resolved, dismissed or waived
+exception is reopened if the audited values change (a disputed one keeps its
+state and is marked for a recheck).
+
+The Exception Center lists, from the current audit, each exception's
+severity, financial impact (only when an amount is determinable: a freight
+audit line, or the invoice arithmetic difference; never 0 for unknown),
+recommended action, audit outcome and evidence; it filters by state,
+severity and category, and searches the shipment, the exception and the
+shipment's invoice numbers.
+
+The review database is upgraded from version 2 to 3 on first start (the
+status column admits the two new states; SQLite cannot change a CHECK in
+place, so `exception_reviews` is rebuilt with every row copied unchanged, in
+one transaction, and `review_events` is not touched). A database that holds
+reviews is first copied whole to `audit_reviews.before-v3.sqlite3` beside
+it.
 
 Server-side settings only: `LOGIDOC_REQUIRE_APPROVAL`, `LOGIDOC_MIN_NOTE_LENGTH`.
 
@@ -412,9 +432,26 @@ by `GET /api/shipments/{id}`.
   issue (`shipment|freight-...`), and its review history is kept as for
   every exception. Without a rate confirmation no freight exception is
   raised.
-- **Limits.** It reads the documents as printed: approved extraction
-  corrections are applied to the reconciliation, not yet to the freight
-  audit (the shipment says so when it has any). Weights in different units
+- **Approved corrections.** An approved extraction correction (proposed by a
+  reviewer with a reason, approved by a different administrator) is the value
+  the freight audit uses for that document's field, never overwriting the
+  extraction: the latest decision of a field wins, and a correction made on
+  another version of the file is not applied (and is listed, with why). The
+  result lists each correction used with the extracted and the approved
+  value, and marks the contract amounts that came from one. Approving a
+  correction of a field the freight audit reads (`CONSUMED_FIELDS`) records a
+  recalculated run, like the reconciliation's fields. Invoice line items are
+  not correctable fields yet.
+- **Reproducibility.** Each result says what it was computed from: every
+  document with its SHA-256 and extractor version and the field values used,
+  the corrections used, the tolerances, every charge and check with its
+  evidence, and when it was audited. Recording an audit run (Audit History)
+  stores the freight audit of every snapshot it writes, whole, in
+  `freight_audit_records` (append-only, triggers); the shipment's Audit
+  history reopens it exactly as recorded. A new audit never overwrites an
+  earlier one; a run that finds nothing changed writes no new snapshot. The
+  history database is upgraded from version 3 to 4 (one new table).
+- **Limits.** Weights in different units
   are not converted. Accessorial evidence is a text search for the charge's
   name in the BOL, POD and rate confirmation, shown to the reviewer, not a
   proof that the service was performed.

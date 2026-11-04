@@ -240,7 +240,7 @@ describe("Exception Center summary", () => {
 
     const severity = await screen.findByLabelText("Exceptions by severity: 2 high, 1 medium")
     expect(severity).toBeInTheDocument()
-    expect(screen.getByLabelText("Exceptions by review state: 2 open, 1 in review, 0 resolved, 0 dismissed")).toBeInTheDocument()
+    expect(screen.getByLabelText("Exceptions by review state: 2 open, 1 in review, 0 disputed, 0 resolved, 0 dismissed, 0 waived")).toBeInTheDocument()
     expect(screen.getAllByText("High").length).toBeGreaterThan(0)
 
     await userEvent.click(screen.getByRole("button", { name: "Invoice mismatch" }))

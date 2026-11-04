@@ -13,6 +13,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
+import audit_explanations as explanations
 import audit_history
 import authz
 import trend_analytics as trends
@@ -26,12 +27,12 @@ router = APIRouter(prefix="/api")
 
 ViewAudit = Depends(require(authz.EXCEPTIONS_VIEW))
 
-ACTIONS = ("assign", "start", "note", "resolve", "dismiss", "reopen", "approve", "reject")
+ACTIONS = ("assign", "start", "note", "resolve", "dismiss", "dispute", "waive", "reopen", "approve", "reject")
 
 
 class ActionBody(BaseModel):
 
-    action: Literal["assign", "start", "note", "resolve", "dismiss", "reopen", "approve", "reject"]
+    action: Literal["assign", "start", "note", "resolve", "dismiss", "dispute", "waive", "reopen", "approve", "reject"]
     note: str | None = Field(default=None, max_length=2000)
     evidence: list[str] = Field(default_factory=list, max_length=10)
     assignee: str | None = Field(default=None, max_length=64)
@@ -84,11 +85,14 @@ def exceptions(
     search: str = Query("", max_length=100), assignee: str | None = Query(None, max_length=64),
     unassigned: bool = False, status: list[str] = Query(default=[]), category: list[str] = Query(default=[]),
     min_age_days: int | None = Query(None, ge=0, le=100000), max_age_days: int | None = Query(None, ge=0, le=100000),
-    pending_approval: bool = False, include_absent: bool = False,
+    pending_approval: bool = False, include_absent: bool = False, severity: list[str] = Query(default=[]),
 ):
     """
     The exception queue with the filters of the screen. Reading it records
-    newly detected exceptions as open, like the dashboard.
+    newly detected exceptions as open, like the dashboard. search matches
+    the shipment, the exception and the shipment's invoice numbers; each row
+    carries its severity, financial impact (when determinable), recommended
+    action and evidence from the current audit.
     """
 
     if not state.service.has_documents():
@@ -106,23 +110,50 @@ def exceptions(
 
     detected = {item["exception_key"]: item for item in state.service.exceptions()}
     flow = workflow_of(state)
+    snapshot = state.service.snapshot()
+    numbers = invoice_numbers(snapshot)
+    wanted = search.strip().lower()
 
+    # The search is applied here so it can also match invoice numbers
     rows = flow.queue(
-        principal, search=search, assignee=assignee, unassigned=unassigned, statuses=tuple(status),
+        principal, search="", assignee=assignee, unassigned=unassigned, statuses=tuple(status),
         categories=tuple(category), min_age_days=min_age_days, max_age_days=max_age_days,
         pending_approval=pending_approval, include_absent=include_absent,
     )
 
+    if wanted:
+        rows = [
+            row for row in rows
+            if wanted in str(row["shipment_id"]).lower() or wanted in str(row["exception_key"]).lower()
+            or any(wanted in number.lower() for number in numbers.get(row["shipment_key"], ()))
+        ]
+
+    if severity:
+        rows = [row for row in rows if detected.get(row["exception_key"], {}).get("severity") in set(severity)]
+
+    next_steps = {
+        item["exception_key"]: item["next_step"]
+        for item in explanations.explain_all(snapshot, list(detected.values()))
+    }
+
     store = state.service.review_store()
+
+    def current(row, name):
+        return detected.get(row["exception_key"], {}).get(name)
 
     return {
         "exceptions": [
             {
                 **row,
                 "detected": row["exception_key"] in detected,
-                "description": detected.get(row["exception_key"], {}).get("description"),
-                "severity": detected.get(row["exception_key"], {}).get("severity"),
-                "kind": detected.get(row["exception_key"], {}).get("kind"),
+                "description": current(row, "description"),
+                "severity": current(row, "severity"),
+                "kind": current(row, "kind"),
+                "financial_impact": current(row, "financial_impact"),
+                "recommended_action": current(row, "recommended_action") or next_steps.get(row["exception_key"]),
+                "audit_outcome": current(row, "audit_outcome"),
+                "evidence": current(row, "evidence") or [],
+                "invoice_numbers": sorted(numbers.get(row["shipment_key"], ())),
                 "allowed_actions": flow.allowed_actions(principal, row) if row["exception_key"] in detected else [],
             }
             for row in rows
@@ -132,6 +163,21 @@ def exceptions(
         "categories": sorted({row["category"] for row in store.states().values()}),
         "statuses": list(STATUSES),
     }
+
+
+def invoice_numbers(snapshot):
+    """{shipment_key: {invoice numbers}} read from each shipment's invoices (its freight audit inputs)."""
+
+    found = {}
+
+    for item in snapshot["shipments"]:
+        for document in (item.get("freight_audit") or {}).get("inputs") or []:
+            field = (document.get("fields") or {}).get("invoice_number") or {}
+
+            if document.get("document_type") == "INVOICE" and field.get("state") == "EXTRACTED" and field.get("value"):
+                found.setdefault(item["shipment_key"], set()).add(str(field["value"]))
+
+    return found
 
 
 @router.get("/exceptions/activity")
@@ -184,6 +230,10 @@ def exception_action(
             row = flow.resolve(principal, item, body.note, body.evidence)
         elif body.action == "dismiss":
             row = flow.dismiss(principal, item, body.note, body.evidence)
+        elif body.action == "dispute":
+            row = flow.dispute(principal, item, body.note, body.evidence)
+        elif body.action == "waive":
+            row = flow.waive(principal, item, body.note, body.evidence)
         elif body.action == "reopen":
             row = flow.reopen(principal, item, body.note)
         elif body.action == "approve":

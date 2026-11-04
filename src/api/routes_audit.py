@@ -44,7 +44,7 @@ def review_counts(exceptions):
 
     counts = Counter(item["review_status"] for item in exceptions)
 
-    return {status: counts.get(status, 0) for status in ("open", "in_review", "resolved", "dismissed")}
+    return {status: counts.get(status, 0) for status in ("open", "in_review", "disputed", "resolved", "dismissed", "waived")}
 
 
 # ------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { ArrowRight } from "lucide-react"
+import { FreightAuditBody } from "@/components/common/FreightAuditPanel"
 import { StatusBadge } from "@/components/common/StatusBadge"
 import { dateTime, NA } from "@/lib/format"
 import type { SnapshotChanges, TimelineEntry } from "@/lib/types"
@@ -93,6 +94,15 @@ export function Timeline({ entries }: { entries: TimelineEntry[] }) {
             </span>
           </div>
           <ChangeSummary changes={changes} />
+          {snapshot.freight_audit && snapshot.freight_audit.outcome && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-sm font-medium text-primary">
+                Freight audit as recorded: <StatusBadge status={snapshot.freight_audit.outcome} />
+              </summary>
+              <p className="my-2 text-xs text-muted-foreground">Exactly as it was recorded with this snapshot; later corrections or documents do not change it.</p>
+              <FreightAuditBody audit={snapshot.freight_audit} label={`Recorded freight audit of snapshot ${snapshot.id}`} />
+            </details>
+          )}
         </li>
       ))}
     </ol>

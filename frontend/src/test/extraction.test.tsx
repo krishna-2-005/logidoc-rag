@@ -215,7 +215,8 @@ describe("extraction panel: provenance and status", () => {
     await panelFor(REVIEWER)
 
     expect(within(rowOf("Delivered pieces")).getByText(/Read by the quantity audit once a correction is approved/)).toBeInTheDocument()
-    expect(within(rowOf("Carrier")).queryByText(/Read by/)).toBeNull()
+    // The carrier is compared with the rate confirmation by the freight audit
+    expect(within(rowOf("Carrier")).getByText(/Read by the freight audit once a correction is approved/)).toBeInTheDocument()
   })
 
   it("explains a partial or unreadable extraction and its review reasons", async () => {

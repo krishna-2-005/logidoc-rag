@@ -24,6 +24,8 @@ export const ACTION_LABELS: Record<WorkflowAction, string> = {
   note: "Add a note or evidence",
   resolve: "Resolve",
   dismiss: "Dismiss",
+  dispute: "Dispute with the carrier",
+  waive: "Waive",
   reopen: "Reopen",
   approve: "Approve",
   reject: "Reject",
@@ -38,6 +40,8 @@ const EVENT_LABELS: Record<string, string> = {
   note: "Note added",
   resolve: "Resolved",
   dismiss: "Dismissed",
+  dispute: "Disputed",
+  waive: "Waived",
   reopen: "Reopened",
   approve: "Approved",
   reject: "Rejected",
@@ -62,6 +66,10 @@ export function validateAction(action: WorkflowAction, note: string, evidence: s
       return null
     case "dismiss":
       return text.length < minNote ? `Dismissing needs a reason of at least ${minNote} characters.` : null
+    case "dispute":
+      return text.length < minNote ? `Disputing needs a reason of at least ${minNote} characters.` : null
+    case "waive":
+      return text.length < minNote ? `Waiving needs a reason of at least ${minNote} characters.` : null
     case "reopen":
       return text.length < minNote ? `Reopening needs a note of at least ${minNote} characters.` : null
     case "reject":
@@ -194,10 +202,10 @@ function ActionForm({ detail, assignees }: { detail: ExceptionDetail; assignees:
 
       {action !== "start" && action !== "approve" && action !== "assign" ? (
         <div className="space-y-1.5">
-          <Label htmlFor="note">{action === "dismiss" ? "Reason for dismissing" : action === "resolve" ? "Resolution note (what was done)" : action === "reject" ? "Why it is rejected" : action === "reopen" ? "Why it is reopened" : "Note"}</Label>
+          <Label htmlFor="note">{action === "dismiss" ? "Reason for dismissing" : action === "dispute" ? "Dispute reason (what the carrier is told)" : action === "waive" ? "Reason for waiving (why the difference is accepted)" : action === "resolve" ? "Resolution note (what was done)" : action === "reject" ? "Why it is rejected" : action === "reopen" ? "Why it is reopened" : "Note"}</Label>
           <Textarea id="note" value={note} onChange={(event) => setNote(event.target.value)} aria-describedby="note-help" />
           <p id="note-help" className="text-xs text-muted-foreground">
-            {["resolve", "dismiss", "reopen", "reject"].includes(action) ? `At least ${minNote} characters. Recorded with your name and the time.` : "Optional when you add evidence."}
+            {["resolve", "dismiss", "dispute", "waive", "reopen", "reject"].includes(action) ? `At least ${minNote} characters. Recorded with your name and the time.` : "Optional when you add evidence."}
           </p>
         </div>
       ) : (
@@ -207,7 +215,7 @@ function ActionForm({ detail, assignees }: { detail: ExceptionDetail; assignees:
         </div>
       )}
 
-      {(action === "resolve" || action === "note" || action === "dismiss") && (
+      {(action === "resolve" || action === "note" || action === "dismiss" || action === "dispute" || action === "waive") && (
         <div className="space-y-1.5">
           <Label htmlFor="evidence">Evidence references (one per line)</Label>
           <Textarea id="evidence" value={evidence} onChange={(event) => setEvidence(event.target.value)} className="min-h-[64px]" placeholder={"INVOICE_SHJ-2026-001.pdf p.1\ncredit memo CM-77"} />
@@ -227,6 +235,11 @@ function ActionForm({ detail, assignees }: { detail: ExceptionDetail; assignees:
       </Button>
     </form>
   )
+}
+
+export function impactText(impact: { amount: number; currency: string | null }) {
+  const amount = impact.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return impact.currency ? `${impact.currency} ${amount}` : amount
 }
 
 function Panel({ item, assignees }: { item: ExceptionListItem; assignees: string[] }) {
@@ -250,6 +263,33 @@ function Panel({ item, assignees }: { item: ExceptionListItem; assignees: string
       </CardHeader>
       <CardContent className="space-y-6">
         {item.description && <p className="text-sm">{item.description}</p>}
+
+        <dl className="grid gap-3 text-sm sm:grid-cols-2" aria-label="Exception facts">
+          <div>
+            <dt className="text-xs text-muted-foreground">Financial impact</dt>
+            <dd>{item.financial_impact ? `${impactText(item.financial_impact)} (${item.financial_impact.basis})` : "Not determinable from the documents"}</dd>
+          </div>
+          {item.audit_outcome && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Freight audit outcome</dt>
+              <dd>
+                <StatusBadge status={item.audit_outcome} />
+              </dd>
+            </div>
+          )}
+          {item.recommended_action && (
+            <div className="sm:col-span-2">
+              <dt className="text-xs text-muted-foreground">Recommended action</dt>
+              <dd>{item.recommended_action}</dd>
+            </div>
+          )}
+          {(item.invoice_numbers ?? []).length > 0 && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Invoice</dt>
+              <dd>{item.invoice_numbers.join(", ")}</dd>
+            </div>
+          )}
+        </dl>
 
         {detail.isPending && <LoadingBlock rows={3} label="Loading exception" />}
         {detail.isError && <ErrorState error={detail.error} onRetry={() => detail.refetch()} title="This exception could not be loaded" />}
@@ -358,6 +398,7 @@ export function Exceptions() {
   // The Overview's review queue opens this list by state (?status=open) or category (?category=)
   const [status, setStatus] = useState(params.get("status") ?? "")
   const [category, setCategory] = useState(params.get("category") ?? "")
+  const [severity, setSeverity] = useState(params.get("severity") ?? "")
   const [older, setOlder] = useState("")
   const [newer, setNewer] = useState("")
   const [waiting, setWaiting] = useState(false)
@@ -371,6 +412,7 @@ export function Exceptions() {
     unassigned: assignee === "__none__",
     status: status ? [status] : [],
     category: category ? [category] : [],
+    severity: severity ? [severity] : [],
     min_age_days: older ? Number(older) : undefined,
     max_age_days: newer ? Number(newer) : undefined,
     pending_approval: waiting,
@@ -380,13 +422,14 @@ export function Exceptions() {
   const selectedKey = params.get("key")
   const selected = list.data?.exceptions.find((item) => item.exception_key === selectedKey) ?? null
 
-  const filtered = !!(debounced || assignee || status || category || older || newer || waiting)
+  const filtered = !!(debounced || assignee || status || category || severity || older || newer || waiting)
 
   const clear = () => {
     setSearch("")
     setAssignee("")
     setStatus("")
     setCategory("")
+    setSeverity("")
     setOlder("")
     setNewer("")
     setWaiting(false)
@@ -404,8 +447,8 @@ export function Exceptions() {
 
       <form role="search" aria-label="Filter exceptions" className="mb-4 grid gap-3 rounded-lg border bg-card p-4 shadow-card sm:grid-cols-2 xl:grid-cols-6" onSubmit={(event) => event.preventDefault()}>
         <div className="space-y-1.5">
-          <Label htmlFor="ex-search">Search shipment</Label>
-          <Input id="ex-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="SHJ-2026-001" />
+          <Label htmlFor="ex-search">Search shipment or invoice</Label>
+          <Input id="ex-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="SHJ-2026-001 or INV-101" />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="ex-assignee">Assignee</Label>
@@ -424,7 +467,18 @@ export function Exceptions() {
           <Label htmlFor="ex-status">State</Label>
           <Select id="ex-status" value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="">Any state</option>
-            {(list.data?.statuses ?? ["open", "in_review", "resolved", "dismissed"]).map((item) => (
+            {(list.data?.statuses ?? ["open", "in_review", "disputed", "resolved", "dismissed", "waived"]).map((item) => (
+              <option key={item} value={item}>
+                {label(item)}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ex-severity">Severity</Label>
+          <Select id="ex-severity" value={severity} onChange={(event) => setSeverity(event.target.value)}>
+            <option value="">Any severity</option>
+            {SEVERITY_ORDER.map((item) => (
               <option key={item} value={item}>
                 {label(item)}
               </option>
@@ -485,6 +539,7 @@ export function Exceptions() {
                   <TableHead>Shipment</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Severity</TableHead>
+                  <TableHead className="text-right">Financial impact</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead>Assignee</TableHead>
                   <TableHead className="text-right">Age</TableHead>
@@ -501,8 +556,10 @@ export function Exceptions() {
                     <TableCell>
                       {item.category}
                       {!item.detected && <span className="block text-xs text-muted-foreground">no longer detected</span>}
+                      {item.recommended_action && <span className="mt-0.5 block text-xs text-muted-foreground">Next: {item.recommended_action}</span>}
                     </TableCell>
                     <TableCell>{item.severity ? <StatusBadge status={item.severity} /> : <span className="text-muted-foreground">{NA}</span>}</TableCell>
+                    <TableCell className="tabular text-right">{item.financial_impact ? impactText(item.financial_impact) : <span className="text-muted-foreground">{NA}</span>}</TableCell>
                     <TableCell className="space-x-1">
                       <StatusBadge status={item.status} />
                       {item.approval_state === "pending" && <StatusBadge status="pending" />}

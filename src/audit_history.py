@@ -65,7 +65,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 VERIFIED = "verified"
 UNAVAILABLE = "unavailable"
@@ -205,7 +205,7 @@ MIGRATION_V2 = (
 # Fields added after version 1. While they are empty they are left out of
 # the digest, so history recorded before they existed does not look
 # changed the first time it is audited again.
-OPTIONAL_DIGEST_FIELDS = ("carrier", "currency", "applied_corrections")
+OPTIONAL_DIGEST_FIELDS = ("carrier", "currency", "applied_corrections", "freight_digest")
 
 # Version 3: what every run consumed, and which run superseded which. Only new
 # tables and one new column: no row is rewritten, so the append-only triggers
@@ -261,6 +261,44 @@ MIGRATION_V3 = (
         for action in ("update", "delete")
     ],
 )
+
+# Version 4: the freight audit of every snapshot written from now on, whole
+# (documents and their SHA-256, the field values and approved corrections
+# used, the tolerances, every charge and check with its evidence, the
+# outcome), so a recorded audit can be reopened exactly as it was. A new
+# table only; earlier snapshots have none ("not recorded", never rebuilt).
+MIGRATION_V4 = (
+    """CREATE TABLE IF NOT EXISTS freight_audit_records (
+        snapshot_id  INTEGER PRIMARY KEY REFERENCES shipment_snapshots (id),
+        shipment_key TEXT NOT NULL,
+        outcome      TEXT,
+        audited_at   TEXT,
+        recorded_at  TEXT NOT NULL,
+        payload      TEXT NOT NULL
+    )""",
+    *[
+        f"CREATE TRIGGER IF NOT EXISTS freight_audit_records_no_{action} BEFORE {action.upper()} "
+        "ON freight_audit_records BEGIN SELECT RAISE(ABORT, 'audit history is append-only'); END"
+        for action in ("update", "delete")
+    ],
+)
+
+
+def freight_digest(audit):
+    """
+    The hash of a freight audit as it decides (its time left out), so a
+    changed contract, invoice or approved correction writes a new snapshot.
+    None without a rate confirmation: then nothing is compared with a
+    contract, and history recorded before the freight audit existed does not
+    look changed.
+    """
+
+    if not audit or not (audit.get("documents") or {}).get("contract"):
+        return None
+
+    payload = {key: value for key, value in audit.items() if key != "audited_at"}
+
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 
@@ -373,6 +411,7 @@ def snapshot_record(shipment, exceptions):
         # Only when an approved correction was consumed: left out of the digest otherwise,
         # so history recorded without corrections does not look changed
         "applied_corrections": (shipment.get("inputs") or {}).get("applied_correction_ids") or None,
+        "freight_digest": freight_digest(shipment.get("freight_audit")),
         "discrepancy_count": len(result.get("discrepancies") or []) if success else 0,
         "review_count": len(result.get("review_items") or []) if success else 0,
         "audit_states": audit_states(result),
@@ -394,6 +433,9 @@ def snapshot_record(shipment, exceptions):
 
     record["digest"] = digest(record)
 
+    # Stored beside the snapshot, never part of its digest (freight_digest is)
+    record["freight_audit"] = shipment.get("freight_audit")
+
     return record
 
 
@@ -405,7 +447,7 @@ def digest(record):
 
     payload = {
         key: value for key, value in record.items()
-        if key != "digest" and not (key in OPTIONAL_DIGEST_FIELDS and value is None)
+        if key not in ("digest", "freight_audit") and not (key in OPTIONAL_DIGEST_FIELDS and value is None)
     }
 
     return hashlib.sha256(
@@ -578,7 +620,7 @@ class HistoryStore:
         """
 
         # Looked up when called, so the steps can be replaced in a test
-        steps = {2: MIGRATION_V2, 3: MIGRATION_V3}
+        steps = {2: MIGRATION_V2, 3: MIGRATION_V3, 4: MIGRATION_V4}
         connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
 
         try:
@@ -801,6 +843,16 @@ class HistoryStore:
 
         snapshot_id = cursor.lastrowid
 
+        audit = record.get("freight_audit")
+
+        if audit:
+            connection.execute(
+                "INSERT INTO freight_audit_records (snapshot_id, shipment_key, outcome, audited_at, recorded_at, payload) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (snapshot_id, record["shipment_key"], audit.get("outcome"), audit.get("audited_at"), at,
+                 json.dumps(audit, sort_keys=True, default=str)),
+            )
+
         for finding in record["findings"]:
 
             connection.execute(
@@ -856,6 +908,12 @@ class HistoryStore:
                         (row["id"],),
                     )
                 ]
+
+                # The freight audit exactly as recorded (None before version 4 or without one)
+                freight = connection.execute(
+                    "SELECT payload FROM freight_audit_records WHERE snapshot_id = ?", (row["id"],)
+                ).fetchone()
+                snapshot["freight_audit"] = json.loads(freight["payload"]) if freight else None
 
                 result.append(snapshot)
 

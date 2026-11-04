@@ -42,6 +42,8 @@ const LOOKS: Record<string, Look> = {
   in_review: { tone: "warn", icon: <Eye />, text: "In review" },
   resolved: { tone: "ok", icon: <CheckCircle2 />, text: "Resolved" },
   dismissed: { tone: "neutral", icon: <PauseCircle />, text: "Dismissed" },
+  disputed: { tone: "bad", icon: <AlertTriangle />, text: "Disputed" },
+  waived: { tone: "neutral", icon: <CheckCircle2 />, text: "Waived" },
   pending: { tone: "warn", icon: <Clock />, text: "Awaiting approval" },
   approved: { tone: "ok", icon: <ShieldCheck />, text: "Approved" },
   rejected: { tone: "bad", icon: <XCircle />, text: "Rejected" },

@@ -606,7 +606,7 @@ def test_a_version_1_database_is_migrated_and_keeps_its_data(tmp_path):
     assert event["actor"] == "Pat" and event["authenticated"] == 0 and event["event_hash"] is None
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("SELECT version FROM schema_info").fetchone()[0] == 2
+        assert connection.execute("SELECT version FROM schema_info").fetchone()[0] == review_store.SCHEMA_VERSION
 
     # The migration is idempotent
     assert ReviewStore(path).states() == store.states()
@@ -643,9 +643,9 @@ def test_a_newer_schema_is_refused(tmp_path):
     store = ReviewStore(tmp_path / "r.sqlite3")
 
     with sqlite3.connect(store.path) as connection:
-        connection.execute("UPDATE schema_info SET version = 3")
+        connection.execute("UPDATE schema_info SET version = ?", (review_store.SCHEMA_VERSION + 1,))
 
-    with pytest.raises(ReviewError, match="schema version 3"):
+    with pytest.raises(ReviewError, match=f"schema version {review_store.SCHEMA_VERSION + 1}"):
         ReviewStore(store.path)
 
 

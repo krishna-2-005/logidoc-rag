@@ -159,7 +159,7 @@ export interface ReviewRow {
   shipment_key: string
   shipment_id: string
   category: string
-  status: "open" | "in_review" | "resolved" | "dismissed"
+  status: "open" | "in_review" | "resolved" | "dismissed" | "disputed" | "waived"
   assignee: string | null
   assigned_at: string | null
   evidence_refs: string[]
@@ -174,13 +174,25 @@ export interface ReviewRow {
   age_days?: number
 }
 
-export type WorkflowAction = "assign" | "start" | "note" | "resolve" | "dismiss" | "reopen" | "approve" | "reject"
+export type WorkflowAction = "assign" | "start" | "note" | "resolve" | "dismiss" | "dispute" | "waive" | "reopen" | "approve" | "reject"
+
+/** The amount an exception puts in question, when the audit can determine one (never 0 for unknown) */
+export interface FinancialImpact {
+  amount: number
+  currency: string | null
+  basis: string
+}
 
 export interface ExceptionListItem extends ReviewRow {
   detected: boolean
   description: string | null
   severity: string | null
   kind: string | null
+  financial_impact: FinancialImpact | null
+  recommended_action: string | null
+  audit_outcome: string | null
+  evidence: string[]
+  invoice_numbers: string[]
   allowed_actions: WorkflowAction[]
 }
 
@@ -325,7 +337,7 @@ export interface SnapshotChanges {
 }
 
 export interface TimelineEntry {
-  snapshot: Snapshot & { runs: { run_id: number; created_at: string }[]; findings: Findings[] }
+  snapshot: Snapshot & { runs: { run_id: number; created_at: string }[]; findings: Findings[]; freight_audit?: FreightAudit | null }
   changes: SnapshotChanges
 }
 
@@ -372,6 +384,23 @@ export interface FreightAudit {
   checks: FreightCheck[]
   financial_impact: { currency: string | null; billed_above_contract: number; without_evidence: number; pending_review: number } | null
   tolerances: Record<string, { absolute: number; percent: number }>
+  /** Approved extraction corrections used, each with the value it replaced */
+  corrections_applied?: {
+    correction_id: number
+    file: string
+    document_type: string
+    field: string
+    original_state: string
+    original_value: unknown
+    corrected_value: unknown
+    proposed_by: string | null
+    approved_by: string | null
+    decided_at: string | null
+  }[]
+  corrections_ignored?: { correction_id: number; file: string; field: string; reason: string }[]
+  /** What the audit read: each document with its fingerprint */
+  inputs?: { file: string; sha256: string; document_type: string; status: string; extractor_version: string }[]
+  audited_at?: string
 }
 
 export interface ShipmentDetail {

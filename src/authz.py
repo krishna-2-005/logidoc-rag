@@ -40,6 +40,8 @@ EXCEPTIONS_ASSIGN_SELF = "exceptions.assign_self"
 EXCEPTIONS_ASSIGN_ANY = "exceptions.assign_any"
 EXCEPTIONS_UPDATE = "exceptions.update"
 EXCEPTIONS_DISMISS = "exceptions.dismiss"
+# Accepting a financial difference as it is (waiving an exception): administrators only
+EXCEPTIONS_WAIVE = "exceptions.waive"
 EXCEPTIONS_APPROVE = "exceptions.approve"
 EXCEPTIONS_REOPEN = "exceptions.reopen"
 
@@ -66,7 +68,7 @@ REVIEWER_PERMISSIONS = frozenset({
 })
 
 ADMIN_PERMISSIONS = REVIEWER_PERMISSIONS | frozenset({
-    EXCEPTIONS_ASSIGN_ANY, EXCEPTIONS_DISMISS, EXCEPTIONS_APPROVE,
+    EXCEPTIONS_ASSIGN_ANY, EXCEPTIONS_DISMISS, EXCEPTIONS_WAIVE, EXCEPTIONS_APPROVE,
     HISTORY_RECORD, INGESTION_WRITE, EXTRACTION_RUN, EXTRACTION_APPROVE,
     ADMIN_USERS, ADMIN_SETTINGS, ADMIN_MAINTENANCE,
 })
