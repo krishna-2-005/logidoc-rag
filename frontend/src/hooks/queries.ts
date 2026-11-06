@@ -1,38 +1,40 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { get, patch, post, postForm } from "@/lib/api"
 import type {
-  AuditRun,
-  Correction,
-  DecisionResult,
-  ExtractionDetail,
-  ExtractionList,
-  IntegrityReport,
-  PendingList,
-  RecomputeResult,
-  RunInputs,
-  Staleness,
   AssistantReply,
+  AuditRun,
+  CarrierDetail,
+  CarrierIntelligence,
   ChatReply,
   Completeness,
+  Correction,
+  DecisionResult,
   DocumentsPayload,
   ExceptionDetail,
   ExceptionList,
   Exposure,
+  ExtractionDetail,
+  ExtractionList,
   IngestionRecord,
   IngestionRegister,
+  IntegrityReport,
   Overview,
+  PendingList,
   PipelineTrace,
   Readiness,
+  RecomputeResult,
+  ReviewRow,
+  RunInputs,
   Session,
   Settings,
   ShipmentDetail,
   ShipmentList,
+  Staleness,
   TimelineEntry,
   Trends,
   UploadSummary,
   UserAccount,
   WorkflowAction,
-  ReviewRow,
 } from "@/lib/types"
 
 /**
@@ -125,6 +127,24 @@ export interface TrendFilters {
   to?: string
   min_sample?: number
 }
+
+export interface CarrierFilters {
+  start?: string
+  end?: string
+}
+
+/** GET /api/carriers: every carrier's figures for the shipments dated in the range */
+export const useCarriers = (filters: CarrierFilters) =>
+  useQuery({ queryKey: [AUDIT, "carriers", filters], queryFn: () => get<CarrierIntelligence>("/api/carriers", { ...filters }), placeholderData: (previous) => previous })
+
+/** GET /api/carriers/{key}: one carrier, its monthly trend and a page of its shipments */
+export const useCarrierDetail = (key: string | null, filters: CarrierFilters & { limit?: number }) =>
+  useQuery({
+    queryKey: [AUDIT, "carrier", key, filters],
+    queryFn: () => get<CarrierDetail>(`/api/carriers/${encodeURIComponent(key ?? "")}`, { ...filters }),
+    enabled: !!key,
+    placeholderData: (previous) => previous,
+  })
 
 export const useTrends = (filters: TrendFilters) =>
   useQuery({ queryKey: [AUDIT, "trends", filters], queryFn: () => get<Trends>("/api/trends", { ...filters }), placeholderData: (previous) => previous })

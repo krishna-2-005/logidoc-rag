@@ -299,6 +299,20 @@ class AuditService:
             plans = {}
             flags = {"unavailable": unavailable}
 
+            # Each shipment's approved corrections are read once, and that one list is
+            # used by both the reconciliation and the freight audit: a decision committed
+            # in between must never reach one of them and not the other (a torn audit).
+            # None: the store could not be read.
+            approved = {}
+
+            def approved_of(key):
+                if key not in approved:
+                    try:
+                        approved[key] = store.approved_corrections(key) if store is not None else None
+                    except sqlite3.DatabaseError:
+                        approved[key] = None
+                return approved[key]
+
             def reconcile(shipment_id, chunks=None, **kwargs):
 
                 # Only approved corrections of this shipment's own documents; with
@@ -307,10 +321,12 @@ class AuditService:
                 overrides, plan = {}, {}
 
                 if store is not None:
-                    try:
-                        overrides, plan = audit_inputs.build_overrides(store.approved_corrections(key), shipment_id, hashes)
-                    except sqlite3.DatabaseError:
+                    corrections = approved_of(key)
+
+                    if corrections is None:
                         flags["unavailable"] = True
+                    else:
+                        overrides, plan = audit_inputs.build_overrides(corrections, shipment_id, hashes)
 
                 plans[key] = plan
 
@@ -340,15 +356,7 @@ class AuditService:
                 for item in snapshot["shipments"]:
                     audit_inputs.mark_corrections_unavailable(item["inputs"])
 
-            def corrections_of(key):
-                if store is None:
-                    return None
-                try:
-                    return store.approved_corrections(key)
-                except sqlite3.DatabaseError:
-                    return None
-
-            add_freight_audits(snapshot, by_key, self.locations.raw_dir, corrections_of)
+            add_freight_audits(snapshot, by_key, self.locations.raw_dir, approved_of)
 
             # A correction the freight audit used is consumed by the audit like the
             # reconciliation's: history records it, staleness and supersession see it

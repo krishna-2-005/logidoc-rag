@@ -6,6 +6,7 @@ import { AppShell, Centered } from "@/components/layout/AppShell"
 import { useSession } from "@/hooks/queries"
 import { UNAUTHORIZED_EVENT } from "@/lib/api"
 import { Assistant } from "@/pages/Assistant"
+import { CarrierIntelligence } from "@/pages/CarrierIntelligence"
 import { Completeness } from "@/pages/Completeness"
 import { Corrections } from "@/pages/Corrections"
 import { Documents } from "@/pages/Documents"
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="invoices" element={<Invoices />} />
         <Route path="exceptions" element={<Exceptions />} />
         <Route path="history" element={<AuditHistory />} />
+        <Route path="carriers" element={<CarrierIntelligence />} />
         <Route path="corrections" element={<Corrections />} />
         <Route path="completeness" element={<Completeness />} />
         <Route path="reports" element={<Reports />} />

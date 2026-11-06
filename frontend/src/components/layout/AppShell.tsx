@@ -16,6 +16,7 @@ import {
   Search,
   Settings as SettingsIcon,
   TriangleAlert,
+  Truck,
   X,
   type LucideIcon,
 } from "lucide-react"
@@ -63,6 +64,7 @@ const NAV: { label: string; items: Item[] }[] = [
   {
     label: "Insights",
     items: [
+      { to: "/carriers", label: "Carrier Intelligence", icon: Truck },
       { to: "/history", label: "Audit History", icon: History },
       { to: "/reports", label: "Reports", icon: FileDown },
     ],

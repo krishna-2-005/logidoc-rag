@@ -533,7 +533,7 @@ def build_exceptions(snapshot):
                 discrepancy_text(result, "Invoice", "Invoice line items do not add up to the total."),
                 invoice.get("difference"), "USD (total - line items)", invoice.get("evidence"),
                 financial_impact=(
-                    {"amount": abs(invoice["difference"]), "currency": invoice.get("currency") or "USD",
+                    {"amount": abs(invoice["difference"]), "currency": invoice.get("currency"),
                      "basis": "the stated total differs from the sum of its line items by this amount"}
                     if known(invoice.get("difference")) else None
                 ))

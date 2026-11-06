@@ -512,3 +512,35 @@ def test_the_legacy_quick_form_asks_for_a_reason_before_disputing_or_waiving(tmp
 
     assert store.set_status(exception(), DISPUTED, reviewer="Pat", note="Raised with the carrier.")["status"] == DISPUTED
     assert store.set_status(exception(), WAIVED, reviewer="Pat", note="Accepted by finance.")["status"] == WAIVED
+
+
+def test_one_audit_reads_each_shipments_corrections_once(rig, monkeypatch):
+    """
+    A decision committed while an audit is computed must reach both the
+    reconciliation and the freight audit, or neither: the corrections are read
+    once per shipment. Here every read after the first sees a newly approved
+    correction, as if it were approved in between.
+    """
+
+    import extraction_store
+
+    correction = {"correction_id": 99, "decision_id": 99, "extraction_id": 1, "extractor_version": "x",
+                  "sha256": "x", "filename": RATE_FILE, "document_type": "RATE_CONFIRMATION",
+                  "field_name": "fuel_surcharge", "value": 200.0, "proposed_by": "bob", "approved_by": "dave",
+                  "decided_at": "now"}
+    calls = {}
+
+    def approved_corrections(self, key):
+        calls[key] = calls.get(key, 0) + 1
+        return [] if calls[key] == 1 else [correction]
+
+    extract(rig, RATE_FILE)      # the extraction store exists
+    monkeypatch.setattr(extraction_store.ExtractionStore, "approved_corrections", approved_corrections)
+    rig.state.service.invalidate()
+
+    shipment = rig.state.service.shipment(SHIPMENT)
+
+    assert set(calls.values()) == {1}
+    assert shipment["freight_audit"]["corrections_applied"] == []
+    assert shipment["freight_audit"]["corrections_ignored"] == []
+    assert shipment["inputs"]["applied_correction_ids"] == []

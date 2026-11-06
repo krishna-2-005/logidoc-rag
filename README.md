@@ -456,6 +456,45 @@ by `GET /api/shipments/{id}`.
   name in the BOL, POD and rate confirmation, shown to the reviewer, not a
   proof that the service was performed.
 
+### Carrier Intelligence (`src/carrier_intelligence.py`, page *Carrier Intelligence*)
+
+Each carrier's delivery, money, documentation, audit and exception figures as
+the documents are now, from what the application already holds: the audit
+snapshot (reconciliation and freight audit, approved corrections applied), the
+exceptions with their review state, and the completeness register. Nothing is
+recalculated or stored. (Audit History's trends are the other view: what
+recorded runs found over time.)
+
+- **Carrier identity.** The carrier the shipment's documents name, compared
+  without case or extra spaces. Names that differ otherwise stay separate
+  carriers; names that only differ in punctuation (`Swift Lines, Inc.` and
+  `Swift Lines Inc`) are listed as possibly the same carrier, for a person to
+  decide, never merged. A shipment whose documents name different carriers is
+  counted for none and listed. Carrier numbers (SCAC, MC, DOT) and contact
+  details are not extracted yet.
+- **Every rate shows its count and denominator**, and a rate with nothing to
+  count is shown as n/a, never 0. On-time: on time or early / deliveries
+  measured (the BOL states a pickup date, and the expected and actual delivery
+  dates were compared). Complete documents: usable BOL, invoice and POD /
+  shipments. Invoice accuracy: line items add up / invoices whose arithmetic
+  could be checked. Audit pass rate: matched (exactly or within tolerance) /
+  invoices compared with a rate confirmation. The full definitions come with
+  every API response and are shown on the page.
+- **Money** per currency only (an unstated currency is its own group; nothing
+  is converted): invoiced, contracted, billed against a contract, variance
+  against the contract, average variance, cost per shipment, and the
+  exceptions' amounts by review state (open, disputed, waived, resolved). A
+  total that was not read is counted as not read, never as 0.
+- **No composite score**: the scorecard shows the figures it would hide.
+- **Dates.** A shipment is dated by its BOL pickup date (else POD delivery,
+  else invoice date). With a date range, undated shipments are left out and
+  listed.
+- API: `GET /api/carriers?start=&end=`, `GET /api/carriers/{key}` (with a
+  monthly trend and a page of shipments: `offset`, `limit`), and
+  `GET /api/reports/carriers.csv` (one row per carrier and currency).
+  Computed on request from the cached audit snapshot (linear in shipments and
+  exceptions), not cached itself, so review decisions show at once.
+
 In `local` mode the Streamlit analytics tabs keep the original quick review
 form (free-typed reviewer name, marked unauthenticated and not subject to the
 evidence rule); in `required` mode it is replaced by the full workflow.
