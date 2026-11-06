@@ -884,3 +884,123 @@ export interface AssistantReply {
   tools_used: { name: string; arguments: Record<string, unknown> }[]
   generated: boolean
 }
+
+// ---------------------------------------------------------------------------
+// Carrier intelligence (GET /api/carriers, /api/carriers/{key})
+// ---------------------------------------------------------------------------
+
+/** A rate with the count and denominator it is based on; rate is null (never 0) when n is 0 */
+export interface RateFigure {
+  count: number
+  n: number
+  rate: number | null
+  low: number | null
+  high: number | null
+}
+
+export interface CarrierMoney {
+  currency: string
+  invoices_with_total: number
+  invoiced_total: number | null
+  invoices_compared_with_contract: number
+  contracted_total: number | null
+  audited_billed_total: number | null
+  verified_variance: number | null
+  average_invoice_variance: number | null
+  cost_per_shipment: number | null
+}
+
+export interface CarrierFigures {
+  shipments: number
+  delivery: { completed: number; measured: number; on_time: number; late: number; on_time_rate: RateFigure; average_delay_days: number | null; not_measured: Record<string, number> }
+  financial: { by_currency: CarrierMoney[]; invoices: number; invoices_total_not_read: number }
+  documents: { shipments: number; complete: number; missing_bol: number; missing_invoice: number; missing_pod: number; completeness_rate: RateFigure }
+  audit: {
+    invoices: number
+    audited_against_contract: number
+    without_contract: number
+    matched: number
+    discrepant: number
+    pending_review: number
+    insufficient_evidence: number
+    duplicate: number
+    audit_pass_rate: RateFigure
+    arithmetic_checked: number
+    arithmetic_match: number
+    arithmetic_mismatch: number
+    arithmetic_needs_review: number
+    invoice_accuracy_rate: RateFigure
+  }
+  exceptions: {
+    total: number
+    open: number
+    by_status: Record<string, number>
+    by_category: Record<string, number>
+    exceptions_per_shipment: number | null
+    repeated: { category: string; shipments: string[] }[]
+    amounts: Record<"open" | "disputed" | "waived" | "resolved", { currency: string; amount: number; exceptions: number }[]>
+  }
+}
+
+export interface CarrierMonth {
+  month: string
+  shipments: number
+  measured: number
+  on_time: number
+  late: number
+  on_time_rate: RateFigure
+  invoiced: { currency: string; total: number; invoices: number }[]
+  arithmetic_mismatches: number
+  contract_discrepancies: number
+  exceptions: number
+}
+
+export interface CarrierCard extends CarrierFigures {
+  carrier_key: string
+  carrier: string
+  names: string[]
+}
+
+export interface CarrierIntelligence {
+  period: { start: string | null; end: string | null }
+  definitions: Record<string, string>
+  carriers: CarrierCard[]
+  unattributed: { not_stated: string[]; conflicting: { shipment_id: string; names: string[] }[]; undated_excluded: string[] }
+  possible_duplicates: string[][]
+  totals: CarrierFigures
+  monthly: CarrierMonth[]
+}
+
+export interface CarrierShipmentRow {
+  shipment_id: string
+  shipment_key: string
+  date: string | null
+  date_basis: string | null
+  final_status: string
+  delivery_status: string | null
+  measured: boolean
+  not_measured_reason: string | null
+  days_late: number | null
+  invoice_total: number | null
+  currency: string
+  arithmetic_status: string | null
+  freight_outcome: string | null
+  contracted: number | null
+  contract_variance: number | null
+  complete: boolean
+  missing: string[]
+  exceptions: { exception_key: string; category: string; severity: string | null; review_status: string }[]
+}
+
+export interface CarrierDetail extends CarrierCard {
+  identifier: string | null
+  contact: string | null
+  identity_note: string
+  period: { start: string | null; end: string | null }
+  definitions: Record<string, string>
+  monthly: CarrierMonth[]
+  shipment_count: number
+  offset: number
+  limit: number
+  shipment_rows: CarrierShipmentRow[]
+}

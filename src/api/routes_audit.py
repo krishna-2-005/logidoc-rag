@@ -9,12 +9,14 @@ recalculated, and nothing a client sends can change an audit result.
 
 import hashlib
 from collections import Counter
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 
 import audit_analytics as analytics
 import audit_explanations as explanations
+import carrier_intelligence as carriers_module
 import authz
 import financial_exposure as exposure
 import processing_trace
@@ -412,3 +414,70 @@ def report_completeness(principal=Download, state: ApiState = Depends(get_state)
     return attachment(
         completeness_csv(state.service.completeness()["shipments"]), "document_completeness.csv", "text/csv; charset=utf-8"
     )
+
+
+# ------------------------------------------------------------
+# Carrier intelligence (current state; trends over recorded runs are /trends)
+# ------------------------------------------------------------
+
+def carrier_inputs(state):
+    """The three things carrier_intelligence reads, as the audit holds them now (no document is read here)."""
+
+    service = state.service
+
+    if not service.has_documents():
+        return [], [], []
+
+    return service.snapshot()["shipments"], service.exceptions(), service.completeness()["shipments"]
+
+
+def period_of(start, end):
+
+    if start and end and start > end:
+        raise HTTPException(status_code=422, detail="The start date is after the end date.")
+
+    return start, end
+
+
+@router.get("/carriers")
+def carriers(
+    principal=ViewAudit, state: ApiState = Depends(get_state),
+    start: date | None = Query(None), end: date | None = Query(None),
+):
+    """
+    Every carrier's delivery, financial, documentation, audit and exception
+    figures for the shipments dated in the range (carrier_intelligence).
+    """
+
+    start, end = period_of(start, end)
+
+    return carriers_module.analyze(*carrier_inputs(state), start=start, end=end)
+
+
+@router.get("/carriers/{carrier_key:path}")
+def carrier(
+    carrier_key: str, principal=ViewAudit, state: ApiState = Depends(get_state),
+    start: date | None = Query(None), end: date | None = Query(None),
+    offset: int = Query(0, ge=0, le=100000), limit: int = Query(50, ge=1, le=500),
+):
+    """One carrier's figures, monthly trend and a page of its shipments."""
+
+    start, end = period_of(start, end)
+    detail = carriers_module.carrier_detail(*carrier_inputs(state), key=carrier_key, start=start, end=end,
+                                            offset=offset, limit=limit)
+
+    if detail is None:
+        raise HTTPException(status_code=404, detail="No shipment of this carrier in the period.")
+
+    return detail
+
+
+@router.get("/reports/carriers.csv")
+def report_carriers(
+    principal=Download, state: ApiState = Depends(get_state),
+    start: date | None = Query(None), end: date | None = Query(None),
+):
+    start, end = period_of(start, end)
+    result = carriers_module.analyze(*carrier_inputs(state), start=start, end=end)
+
+    return attachment(carriers_module.carriers_csv(result), "carrier_performance.csv", "text/csv; charset=utf-8")
