@@ -31,6 +31,7 @@ Paths are fixed when the service is built (config.py or the tests); no
 method takes a path from a caller.
 """
 
+import hashlib
 import logging
 import threading
 from dataclasses import dataclass
@@ -67,7 +68,7 @@ def freight_skipped(reason):
             "currency": None, "charges": [], "checks": [], "financial_impact": None, "tolerances": {}}
 
 
-def add_freight_audits(snapshot, by_key, raw_dir, corrections_of):
+def add_freight_audits(snapshot, by_key, raw_dir, corrections_of, extraction_cache=None):
     """
     Adds item["freight_audit"] to every shipment of the snapshot: its carrier
     invoice matched against its rate confirmation and BOL/POD (freight_audit),
@@ -77,6 +78,14 @@ def add_freight_audits(snapshot, by_key, raw_dir, corrections_of):
     says so). Each PDF is extracted once, read-only. Shipments whose
     documents print colliding IDs are not audited (their documents are never
     used together).
+
+    extraction_cache: {(file name, SHA-256 of its content, extractor version):
+    extraction} kept between audits, so a recalculation after one upload
+    extracts only the new or changed files (measured: extraction was half of
+    a recalculation). A file whose content changed has another hash, so it is
+    never served from the cache; entries of files no longer in the folder are
+    dropped. The cached extractions are only read: corrections are applied to
+    copies (freight_audit.apply_corrections).
     """
 
     from datetime import datetime, timezone
@@ -93,12 +102,21 @@ def add_freight_audits(snapshot, by_key, raw_dir, corrections_of):
         return
 
     extracted = {}
+    cache = extraction_cache if extraction_cache is not None else {}
+    kept = set()
 
     def extraction_of(name):
         if name not in extracted:
             path = Path(raw_dir) / str(name)
             try:
-                extracted[name] = document_extraction.extract_document(path) if path.is_file() else None
+                if not path.is_file():
+                    extracted[name] = None
+                else:
+                    key = (str(name), hashlib.sha256(path.read_bytes()).hexdigest(), document_extraction.EXTRACTOR_VERSION)
+                    kept.add(key)
+                    if key not in cache:
+                        cache[key] = document_extraction.extract_document(path)
+                    extracted[name] = cache[key]
             except Exception as error:  # one unreadable file must not hide the other shipments' audits
                 log.warning("freight audit: %s could not be extracted: %s", name, error)
                 extracted[name] = None
@@ -146,6 +164,10 @@ def add_freight_audits(snapshot, by_key, raw_dir, corrections_of):
         except Exception as error:  # reported on the shipment, never breaks the reconciliation
             log.exception("freight audit of %s failed", key)
             item["freight_audit"] = freight_skipped(f"The freight audit could not be completed: {error}")
+
+    # Only the files of this audit stay cached
+    for key in [key for key in cache if key not in kept]:
+        del cache[key]
 
 
 @dataclass(frozen=True)
@@ -195,6 +217,8 @@ class AuditService:
         self.reconcile = reconcile or reconciliation.reconcile_shipment
         self.lock = threading.RLock()
         self.cache = {}
+        # Freight audit extractions by (file, content hash, extractor version): survives invalidate()
+        self.extractions = {}
 
     # --------------------------------------------------------
     # Stores
@@ -363,7 +387,7 @@ class AuditService:
                 for item in snapshot["shipments"]:
                     audit_inputs.mark_corrections_unavailable(item["inputs"])
 
-            add_freight_audits(snapshot, by_key, self.locations.raw_dir, approved_of)
+            add_freight_audits(snapshot, by_key, self.locations.raw_dir, approved_of, self.extractions)
 
             # A correction the freight audit used is consumed by the audit like the
             # reconciliation's: history records it, staleness and supersession see it

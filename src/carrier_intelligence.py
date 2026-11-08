@@ -178,7 +178,7 @@ def iso_date(value):
 
 
 def facts(item, completeness_row, exceptions, resolver=None):
-    """Everything about one shipment the figures are made of."""
+    """Everything about one shipment the figures are made of. exceptions: the shipment's own."""
 
     result = item.get("result") or {}
     audit = item.get("freight_audit") or {}
@@ -211,6 +211,7 @@ def facts(item, completeness_row, exceptions, resolver=None):
     else:
         not_measured = None
 
+    # Given the shipment's own already (shipment_rows groups them once); filtered again so a wider list is safe
     own = [e for e in exceptions if e["shipment_key"] == item["shipment_key"]]
 
     return {
@@ -454,7 +455,16 @@ def shipment_rows(shipments, exceptions, completeness_rows, resolver=None):
 
     completeness_by_key = {row["shipment_key"]: row for row in completeness_rows}
 
-    return [facts(item, completeness_by_key.get(item["shipment_key"]), exceptions, resolver) for item in shipments]
+    # Grouped once: one pass over the exceptions, not one per shipment (measured: quadratic at 10,000 shipments)
+    exceptions_by_key = defaultdict(list)
+
+    for exception in exceptions:
+        exceptions_by_key[exception["shipment_key"]].append(exception)
+
+    return [
+        facts(item, completeness_by_key.get(item["shipment_key"]), exceptions_by_key.get(item["shipment_key"], []), resolver)
+        for item in shipments
+    ]
 
 
 def in_period(row, start=None, end=None):
@@ -555,9 +565,13 @@ def analyze(shipments, exceptions, completeness_rows, start=None, end=None, reso
 def carrier_detail(shipments, exceptions, completeness_rows, key, start=None, end=None, offset=0, limit=50, resolver=None):
     """One carrier: its figures, monthly trend and shipments (a page of them), or None when it has none."""
 
+    # Only this carrier's shipments are worked out in full
+    own = [item for item in shipments if carrier_of(item, resolver)[0] == key]
+    keys = {item["shipment_key"] for item in own}
+
     rows = [
-        row for row in shipment_rows(shipments, exceptions, completeness_rows, resolver)
-        if row["carrier_key"] == key and in_period(row, start, end)
+        row for row in shipment_rows(own, [e for e in exceptions if e["shipment_key"] in keys], completeness_rows, resolver)
+        if in_period(row, start, end)
     ]
 
     if not rows:
