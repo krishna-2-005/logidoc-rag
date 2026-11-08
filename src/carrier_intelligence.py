@@ -117,8 +117,22 @@ def first(audit, document_type, name):
     return None
 
 
-def carrier_of(item):
-    """(key, display name, names given) of a shipment: key None when not stated, CONFLICTING when the documents disagree."""
+def resolved_key(name, resolver):
+    """A document name's carrier key: its registered carrier's when an approved link says so."""
+
+    registered = (resolver or {}).get(carrier_key(name))
+
+    return f"registered:{registered['id']}" if registered else carrier_key(name)
+
+
+def carrier_of(item, resolver=None):
+    """
+    (key, display name, names given) of a shipment: key None when not stated,
+    CONFLICTING when the documents disagree. resolver ({document name key:
+    registered carrier}, carrier_registry.CarrierRegistry.resolver) puts names
+    an administrator linked to one registered carrier under that carrier; with
+    none, names are compared by carrier_key alone.
+    """
 
     audit = item.get("freight_audit") or {}
     names = [
@@ -134,7 +148,7 @@ def carrier_of(item):
         names = [str(carrier[role]) for role in ("bol", "invoice", "pod") if carrier.get(role)]
 
     names = [" ".join(name.split()) for name in names]
-    keys = {carrier_key(name) for name in names}
+    keys = {resolved_key(name, resolver) for name in names}
 
     if not keys:
         return None, NOT_STATED, []
@@ -142,11 +156,17 @@ def carrier_of(item):
     if len(keys) > 1:
         return CONFLICTING, CONFLICTING, sorted(set(names))
 
+    key = keys.pop()
+    registered = (resolver or {}).get(carrier_key(names[0]))
+
+    if registered:
+        return key, registered["legal_name"], sorted(set(names))
+
     # The form written most often, then the first alphabetically, as its name
     counts = Counter(names)
     name = sorted(counts, key=lambda value: (-counts[value], value))[0]
 
-    return keys.pop(), name, sorted(set(names))
+    return key, name, sorted(set(names))
 
 
 def iso_date(value):
@@ -157,13 +177,13 @@ def iso_date(value):
         return None
 
 
-def facts(item, completeness_row, exceptions):
-    """Everything about one shipment the figures are made of."""
+def facts(item, completeness_row, exceptions, resolver=None):
+    """Everything about one shipment the figures are made of. exceptions: the shipment's own."""
 
     result = item.get("result") or {}
     audit = item.get("freight_audit") or {}
     success = bool(result.get("success"))
-    key, name, names = carrier_of(item)
+    key, name, names = carrier_of(item, resolver)
 
     pickup = iso_date(first(audit, "BOL", "pickup_date"))
     delivered = iso_date(first(audit, "POD", "delivery_date"))
@@ -191,6 +211,7 @@ def facts(item, completeness_row, exceptions):
     else:
         not_measured = None
 
+    # Given the shipment's own already (shipment_rows groups them once); filtered again so a wider list is safe
     own = [e for e in exceptions if e["shipment_key"] == item["shipment_key"]]
 
     return {
@@ -430,11 +451,20 @@ def loose_key(name):
     return re.sub(r"[^0-9a-z]", "", str(name).casefold())
 
 
-def shipment_rows(shipments, exceptions, completeness_rows):
+def shipment_rows(shipments, exceptions, completeness_rows, resolver=None):
 
     completeness_by_key = {row["shipment_key"]: row for row in completeness_rows}
 
-    return [facts(item, completeness_by_key.get(item["shipment_key"]), exceptions) for item in shipments]
+    # Grouped once: one pass over the exceptions, not one per shipment (measured: quadratic at 10,000 shipments)
+    exceptions_by_key = defaultdict(list)
+
+    for exception in exceptions:
+        exceptions_by_key[exception["shipment_key"]].append(exception)
+
+    return [
+        facts(item, completeness_by_key.get(item["shipment_key"]), exceptions_by_key.get(item["shipment_key"], []), resolver)
+        for item in shipments
+    ]
 
 
 def in_period(row, start=None, end=None):
@@ -448,16 +478,46 @@ def in_period(row, start=None, end=None):
     return (start is None or row["date"] >= start) and (end is None or row["date"] <= end)
 
 
-def analyze(shipments, exceptions, completeness_rows, start=None, end=None):
+def registered_of(key, resolver):
+    """The registered carrier (master data) behind a carrier key, or None."""
+
+    if not str(key).startswith("registered:"):
+        return None
+
+    wanted = int(str(key).split(":", 1)[1])
+
+    return next((carrier for carrier in (resolver or {}).values() if carrier["id"] == wanted), None)
+
+
+def master_data(carrier):
+    """The identity fields of a registered carrier, as the API shows them."""
+
+    if carrier is None:
+        return None
+
+    return {name: carrier.get(name) for name in ("id", "legal_name", "trading_name", "scac", "mc_number", "dot_number",
+                                                 "contact_name", "contact_email", "contact_phone")}
+
+
+def card_name(key, counts, resolver):
+
+    registered = registered_of(key, resolver)
+
+    return registered["legal_name"] if registered else sorted(counts, key=lambda name: (-counts[name], name))[0]
+
+
+def analyze(shipments, exceptions, completeness_rows, start=None, end=None, resolver=None):
     """
     Every carrier's figures for the shipments dated in [start, end] (both
     optional; undated shipments are left out only when a range is given).
-    Returns {"period", "definitions", "carriers": [...], "unattributed",
-    "possible_duplicates", "totals", "monthly"}; each carrier has "carrier_key",
-    "carrier", "names", "shipments" and the figures.
+    resolver: the approved links of document names to registered carriers
+    (carrier_registry), or None. Returns {"period", "definitions", "carriers":
+    [...], "unattributed", "possible_duplicates", "totals", "monthly"}; each
+    carrier has "carrier_key", "carrier", "names", "registered" (its master
+    data, or None), "shipments" and the figures.
     """
 
-    rows = shipment_rows(shipments, exceptions, completeness_rows)
+    rows = shipment_rows(shipments, exceptions, completeness_rows, resolver)
     selected = [row for row in rows if in_period(row, start, end)]
 
     groups = defaultdict(list)
@@ -472,8 +532,9 @@ def analyze(shipments, exceptions, completeness_rows, start=None, end=None):
         counts = Counter(name for row in members for name in row["carrier_names"])
         carriers.append({
             "carrier_key": key,
-            "carrier": sorted(counts, key=lambda name: (-counts[name], name))[0],
+            "carrier": card_name(key, counts, resolver),
             "names": sorted(counts),
+            "registered": master_data(registered_of(key, resolver)),
             **figures(members),
         })
 
@@ -501,12 +562,16 @@ def analyze(shipments, exceptions, completeness_rows, start=None, end=None):
     }
 
 
-def carrier_detail(shipments, exceptions, completeness_rows, key, start=None, end=None, offset=0, limit=50):
+def carrier_detail(shipments, exceptions, completeness_rows, key, start=None, end=None, offset=0, limit=50, resolver=None):
     """One carrier: its figures, monthly trend and shipments (a page of them), or None when it has none."""
 
+    # Only this carrier's shipments are worked out in full
+    own = [item for item in shipments if carrier_of(item, resolver)[0] == key]
+    keys = {item["shipment_key"] for item in own}
+
     rows = [
-        row for row in shipment_rows(shipments, exceptions, completeness_rows)
-        if row["carrier_key"] == key and in_period(row, start, end)
+        row for row in shipment_rows(own, [e for e in exceptions if e["shipment_key"] in keys], completeness_rows, resolver)
+        if in_period(row, start, end)
     ]
 
     if not rows:
@@ -514,14 +579,24 @@ def carrier_detail(shipments, exceptions, completeness_rows, key, start=None, en
 
     counts = Counter(name for row in rows for name in row["carrier_names"])
     rows.sort(key=lambda row: (row["date"] is None, row["date"] or date.min, row["shipment_id"]))
+    registered = registered_of(key, resolver)
+    identifiers = [f"{label} {registered[field]}" for field, label in (("scac", "SCAC"), ("mc_number", "MC"), ("dot_number", "USDOT"))
+                   if registered and registered.get(field)]
+    contact = [registered[field] for field in ("contact_name", "contact_email", "contact_phone") if registered and registered.get(field)]
 
     return {
         "carrier_key": key,
-        "carrier": sorted(counts, key=lambda name: (-counts[name], name))[0],
+        "carrier": card_name(key, counts, resolver),
         "names": sorted(counts),
-        "identifier": None,
-        "contact": None,
-        "identity_note": "The documents' carrier name is the identity: carrier numbers (SCAC, MC, DOT) and contact details are not extracted yet.",
+        "registered": master_data(registered),
+        "identifier": " · ".join(identifiers) or None,
+        "contact": " · ".join(contact) or None,
+        "identity_note": (
+            "A registered carrier: its identity comes from the carrier master data, and the document names listed "
+            "were linked to it by an approved request." if registered else
+            "The documents' carrier name is the identity: carrier numbers (SCAC, MC, DOT) and contact details are not "
+            "extracted yet. An administrator can register the carrier and link its names."
+        ),
         "period": {"start": start.isoformat() if start else None, "end": end.isoformat() if end else None},
         "definitions": DEFINITIONS,
         **figures(rows),
@@ -547,6 +622,8 @@ CSV_COLUMNS = (
     "duplicate", "audit_pass_rate", "arithmetic_checked", "arithmetic_mismatch", "invoice_accuracy_rate",
     "currency", "invoiced_total", "contracted_total", "audited_billed_total", "verified_variance",
     "average_invoice_variance", "cost_per_shipment", "exceptions", "open_exceptions", "repeated_categories",
+    # Added later, at the end, so the columns before keep their positions
+    "scac", "mc_number", "dot_number",
 )
 
 
@@ -561,6 +638,7 @@ def carriers_csv(result):
     rows = []
 
     for card in result["carriers"]:
+        registered = card.get("registered") or {}
         d, docs, a, e = card["delivery"], card["documents"], card["audit"], card["exceptions"]
         money_rows = card["financial"]["by_currency"] or [{"currency": None}]
 
@@ -576,6 +654,7 @@ def carriers_csv(result):
                 money_row.get("verified_variance"), money_row.get("average_invoice_variance"),
                 money_row.get("cost_per_shipment"), e["total"], e["open"],
                 "; ".join(item["category"] for item in e["repeated"]),
+                registered.get("scac"), registered.get("mc_number"), registered.get("dot_number"),
             ])
 
     return write_csv(CSV_COLUMNS, [[cell(value) for value in row] for row in rows])

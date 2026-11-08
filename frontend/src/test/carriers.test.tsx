@@ -155,6 +155,23 @@ describe("Carrier Intelligence", () => {
     })
   })
 
+  it("shows a registered carrier's master data", async () => {
+    const registered = { id: 1, legal_name: "Swift Lines Inc", trading_name: null, scac: "SWFT", mc_number: "123456", dot_number: null, contact_name: null, contact_email: "ops@swiftlines.example", contact_phone: null }
+    setup({
+      "/api/carriers": { ...LIST, carriers: [{ ...LIST.carriers[0], carrier_key: "registered:1", carrier: "Swift Lines Inc", registered }] },
+      "/api/carriers/registered%3A1": { ...DETAIL, carrier_key: "registered:1", carrier: "Swift Lines Inc", registered, identifier: "SCAC SWFT · MC 123456", contact: "ops@swiftlines.example" },
+    })
+    renderPage(<CarrierIntelligence />, "/carriers")
+
+    const table = await screen.findByRole("table", { name: "Carrier comparison" })
+    expect(within(table).getByText("Registered · SCAC SWFT")).toBeInTheDocument()
+
+    await userEvent.click(within(table).getByRole("button", { name: "Open carrier Swift Lines Inc" }))
+    const data = await screen.findByLabelText("Carrier master data")
+    expect(data).toHaveTextContent("SCAC SWFT · MC 123456")
+    expect(data).toHaveTextContent("ops@swiftlines.example")
+  })
+
   it("says so when there is nothing in the period", async () => {
     setup({ "/api/carriers": { ...LIST, carriers: [], totals: figures({ shipments: 0 }), monthly: [], possible_duplicates: [], unattributed: { not_stated: [], conflicting: [], undated_excluded: [] } } })
     renderPage(<CarrierIntelligence />, "/carriers")

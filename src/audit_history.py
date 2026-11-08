@@ -65,7 +65,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 VERIFIED = "verified"
 UNAVAILABLE = "unavailable"
@@ -281,6 +281,16 @@ MIGRATION_V4 = (
         "ON freight_audit_records BEGIN SELECT RAISE(ABORT, 'audit history is append-only'); END"
         for action in ("update", "delete")
     ],
+)
+
+
+# Version 5: indexes for the per-shipment lookups made while recording a run
+# (the previous input set and the previous run of each shipment). Indexes only:
+# no row is read or rewritten. Measured: recording an unchanged run of 10,000
+# shipments spent 4.5 s scanning these tables without them.
+MIGRATION_V5 = (
+    "CREATE INDEX IF NOT EXISTS run_input_sets_by_shipment ON run_input_sets (shipment_key, run_id)",
+    "CREATE INDEX IF NOT EXISTS run_shipments_by_shipment ON run_shipments (shipment_key, run_id)",
 )
 
 
@@ -620,7 +630,7 @@ class HistoryStore:
         """
 
         # Looked up when called, so the steps can be replaced in a test
-        steps = {2: MIGRATION_V2, 3: MIGRATION_V3, 4: MIGRATION_V4}
+        steps = {2: MIGRATION_V2, 3: MIGRATION_V3, 4: MIGRATION_V4, 5: MIGRATION_V5}
         connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
 
         try:
@@ -680,7 +690,13 @@ class HistoryStore:
             if not items:
                 raise HistoryError("None of those shipments is in the audit.")
 
-        records = [snapshot_record(item, exceptions) for item in items]
+        # Each shipment's exceptions, grouped once (measured: one scan per shipment was quadratic)
+        exceptions_by_key = {}
+
+        for exception in exceptions:
+            exceptions_by_key.setdefault(exception["shipment_key"], []).append(exception)
+
+        records = [snapshot_record(item, exceptions_by_key.get(item["shipment_key"], [])) for item in items]
         inputs_by_key = {item["shipment_key"]: item.get("inputs") for item in items}
 
         written, unchanged = [], []
@@ -992,6 +1008,39 @@ class HistoryStore:
                     "SELECT shipment_key, shipment_id FROM shipment_snapshots GROUP BY shipment_key"
                 )
             }
+
+    def feed(self, after=0, limit=50):
+        """
+        The recorded runs after run id `after`, oldest first (at most limit),
+        each with every shipment it checked and the snapshot that shipment
+        pointed at: an outbound change feed. Runs and snapshots are
+        append-only, so what a run id returned once never changes; a reader
+        that keeps the last run id it processed can resume from it, and
+        reading again after a failure returns the same runs.
+        """
+
+        with closing(self.connect()) as connection:
+
+            runs = [dict(row) for row in connection.execute(
+                "SELECT id AS run_id, created_at, label, shipments_checked, snapshots_written FROM audit_runs "
+                "WHERE id > ? ORDER BY id LIMIT ?", (after, limit + 1))]
+
+            more = len(runs) > limit
+            runs = runs[:limit]
+
+            for run in runs:
+                run["shipments"] = [dict(row) for row in connection.execute(
+                    "SELECT s.shipment_key, s.shipment_id, s.id AS snapshot_id, s.run_id = r.run_id AS changed, "
+                    "s.final_status, s.carrier, s.currency, s.invoice_total, s.discrepancy_count, s.review_count, "
+                    "f.outcome AS freight_outcome "
+                    "FROM run_shipments r JOIN shipment_snapshots s ON s.id = r.snapshot_id "
+                    "LEFT JOIN freight_audit_records f ON f.snapshot_id = s.id "
+                    "WHERE r.run_id = ? ORDER BY s.shipment_key", (run["run_id"],))]
+
+                for item in run["shipments"]:
+                    item["changed"] = bool(item["changed"])
+
+        return {"runs": runs, "next_after": runs[-1]["run_id"] if runs else after, "has_more": more}
 
     def runs(self, limit=50):
         """

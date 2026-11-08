@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 import readiness
-from api import routes_assistant, routes_audit, routes_auth, routes_extraction, routes_ingestion, routes_workflow
+from api import routes_assistant, routes_audit, routes_auth, routes_carriers, routes_extraction, routes_ingestion, routes_workflow
 from api.core import ApiSettings, ApiState, csrf_guard
 from audit_service import Locations
 from auth import ConfigError
@@ -39,6 +39,41 @@ from review_store import Policy
 
 
 log = logging.getLogger("logidoc.api")
+
+# The version of the API contract. /api/v1/... is the same API as /api/...:
+# integrations pin /api/v1 (and see API-Version on every /api response); the
+# web application keeps using /api. A change that is not backward compatible
+# is published as /api/v2 beside it, never by changing v1 (docs/
+# ENTERPRISE_INTEGRATION_READINESS.md, "Versioning").
+API_VERSION = "1"
+VERSIONED_PREFIX = f"/api/v{API_VERSION}/"
+
+
+class ApiVersions:
+    """
+    ASGI middleware: serves /api/v1/<path> as /api/<path> (the same route,
+    permissions and CSRF rule) and adds API-Version to every /api response.
+    An unknown version (/api/v2/...) matches no route: 404.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+
+        if scope["type"] != "http" or not scope["path"].startswith("/api"):
+            return await self.app(scope, receive, send)
+
+        if scope["path"].startswith(VERSIONED_PREFIX):
+            path = "/api/" + scope["path"][len(VERSIONED_PREFIX):]
+            scope = dict(scope, path=path, raw_path=path.encode("utf-8"))
+
+        async def versioned(message):
+            if message["type"] == "http.response.start":
+                message = dict(message, headers=[*message.get("headers", []), (b"api-version", API_VERSION.encode())])
+            await send(message)
+
+        return await self.app(scope, receive, versioned)
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -82,8 +117,11 @@ def create_app(state=None, settings=None):
     app.add_middleware(
         CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type", "X-LogiDoc-Client"],
-        max_age=600,
+        expose_headers=["API-Version"], max_age=600,
     )
+
+    # Outermost: the version prefix is resolved before CORS, CSRF and routing see the request
+    app.add_middleware(ApiVersions)
 
     @app.middleware("http")
     async def secure(request: Request, call_next):
@@ -101,7 +139,8 @@ def create_app(state=None, settings=None):
         return response
 
     for router in (routes_auth.router, routes_audit.router, routes_workflow.router, routes_ingestion.router,
-                   routes_assistant.router, routes_extraction.router, routes_extraction.history_router):
+                   routes_assistant.router, routes_extraction.router, routes_extraction.history_router,
+                   routes_carriers.router):
         app.include_router(router, dependencies=[Depends(csrf_guard)])
 
     @app.get("/api/health")

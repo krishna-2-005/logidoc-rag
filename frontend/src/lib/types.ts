@@ -955,10 +955,25 @@ export interface CarrierMonth {
   exceptions: number
 }
 
+/** A carrier's master data (GET /api/carrier-registry): validated identifiers and contact */
+export interface RegisteredCarrier {
+  id: number
+  legal_name: string
+  trading_name: string | null
+  scac: string | null
+  mc_number: string | null
+  dot_number: string | null
+  contact_name: string | null
+  contact_email: string | null
+  contact_phone: string | null
+}
+
 export interface CarrierCard extends CarrierFigures {
   carrier_key: string
   carrier: string
   names: string[]
+  /** Its master data when an administrator registered it and linked its document names; null otherwise */
+  registered?: RegisteredCarrier | null
 }
 
 export interface CarrierIntelligence {

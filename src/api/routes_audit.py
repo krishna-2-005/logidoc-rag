@@ -20,6 +20,8 @@ import carrier_intelligence as carriers_module
 import authz
 import financial_exposure as exposure
 import processing_trace
+from api import schemas
+from api.routes_carriers import resolver_of
 from api.core import ApiState, get_state, require
 from audit_export import ExportError, audit_csv, export_filename
 from audit_pdf_export import audit_pdf, pdf_filename
@@ -148,6 +150,22 @@ def shipments(
         "statuses": sorted({row["final_status"] for row in rows}),
         "categories": sorted({name for row in rows for name in row["discrepancy_categories"]}),
     }
+
+
+@router.get("/shipments/{shipment_id}/freight-audit", response_model=schemas.FreightAuditResponse, response_model_exclude_unset=True, responses=schemas.ERRORS)
+def shipment_freight_audit(shipment_id: str, principal=ViewAudit, state: ApiState = Depends(get_state)):
+    """
+    One shipment's freight audit (its invoice against its rate confirmation and
+    BOL/POD), as the shipment detail returns it, under a typed contract.
+    """
+
+    shipment = state.service.shipment(shipment_id)
+
+    if shipment is None:
+        raise HTTPException(status_code=404, detail="No such shipment.")
+
+    return {"shipment_id": shipment["shipment_id"], "shipment_key": shipment["shipment_key"],
+            "freight_audit": shipment.get("freight_audit")}
 
 
 @router.get("/shipments/{shipment_id}")
@@ -439,7 +457,7 @@ def period_of(start, end):
     return start, end
 
 
-@router.get("/carriers")
+@router.get("/carriers", response_model=schemas.CarrierIntelligenceResponse, response_model_exclude_unset=True, responses=schemas.ERRORS)
 def carriers(
     principal=ViewAudit, state: ApiState = Depends(get_state),
     start: date | None = Query(None), end: date | None = Query(None),
@@ -451,10 +469,10 @@ def carriers(
 
     start, end = period_of(start, end)
 
-    return carriers_module.analyze(*carrier_inputs(state), start=start, end=end)
+    return carriers_module.analyze(*carrier_inputs(state), start=start, end=end, resolver=resolver_of(state))
 
 
-@router.get("/carriers/{carrier_key:path}")
+@router.get("/carriers/{carrier_key:path}", response_model=schemas.CarrierDetailResponse, response_model_exclude_unset=True, responses=schemas.ERRORS)
 def carrier(
     carrier_key: str, principal=ViewAudit, state: ApiState = Depends(get_state),
     start: date | None = Query(None), end: date | None = Query(None),
@@ -464,6 +482,7 @@ def carrier(
 
     start, end = period_of(start, end)
     detail = carriers_module.carrier_detail(*carrier_inputs(state), key=carrier_key, start=start, end=end,
+                                            resolver=resolver_of(state),
                                             offset=offset, limit=limit)
 
     if detail is None:
@@ -472,12 +491,15 @@ def carrier(
     return detail
 
 
-@router.get("/reports/carriers.csv")
+@router.get(
+    "/reports/carriers.csv", responses={**schemas.ERRORS, 200: {"content": {"text/csv": {}},
+    "description": "One row per carrier and currency; columns: carrier_intelligence.CSV_COLUMNS"}},
+)
 def report_carriers(
     principal=Download, state: ApiState = Depends(get_state),
     start: date | None = Query(None), end: date | None = Query(None),
 ):
     start, end = period_of(start, end)
-    result = carriers_module.analyze(*carrier_inputs(state), start=start, end=end)
+    result = carriers_module.analyze(*carrier_inputs(state), start=start, end=end, resolver=resolver_of(state))
 
     return attachment(carriers_module.carriers_csv(result), "carrier_performance.csv", "text/csv; charset=utf-8")

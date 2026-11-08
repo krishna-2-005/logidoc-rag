@@ -78,6 +78,7 @@ function Comparison({ carriers, selected, onSelect }: { carriers: CarrierCard[];
               <button type="button" className="text-left text-primary hover:underline" onClick={() => onSelect(card.carrier_key)} aria-label={`Open carrier ${card.carrier}`}>
                 {card.carrier}
               </button>
+              {card.registered && <span className="block text-xs text-muted-foreground">Registered{card.registered.scac ? ` · SCAC ${card.registered.scac}` : ""}</span>}
               {card.exceptions.repeated.length > 0 && <span className="block text-xs text-warn">Repeated: {card.exceptions.repeated.map((item) => item.category).join(", ")}</span>}
             </TableCell>
             <TableCell className="tabular text-right">{count(card.shipments)}</TableCell>
@@ -154,6 +155,22 @@ function Detail({ detail, onMore }: { detail: CarrierDetail; onMore: () => void 
   return (
     <Section title={`Carrier: ${detail.carrier}`} description={detail.identity_note}>
       <div className="space-y-6" aria-label={`Carrier ${detail.carrier}`}>
+        {(detail.identifier || detail.contact) && (
+          <dl className="grid gap-3 text-sm sm:grid-cols-2" aria-label="Carrier master data">
+            {detail.identifier && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Identifiers</dt>
+                <dd>{detail.identifier}</dd>
+              </div>
+            )}
+            {detail.contact && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Contact</dt>
+                <dd>{detail.contact}</dd>
+              </div>
+            )}
+          </dl>
+        )}
         {detail.names.length > 1 && <p className="text-sm">Written on the documents as: {detail.names.join(", ")}</p>}
 
         <Table aria-label="Money by currency">

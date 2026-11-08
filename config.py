@@ -69,6 +69,10 @@ MAX_UPLOAD_MB = max(int(os.environ.get("LOGIDOC_MAX_UPLOAD_MB") or 25), 1)
 # weight. Empty means exact matching everywhere. Server-side only.
 FREIGHT_TOLERANCES = os.environ.get("LOGIDOC_FREIGHT_TOLERANCES") or ""
 
+# Carrier master data (src/carrier_registry.py): registered carriers, their
+# identifiers and the approved links of document names to them
+CARRIER_DB_PATH = Path(os.environ.get("LOGIDOC_CARRIER_DB") or DATA_DIR / "carrier_registry.sqlite3")
+
 
 def ingestion_locations(raw_dir=RAW_DATA_DIR):
     """
