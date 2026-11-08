@@ -17,6 +17,7 @@ import audit_explanations as explanations
 import audit_history
 import authz
 import trend_analytics as trends
+from api import schemas
 from api.core import ApiState, get_principal, get_state, require
 from api.routes_audit import attachment
 from exception_workflow import ExceptionWorkflow
@@ -79,7 +80,7 @@ def find(state, key):
 # Exceptions
 # ------------------------------------------------------------
 
-@router.get("/exceptions")
+@router.get("/exceptions", response_model=schemas.ExceptionList, response_model_exclude_unset=True, responses=schemas.ERRORS)
 def exceptions(
     principal=Depends(get_principal), state: ApiState = Depends(get_state),
     search: str = Query("", max_length=100), assignee: str | None = Query(None, max_length=64),
@@ -186,7 +187,7 @@ def activity(principal=ViewAudit, state: ApiState = Depends(get_state)):
     return workflow_of(state).activity(principal, 200)
 
 
-@router.get("/exceptions/{key:path}/history")
+@router.get("/exceptions/{key:path}/history", response_model=list[schemas.ReviewEvent], response_model_exclude_unset=True, responses=schemas.ERRORS)
 def exception_history(key: str, principal=ViewAudit, state: ApiState = Depends(get_state)):
 
     return workflow_of(state).history(principal, key)
@@ -205,7 +206,7 @@ def exception_detail(key: str, principal=ViewAudit, state: ApiState = Depends(ge
     }
 
 
-@router.post("/exceptions/{key:path}/actions")
+@router.post("/exceptions/{key:path}/actions", response_model=schemas.ActionResult, response_model_exclude_unset=True, responses=schemas.ERRORS)
 def exception_action(
     key: str, body: ActionBody, principal=Depends(get_principal), state: ApiState = Depends(get_state),
 ):
@@ -283,7 +284,7 @@ def record_run(
     )
 
 
-@router.get("/history/shipments/{shipment_id}")
+@router.get("/history/shipments/{shipment_id}", response_model=list[schemas.TimelineEntry], response_model_exclude_unset=True, responses=schemas.ERRORS)
 def shipment_history(shipment_id: str, principal=Depends(require(authz.HISTORY_VIEW)), state: ApiState = Depends(get_state)):
     """
     A shipment's recorded snapshots, newest first, each with what changed
