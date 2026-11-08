@@ -162,11 +162,17 @@ class Locations:
     quarantine_dir: Path
     archive_dir: Path
     extraction_db: Path = None
+    carrier_db: Path = None
 
     def extraction_path(self):
         """The extraction store: its own setting, or next to the raw folder."""
 
         return Path(self.extraction_db) if self.extraction_db else Path(self.raw_dir).parent / "extractions.sqlite3"
+
+    def carrier_registry_path(self):
+        """The carrier master data: its own setting, or next to the raw folder."""
+
+        return Path(self.carrier_db) if self.carrier_db else Path(self.raw_dir).parent / "carrier_registry.sqlite3"
 
     @staticmethod
     def from_config(config):
@@ -176,6 +182,7 @@ class Locations:
         return Locations(
             Path(config.RAW_DATA_DIR), Path(config.CHROMA_DIR), Path(config.REVIEW_DB_PATH),
             Path(config.HISTORY_DB_PATH), places["register"], places["quarantine"], places["archive"], places["extractions"],
+            Path(config.CARRIER_DB_PATH) if getattr(config, "CARRIER_DB_PATH", None) else None,
         )
 
 

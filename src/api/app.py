@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 import readiness
-from api import routes_assistant, routes_audit, routes_auth, routes_extraction, routes_ingestion, routes_workflow
+from api import routes_assistant, routes_audit, routes_auth, routes_carriers, routes_extraction, routes_ingestion, routes_workflow
 from api.core import ApiSettings, ApiState, csrf_guard
 from audit_service import Locations
 from auth import ConfigError
@@ -139,7 +139,8 @@ def create_app(state=None, settings=None):
         return response
 
     for router in (routes_auth.router, routes_audit.router, routes_workflow.router, routes_ingestion.router,
-                   routes_assistant.router, routes_extraction.router, routes_extraction.history_router):
+                   routes_assistant.router, routes_extraction.router, routes_extraction.history_router,
+                   routes_carriers.router):
         app.include_router(router, dependencies=[Depends(csrf_guard)])
 
     @app.get("/api/health")

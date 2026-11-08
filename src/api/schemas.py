@@ -185,6 +185,7 @@ class CarrierCard(CarrierFigures):
     carrier_key: str
     carrier: str
     names: list[str]
+    registered: "RegisteredCarrier | None" = None
 
 
 class ConflictingShipment(Contract):
@@ -561,3 +562,64 @@ class ReviewEvent(Contract):
 class ActionResult(Contract):
     review: ReviewRow
     allowed_actions: list[str]
+
+
+# ============================================================
+# CARRIER MASTER DATA
+# ============================================================
+
+class RegisteredCarrier(Contract):
+    """A carrier's master data: validated identifiers (SCAC letters, MC and USDOT digits) and contact."""
+
+    id: int
+    legal_name: str
+    trading_name: str | None
+    scac: str | None
+    mc_number: str | None
+    dot_number: str | None
+    contact_name: str | None
+    contact_email: str | None
+    contact_phone: str | None
+
+
+class RegisteredCarrierRecord(RegisteredCarrier):
+    created_by: str
+    created_at: str
+    updated_at: str
+    document_names: list[str]
+
+
+class LinkRequest(Contract):
+    id: int
+    name_key: str
+    display_name: str
+    carrier_id: int | None
+    reason: str
+    proposed_by: str
+    proposed_at: str
+    decision: Literal["approved", "rejected"] | None
+    decided_by: str | None
+    decided_at: str | None
+    decision_note: str | None
+
+
+class CarrierRegistryResponse(Contract):
+    carriers: list[RegisteredCarrierRecord]
+    requests: list[LinkRequest]
+    pending: int
+
+
+class RegistryEvent(Contract):
+    id: int
+    at: str
+    actor: str
+    action: str
+    carrier_id: int | None
+    request_id: int | None
+    before: Any
+    after: Any
+
+
+CarrierCard.model_rebuild()
+CarrierIntelligenceResponse.model_rebuild()
+CarrierDetailResponse.model_rebuild()

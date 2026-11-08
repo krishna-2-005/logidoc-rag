@@ -21,6 +21,7 @@ import authz
 import financial_exposure as exposure
 import processing_trace
 from api import schemas
+from api.routes_carriers import resolver_of
 from api.core import ApiState, get_state, require
 from audit_export import ExportError, audit_csv, export_filename
 from audit_pdf_export import audit_pdf, pdf_filename
@@ -468,7 +469,7 @@ def carriers(
 
     start, end = period_of(start, end)
 
-    return carriers_module.analyze(*carrier_inputs(state), start=start, end=end)
+    return carriers_module.analyze(*carrier_inputs(state), start=start, end=end, resolver=resolver_of(state))
 
 
 @router.get("/carriers/{carrier_key:path}", response_model=schemas.CarrierDetailResponse, response_model_exclude_unset=True, responses=schemas.ERRORS)
@@ -481,6 +482,7 @@ def carrier(
 
     start, end = period_of(start, end)
     detail = carriers_module.carrier_detail(*carrier_inputs(state), key=carrier_key, start=start, end=end,
+                                            resolver=resolver_of(state),
                                             offset=offset, limit=limit)
 
     if detail is None:
@@ -498,6 +500,6 @@ def report_carriers(
     start: date | None = Query(None), end: date | None = Query(None),
 ):
     start, end = period_of(start, end)
-    result = carriers_module.analyze(*carrier_inputs(state), start=start, end=end)
+    result = carriers_module.analyze(*carrier_inputs(state), start=start, end=end, resolver=resolver_of(state))
 
     return attachment(carriers_module.carriers_csv(result), "carrier_performance.csv", "text/csv; charset=utf-8")

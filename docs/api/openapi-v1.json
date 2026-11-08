@@ -237,6 +237,110 @@
         "title": "Body_upload_api_ingestion_upload_post",
         "type": "object"
       },
+      "CarrierBody": {
+        "properties": {
+          "confirm_distinct": {
+            "default": false,
+            "title": "Confirm Distinct",
+            "type": "boolean"
+          },
+          "contact_email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Email"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "maxLength": 30,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "dot_number": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dot Number"
+          },
+          "legal_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Legal Name",
+            "type": "string"
+          },
+          "mc_number": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mc Number"
+          },
+          "scac": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scac"
+          },
+          "trading_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trading Name"
+          }
+        },
+        "required": [
+          "legal_name"
+        ],
+        "title": "CarrierBody",
+        "type": "object"
+      },
       "CarrierCard": {
         "properties": {
           "audit": {
@@ -269,6 +373,16 @@
             "title": "Names",
             "type": "array"
           },
+          "registered": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RegisteredCarrier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "shipments": {
             "title": "Shipments",
             "type": "integer"
@@ -286,6 +400,109 @@
           "names"
         ],
         "title": "CarrierCard",
+        "type": "object"
+      },
+      "CarrierChanges": {
+        "properties": {
+          "contact_email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Email"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "maxLength": 30,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "dot_number": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dot Number"
+          },
+          "legal_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Name"
+          },
+          "mc_number": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mc Number"
+          },
+          "scac": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scac"
+          },
+          "trading_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trading Name"
+          }
+        },
+        "title": "CarrierChanges",
         "type": "object"
       },
       "CarrierDetailResponse": {
@@ -370,6 +587,16 @@
           },
           "period": {
             "$ref": "#/components/schemas/Period"
+          },
+          "registered": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RegisteredCarrier"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "shipment_count": {
             "title": "Shipment Count",
@@ -652,6 +879,35 @@
           "exceptions"
         ],
         "title": "CarrierMonth",
+        "type": "object"
+      },
+      "CarrierRegistryResponse": {
+        "properties": {
+          "carriers": {
+            "items": {
+              "$ref": "#/components/schemas/RegisteredCarrierRecord"
+            },
+            "title": "Carriers",
+            "type": "array"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "requests": {
+            "items": {
+              "$ref": "#/components/schemas/LinkRequest"
+            },
+            "title": "Requests",
+            "type": "array"
+          }
+        },
+        "required": [
+          "carriers",
+          "requests",
+          "pending"
+        ],
+        "title": "CarrierRegistryResponse",
         "type": "object"
       },
       "CarrierShipmentRow": {
@@ -2659,6 +2915,143 @@
         "title": "InvoicedMonth",
         "type": "object"
       },
+      "LinkBody": {
+        "properties": {
+          "carrier_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier Id"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "carrier_id",
+          "reason"
+        ],
+        "title": "LinkBody",
+        "type": "object"
+      },
+      "LinkRequest": {
+        "properties": {
+          "carrier_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier Id"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "enum": [
+                  "approved",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "decision_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Note"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name_key": {
+            "title": "Name Key",
+            "type": "string"
+          },
+          "proposed_at": {
+            "title": "Proposed At",
+            "type": "string"
+          },
+          "proposed_by": {
+            "title": "Proposed By",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name_key",
+          "display_name",
+          "carrier_id",
+          "reason",
+          "proposed_by",
+          "proposed_at",
+          "decision",
+          "decided_by",
+          "decided_at",
+          "decision_note"
+        ],
+        "title": "LinkRequest",
+        "type": "object"
+      },
       "LoginBody": {
         "properties": {
           "password": {
@@ -2833,6 +3226,294 @@
           }
         },
         "title": "RecordBody",
+        "type": "object"
+      },
+      "RegisteredCarrier": {
+        "description": "A carrier's master data: validated identifiers (SCAC letters, MC and USDOT digits) and contact.",
+        "properties": {
+          "contact_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Email"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "dot_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dot Number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "legal_name": {
+            "title": "Legal Name",
+            "type": "string"
+          },
+          "mc_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mc Number"
+          },
+          "scac": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scac"
+          },
+          "trading_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trading Name"
+          }
+        },
+        "required": [
+          "id",
+          "legal_name",
+          "trading_name",
+          "scac",
+          "mc_number",
+          "dot_number",
+          "contact_name",
+          "contact_email",
+          "contact_phone"
+        ],
+        "title": "RegisteredCarrier",
+        "type": "object"
+      },
+      "RegisteredCarrierRecord": {
+        "properties": {
+          "contact_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Email"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "document_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Document Names",
+            "type": "array"
+          },
+          "dot_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dot Number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "legal_name": {
+            "title": "Legal Name",
+            "type": "string"
+          },
+          "mc_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mc Number"
+          },
+          "scac": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scac"
+          },
+          "trading_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trading Name"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "legal_name",
+          "trading_name",
+          "scac",
+          "mc_number",
+          "dot_number",
+          "contact_name",
+          "contact_email",
+          "contact_phone",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "document_names"
+        ],
+        "title": "RegisteredCarrierRecord",
+        "type": "object"
+      },
+      "RegistryEvent": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "after": {
+            "title": "After"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "before": {
+            "title": "Before"
+          },
+          "carrier_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "actor",
+          "action",
+          "carrier_id",
+          "request_id",
+          "before",
+          "after"
+        ],
+        "title": "RegistryEvent",
         "type": "object"
       },
       "RepeatedException": {
@@ -4157,6 +4838,460 @@
           }
         },
         "summary": "Logout"
+      }
+    },
+    "/api/carrier-registry": {
+      "get": {
+        "operationId": "registry_api_carrier_registry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CarrierRegistryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Registry"
+      },
+      "post": {
+        "operationId": "register_carrier_api_carrier_registry_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CarrierBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredCarrierRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Register Carrier"
+      }
+    },
+    "/api/carrier-registry/events": {
+      "get": {
+        "operationId": "registry_events_api_carrier_registry_events_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RegistryEvent"
+                  },
+                  "title": "Response Registry Events Api Carrier Registry Events Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Registry Events"
+      }
+    },
+    "/api/carrier-registry/links": {
+      "post": {
+        "description": "Proposes that a document name belongs to a registered carrier (or is unlinked). No effect until approved.",
+        "operationId": "propose_link_api_carrier_registry_links_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkRequest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Propose Link"
+      }
+    },
+    "/api/carrier-registry/links/{request_id}/decision": {
+      "post": {
+        "description": "Approves or rejects a link request (a different administrator than the proposer).",
+        "operationId": "decide_link_api_carrier_registry_links__request_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkRequest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Decide Link"
+      }
+    },
+    "/api/carrier-registry/{carrier_id}": {
+      "patch": {
+        "operationId": "change_carrier_api_carrier_registry__carrier_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "carrier_id",
+            "required": true,
+            "schema": {
+              "title": "Carrier Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CarrierChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredCarrierRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Change Carrier"
       }
     },
     "/api/carriers": {
