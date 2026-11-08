@@ -623,3 +623,40 @@ class RegistryEvent(Contract):
 CarrierCard.model_rebuild()
 CarrierIntelligenceResponse.model_rebuild()
 CarrierDetailResponse.model_rebuild()
+
+
+# ============================================================
+# INTEGRATION FEED
+# ============================================================
+
+class FeedShipment(Contract):
+    """One shipment of a recorded run: changed is false when the run found it as the earlier snapshot."""
+
+    shipment_key: str
+    shipment_id: str
+    snapshot_id: int
+    changed: bool
+    final_status: str | None
+    carrier: str | None
+    currency: str | None
+    invoice_total: float | None
+    discrepancy_count: int
+    review_count: int
+    freight_outcome: FreightOutcome | None
+
+
+class FeedRun(Contract):
+    run_id: int
+    created_at: str
+    label: str | None
+    shipments_checked: int
+    snapshots_written: int
+    shipments: list[FeedShipment]
+
+
+class AuditRunFeed(Contract):
+    """Recorded runs after the cursor, oldest first. Resume from next_after; has_more: call again."""
+
+    runs: list[FeedRun]
+    next_after: int
+    has_more: bool

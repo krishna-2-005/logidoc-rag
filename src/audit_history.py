@@ -1009,6 +1009,39 @@ class HistoryStore:
                 )
             }
 
+    def feed(self, after=0, limit=50):
+        """
+        The recorded runs after run id `after`, oldest first (at most limit),
+        each with every shipment it checked and the snapshot that shipment
+        pointed at: an outbound change feed. Runs and snapshots are
+        append-only, so what a run id returned once never changes; a reader
+        that keeps the last run id it processed can resume from it, and
+        reading again after a failure returns the same runs.
+        """
+
+        with closing(self.connect()) as connection:
+
+            runs = [dict(row) for row in connection.execute(
+                "SELECT id AS run_id, created_at, label, shipments_checked, snapshots_written FROM audit_runs "
+                "WHERE id > ? ORDER BY id LIMIT ?", (after, limit + 1))]
+
+            more = len(runs) > limit
+            runs = runs[:limit]
+
+            for run in runs:
+                run["shipments"] = [dict(row) for row in connection.execute(
+                    "SELECT s.shipment_key, s.shipment_id, s.id AS snapshot_id, s.run_id = r.run_id AS changed, "
+                    "s.final_status, s.carrier, s.currency, s.invoice_total, s.discrepancy_count, s.review_count, "
+                    "f.outcome AS freight_outcome "
+                    "FROM run_shipments r JOIN shipment_snapshots s ON s.id = r.snapshot_id "
+                    "LEFT JOIN freight_audit_records f ON f.snapshot_id = s.id "
+                    "WHERE r.run_id = ? ORDER BY s.shipment_key", (run["run_id"],))]
+
+                for item in run["shipments"]:
+                    item["changed"] = bool(item["changed"])
+
+        return {"runs": runs, "next_after": runs[-1]["run_id"] if runs else after, "has_more": more}
+
     def runs(self, limit=50):
         """
         Recent runs, newest first, each with the shipments it superseded

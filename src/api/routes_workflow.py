@@ -299,6 +299,25 @@ def shipment_history(shipment_id: str, principal=Depends(require(authz.HISTORY_V
     return state.service.history_store().timeline(shipment["shipment_key"])
 
 
+@router.get("/integrations/audit-runs", response_model=schemas.AuditRunFeed, response_model_exclude_unset=True,
+            responses=schemas.ERRORS)
+def audit_run_feed(
+    principal=Depends(require(authz.HISTORY_VIEW)), state: ApiState = Depends(get_state),
+    after: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=500),
+):
+    """
+    Outbound change feed for an ERP, TMS or a webhook dispatcher: the recorded
+    audit runs after run id `after`, oldest first, with each shipment's status,
+    carrier, invoice total and freight audit outcome. Recorded runs never
+    change, so polling from the last run id seen is safe to repeat.
+    """
+
+    if not state.locations.history_db.is_file():
+        return {"runs": [], "next_after": after, "has_more": False}
+
+    return state.service.history_store().feed(after=after, limit=limit)
+
+
 @router.get("/history/compare")
 def compare(
     shipment: str = Query(max_length=100), first: int = Query(ge=1), second: int = Query(ge=1),

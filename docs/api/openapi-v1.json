@@ -181,6 +181,33 @@
         "title": "AuditFigures",
         "type": "object"
       },
+      "AuditRunFeed": {
+        "description": "Recorded runs after the cursor, oldest first. Resume from next_after; has_more: call again.",
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_after": {
+            "title": "Next After",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/FeedRun"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "next_after",
+          "has_more"
+        ],
+        "title": "AuditRunFeed",
+        "type": "object"
+      },
       "AuditState": {
         "properties": {
           "reason": {
@@ -2094,6 +2121,161 @@
           "allowed_actions"
         ],
         "title": "ExceptionListItem",
+        "type": "object"
+      },
+      "FeedRun": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "shipments": {
+            "items": {
+              "$ref": "#/components/schemas/FeedShipment"
+            },
+            "title": "Shipments",
+            "type": "array"
+          },
+          "shipments_checked": {
+            "title": "Shipments Checked",
+            "type": "integer"
+          },
+          "snapshots_written": {
+            "title": "Snapshots Written",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "created_at",
+          "label",
+          "shipments_checked",
+          "snapshots_written",
+          "shipments"
+        ],
+        "title": "FeedRun",
+        "type": "object"
+      },
+      "FeedShipment": {
+        "description": "One shipment of a recorded run: changed is false when the run found it as the earlier snapshot.",
+        "properties": {
+          "carrier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "discrepancy_count": {
+            "title": "Discrepancy Count",
+            "type": "integer"
+          },
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "freight_outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "MATCHED",
+                  "MATCHED_WITH_TOLERANCE",
+                  "DISCREPANCY",
+                  "INSUFFICIENT_EVIDENCE",
+                  "DUPLICATE",
+                  "PENDING_REVIEW"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freight Outcome"
+          },
+          "invoice_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Total"
+          },
+          "review_count": {
+            "title": "Review Count",
+            "type": "integer"
+          },
+          "shipment_id": {
+            "title": "Shipment Id",
+            "type": "string"
+          },
+          "shipment_key": {
+            "title": "Shipment Key",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "shipment_key",
+          "shipment_id",
+          "snapshot_id",
+          "changed",
+          "final_status",
+          "carrier",
+          "currency",
+          "invoice_total",
+          "discrepancy_count",
+          "review_count",
+          "freight_outcome"
+        ],
+        "title": "FeedShipment",
         "type": "object"
       },
       "FinancialFigures": {
@@ -7048,6 +7230,90 @@
           }
         },
         "summary": "Retry"
+      }
+    },
+    "/api/integrations/audit-runs": {
+      "get": {
+        "description": "Outbound change feed for an ERP, TMS or a webhook dispatcher: the recorded\naudit runs after run id `after`, oldest first, with each shipment's status,\ncarrier, invoice total and freight audit outcome. Recorded runs never\nchange, so polling from the last run id seen is safe to repeat.",
+        "operationId": "audit_run_feed_api_integrations_audit_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditRunFeed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Audit Run Feed"
       }
     },
     "/api/overview": {
