@@ -54,6 +54,7 @@ from pathlib import Path
 import authz
 import document_validation as validation
 import ingestion_manager
+import metrics
 import ingestion_register as register_module
 from authz import require
 from config import COLLECTION_NAME
@@ -457,10 +458,13 @@ def process_files(
                     records.append(not_attempted(register, upload, principal, quarantine_dir, file_id))
                     continue
 
+                started = time.perf_counter()
                 records.append(process_one(
                     register, upload, principal, raw_dir, chroma_dir, collection_name, embed_text,
                     quarantine_dir, max_attempts, backoff, sleep, existing_id=file_id,
                 ))
+                metrics.REGISTRY.observe("logidoc_pdf_processing_seconds", time.perf_counter() - started)
+                metrics.REGISTRY.inc("logidoc_ingestion_files_total", {"outcome": str(records[-1].get("status"))})
 
                 service_down = records[-1]["code"] == MODEL_SERVICE_DOWN
 

@@ -22,10 +22,12 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import alerts  # noqa: E402
 import backup  # noqa: E402
 import backup_automation as automation  # noqa: E402
 import metrics  # noqa: E402
 from file_lock import FileLock  # noqa: E402
+from test_api import Rig  # noqa: E402
 from test_trend_analytics import make_v1_history  # noqa: E402
 
 UTC = timezone.utc
@@ -278,6 +280,232 @@ def test_run_if_due_follows_the_schedule(tmp_path):
     assert runner.run_if_due(at("2026-11-09T02:31:00"))["outcome"] == "success"
     assert runner.run_if_due(at("2026-11-09T05:00:00")) is None                  # already done today
     assert runner_for(tmp_path / "off", schedule="off").run_if_due(at("2026-11-09T05:00:00")) is None
+
+
+# ============================================================
+# THE SERVER'S OPERATIONS: MONITOR AND ALERTS
+# ============================================================
+
+class Collector:
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, alert):
+        self.sent.append(alert)
+
+
+def test_the_monitor_raises_and_resolves_alerts(tmp_path):
+
+    rig = Rig(tmp_path, "required")
+    operations = rig.state.operations
+    operations.registry = metrics.Registry()              # no requests of other tests in the window
+    collector = Collector()
+    operations.alerts.notifiers = [collector]
+    operations.list_models = lambda: None                 # the model service does not answer
+    operations.disk_usage = lambda path: Free(100)        # 100 MB free: critical
+
+    for _ in range(3):
+        operations.monitor_once()
+
+    active = {alert["key"]: alert for alert in operations.alerts.view()["active"]}
+    assert active["disk_low"]["severity"] == "critical"
+    assert active["ai_service_down"]["severity"] == "warning"
+    assert "audit" in active["ai_service_down"]["message"]               # says what still works
+    assert str(tmp_path) not in json.dumps(operations.alerts.view())
+
+    operations.disk_usage = lambda path: Free(50_000)
+    operations.list_models = lambda: {"nomic-embed-text:latest", "nemotron-3-nano:4b"}
+    operations.monitor_once()
+
+    assert operations.alerts.view()["active"] == []
+    assert {alert["key"] for alert in collector.sent if alert["state"] == "resolved"} == {"disk_low", "ai_service_down"}
+
+
+def test_a_backup_failure_is_a_critical_alert_until_a_backup_succeeds(tmp_path):
+
+    rig = Rig(tmp_path, "required")
+    operations = rig.state.operations
+    operations.alerts.notifiers = [Collector()]
+
+    operations.runner.disk_usage = lambda path: Free(0)
+    assert operations.runner.run()["outcome"] == "failed"
+    [active] = operations.alerts.view()["active"]
+    assert active["key"] == "backup_failed" and active["severity"] == "critical"
+
+    operations.runner.disk_usage = lambda path: Free(100_000)
+    operations.runner.settings = automation.BackupSettings(operations.runner.settings.root,
+                                                           operations.runner.settings.schedule,
+                                                           operations.runner.settings.retention, min_free_mb=0)
+    assert operations.runner.run()["outcome"] == "success"
+    assert operations.alerts.view()["active"] == []
+
+
+def test_an_alert_is_not_repeated_within_its_cooldown(tmp_path):
+
+    now = {"value": at("2026-11-09T00:00:00")}
+    collector = Collector()
+    manager = alerts.AlertManager(alerts.AlertSettings(cooldown_seconds=3600), [collector], clock=lambda: now["value"])
+
+    manager.fire("disk_low", "warning", "low")
+    manager.fire("disk_low", "warning", "low")
+    now["value"] += timedelta(minutes=30)
+    manager.fire("disk_low", "warning", "low")
+    assert len(collector.sent) == 1
+
+    manager.fire("disk_low", "critical", "lower")               # more severe: sent at once
+    now["value"] += timedelta(hours=1, seconds=1)
+    manager.fire("disk_low", "critical", "lower")               # cooldown passed
+    assert [alert["severity"] for alert in collector.sent] == ["warning", "critical", "critical"]
+
+
+def test_failures_latency_and_database_errors_in_the_window_alert(tmp_path):
+
+    registry = metrics.Registry(clock=lambda: 1000.0)
+    manager = alerts.AlertManager(alerts.AlertSettings(server_errors=3, latency_ms=500, min_requests=5), [Collector()])
+
+    for _ in range(3):
+        registry.request("GET", "/api/overview", 500, 0.01)
+    for _ in range(5):
+        registry.request("GET", "/api/carriers", 200, 2.0)
+    registry.error("database")
+
+    manager.evaluate(window=registry.window_stats(300, now=1000.0))
+    keys = {alert["key"] for alert in manager.view()["active"]}
+
+    assert keys == {"api_failures", "latency_high", "database_errors"}
+
+
+def test_a_stale_backup_alerts_only_while_a_schedule_is_on(tmp_path):
+
+    now = at("2026-11-09T12:00:00")
+    manager = alerts.AlertManager(alerts.AlertSettings(backup_max_age_hours=26), [Collector()], clock=lambda: now)
+    old = {"last_success": {"at": backup.iso(now - timedelta(hours=30))}}
+
+    manager.evaluate(backup_status=old, schedule_enabled=False)
+    assert manager.view()["active"] == []
+
+    manager.evaluate(backup_status=old, schedule_enabled=True)
+    assert [alert["key"] for alert in manager.view()["active"]] == ["backup_stale"]
+
+
+def test_the_webhook_receives_the_alert_and_its_url_is_never_logged(caplog):
+
+    sent = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, size):
+            return b""
+
+    def opener(request, timeout):
+        sent.update(url=request.full_url, body=json.loads(request.data), timeout=timeout)
+        return Response()
+
+    secret = "https://hooks.example.test/services/T000/SECRET-TOKEN"
+    manager = alerts.AlertManager(alerts.AlertSettings(), [alerts.LogNotifier(), alerts.WebhookNotifier(secret, opener=opener)])
+    manager.fire("backup_failed", "critical", "The backup failed (storage_error).")
+
+    assert sent["url"] == secret and sent["timeout"] == 5.0
+    assert sent["body"]["source"] == "logidoc-rag" and sent["body"]["alert"]["key"] == "backup_failed"
+
+    def unreachable(request, timeout):
+        raise OSError(f"cannot reach {secret}")
+
+    failing = alerts.AlertManager(alerts.AlertSettings(), [alerts.WebhookNotifier(secret, opener=unreachable)])
+    with caplog.at_level("WARNING"):
+        failing.fire("disk_low", "warning", "low")
+
+    assert "SECRET-TOKEN" not in caplog.text and "hooks.example.test" not in caplog.text
+
+
+# ============================================================
+# THE ADMINISTRATORS' ENDPOINTS
+# ============================================================
+
+def wait_until(condition, seconds=60):
+
+    deadline = time.monotonic() + seconds
+
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.1)
+
+    return False
+
+
+def test_only_an_administrator_sees_and_starts_backups(tmp_path):
+
+    rig = Rig(tmp_path, "required")
+
+    assert rig.client().get("/api/admin/backups").status_code == 401
+    assert rig.client("bob").get("/api/admin/backups").status_code == 403
+    assert rig.client("bob").post("/api/admin/backups", json={}).status_code == 403
+    assert rig.client().post("/api/admin/backups", json={}).status_code == 401
+
+    for url in ("/api/admin/metrics", "/api/admin/alerts"):
+        assert rig.client().get(url).status_code == 401 and rig.client("bob").get(url).status_code == 403
+
+    # The CSRF rule holds here too
+    bare = rig.client("alice")
+    bare.headers.pop("X-LogiDoc-Client")
+    assert bare.post("/api/admin/backups", json={}).status_code == 403
+
+
+def test_an_administrator_makes_a_backup_and_sees_it(tmp_path):
+
+    rig = Rig(tmp_path, "required")
+    admin = rig.client("alice")
+
+    assert admin.post("/api/admin/backups", json={"label": "before the upgrade"}).json() == {"started": True}
+    assert wait_until(lambda: admin.get("/api/admin/backups").json()["status"].get("last_success"))
+
+    overview = admin.get("/api/admin/backups").json()
+    [made] = overview["backups"]
+
+    assert made["usable"] and made["origin"] == "manual" and made["label"] == "before the upgrade"
+    assert overview["schedule"] == "off" and overview["running"] is False
+    assert str(tmp_path) not in json.dumps(overview)
+
+    # Made inside the test's own folder, never the project's backups/
+    assert (rig.state.backup_dir / made["backup_id"]).is_dir()
+
+
+def test_a_second_backup_while_one_runs_is_refused(tmp_path):
+
+    rig = Rig(tmp_path, "required")
+    runner = rig.state.operations.runner
+    runner.lock.acquire()
+
+    try:
+        reply = rig.client("alice").post("/api/admin/backups", json={})
+        assert reply.status_code == 409 and reply.json() == {"detail": "A backup is already running."}
+    finally:
+        runner.lock.release()
+
+
+def test_the_metrics_endpoint_in_json_and_prometheus_formats(tmp_path):
+
+    rig = Rig(tmp_path, "required")
+    admin = rig.client("alice")
+    admin.get("/api/overview")
+
+    snapshot = admin.get("/api/admin/metrics").json()
+    routes = {item["labels"]["route"] for item in snapshot["counters"]["logidoc_http_requests_total"]}
+    assert "/api/overview" in routes and snapshot["uptime_seconds"] >= 0
+
+    text = admin.get("/api/admin/metrics", params={"format": "prometheus"})
+    assert text.headers["content-type"].startswith("text/plain")
+    assert "# TYPE logidoc_http_requests_total counter" in text.text
+    assert 'logidoc_http_request_duration_seconds_bucket{route="/api/overview",le="+Inf"}' in text.text
+
+    assert admin.get("/api/admin/alerts").json() == {"active": [], "recent": []}
 
 
 # ============================================================

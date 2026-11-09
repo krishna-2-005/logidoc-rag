@@ -31,6 +31,7 @@ Nothing is retried here.
 import logging
 import sys
 import threading
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -42,6 +43,7 @@ import httpx
 import ollama
 
 import config
+import metrics
 
 
 log = logging.getLogger("logidoc.models")
@@ -152,9 +154,13 @@ def call(kind, model, request):
     """
 
     unavailable = f"The {kind} service is unavailable (it could not be reached)."
+    started = time.perf_counter()
 
     try:
-        return request(client(kind))
+        response = request(client(kind))
+        metrics.REGISTRY.observe("logidoc_llm_request_duration_seconds", time.perf_counter() - started,
+                                 {"kind": kind, "outcome": "success"})
+        return response
     except httpx.ConnectTimeout as error:
         failure, cause = ModelUnavailable(unavailable), error
     except httpx.TimeoutException as error:
@@ -168,6 +174,8 @@ def call(kind, model, request):
 
     # The service's own words (never the request, so never document text)
     log.warning("The %s call failed: %s: %s", kind, type(cause).__name__, cause)
+    metrics.REGISTRY.observe("logidoc_llm_request_duration_seconds", time.perf_counter() - started,
+                             {"kind": kind, "outcome": type(failure).__name__})
 
     raise failure from cause
 

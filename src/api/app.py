@@ -8,10 +8,26 @@ create_app() builds the FastAPI application: the routers, CORS limited to
 the configured origins, the CSRF header check, security headers, error
 handlers that never return a stack trace, and (when the React build exists)
 the single-page frontend.
+
+Middleware, outermost first:
+
+    security headers         X-Content-Type-Options, X-Frame-Options, ...
+    ProxyHeadersMiddleware   the client's scheme and address from
+                             X-Forwarded-*, trusted only from
+                             LOGIDOC_FORWARDED_ALLOW_IPS
+    ApiVersions              /api/v1/... served as /api/...
+    RequestContext           request IDs, access log, metrics, unhandled
+                             errors as a bare 500 (src/observability.py)
+    TrustedHosts             LOGIDOC_TRUSTED_HOSTS (and the loopback names,
+                             for probes on the machine itself)
+    HttpsPolicy              optional redirect to HTTPS, HSTS
+    BodyLimit                413 for a body over the limit
+    CORSMiddleware           the configured origins only
 """
 
 import logging
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -26,11 +42,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 import config
+import metrics
 import readiness
-from api import routes_assistant, routes_audit, routes_auth, routes_carriers, routes_extraction, routes_ingestion, routes_workflow
+from api import (routes_assistant, routes_audit, routes_auth, routes_carriers, routes_extraction, routes_ingestion,
+                 routes_operations, routes_workflow)
 from api.core import ApiSettings, ApiState, csrf_guard
+from api.middleware import BodyLimit, HttpsPolicy, TrustedHosts
+from observability import RequestContext, set_error_category
 from audit_service import Locations
 from auth import ConfigError
 from extraction_store import STORE_STATE_ERRORS
@@ -94,7 +115,18 @@ def default_state(settings):
         Locations.from_config(config),
         config.AUTH_DB_PATH,
         Policy(min_note=config.MIN_NOTE_LENGTH, require_approval=config.REQUIRE_APPROVAL),
+        backup_dir=config.BACKUP_DIR,
     )
+
+
+LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "[::1]")
+
+
+def allowed_hosts(settings):
+
+    hosts = list(settings.trusted_hosts)
+
+    return hosts if "*" in hosts else hosts + [host for host in LOOPBACK_HOSTS if host not in hosts]
 
 
 def create_app(state=None, settings=None):
@@ -106,22 +138,46 @@ def create_app(state=None, settings=None):
     settings = settings or (state.settings if state else ApiSettings.from_env())
     state = state or default_state(settings)
 
+    @asynccontextmanager
+    async def lifespan(application):
+
+        # The backup schedule and the monitor run only in the server process (serve.py), never in the tests
+        if state.settings.background_jobs:
+            state.operations.start()
+
+        try:
+            yield
+        finally:
+            if state.operations_cache is not None:
+                state.operations_cache.stop()
+
     app = FastAPI(
         title="LogiDoc-RAG API", version="1.0",
         docs_url=None if state.settings.cookie_secure else "/api/docs",
         redoc_url=None, openapi_url=None if state.settings.cookie_secure else "/api/openapi.json",
+        lifespan=lifespan,
     )
 
     app.state.logidoc = state
 
     app.add_middleware(
         CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type", "X-LogiDoc-Client"],
-        expose_headers=["API-Version"], max_age=600,
+        allow_methods=["GET", "POST", "PATCH"],
+        allow_headers=["Content-Type", "X-LogiDoc-Client", "X-Request-ID", "X-Correlation-ID"],
+        expose_headers=["API-Version", "X-Request-ID", "X-Correlation-ID"], max_age=600,
     )
 
-    # Outermost: the version prefix is resolved before CORS, CSRF and routing see the request
+    # Added innermost first: each add_middleware wraps the ones before it
+    app.add_middleware(BodyLimit, limit=settings.max_request_bytes, upload_limit=settings.max_upload_request_bytes)
+    app.add_middleware(HttpsPolicy, redirect=settings.https_redirect, hsts_seconds=settings.hsts_seconds)
+    app.add_middleware(TrustedHosts, allowed=allowed_hosts(settings))
+    app.add_middleware(RequestContext, registry=metrics.REGISTRY)
+
+    # The version prefix is resolved before the request is tracked, CORS, CSRF and routing see it
     app.add_middleware(ApiVersions)
+
+    if settings.forwarded_allow_ips:
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.forwarded_allow_ips)
 
     @app.middleware("http")
     async def secure(request: Request, call_next):
@@ -140,25 +196,40 @@ def create_app(state=None, settings=None):
 
     for router in (routes_auth.router, routes_audit.router, routes_workflow.router, routes_ingestion.router,
                    routes_assistant.router, routes_extraction.router, routes_extraction.history_router,
-                   routes_carriers.router):
+                   routes_carriers.router, routes_operations.router):
         app.include_router(router, dependencies=[Depends(csrf_guard)])
 
     @app.get("/api/health")
     def health():
 
+        # Alive: the process answers. Never touches a store or a service
         return {"status": "ok"}
 
     @app.get("/api/ready")
     def ready():
 
         # /api/health says the process answers; this says whether the work can be done (src/readiness.py).
-        # Status words only, never a path, host or model name; 503 only when a folder is unusable
-        report = readiness.readiness(state.locations)
+        # Status words only, never a path, host or model name; 503 only when a folder or a database is unusable.
+        # An offline model service is "degraded", never "not_ready"
+        thresholds = state.operations.alerts.settings
+        report = readiness.readiness(
+            state.locations, extra_stores={"auth": state.user_db},
+            disk_folders={"data": Path(state.locations.raw_dir).parent, "index": state.locations.chroma_dir,
+                          "backups": state.operations.backup_settings.root},
+            warning_mb=thresholds.disk_warning_mb, critical_mb=thresholds.disk_critical_mb,
+        )
+
+        for status in (readiness.READY, readiness.DEGRADED, readiness.NOT_READY):
+            metrics.REGISTRY.set("logidoc_readiness", 1 if report["status"] == status else 0, {"status": status})
+
+        metrics.REGISTRY.set("logidoc_ollama_available", 1 if report["checks"]["model_service"].get("ok") else 0)
 
         return JSONResponse(status_code=503 if report["status"] == readiness.NOT_READY else 200, content=report)
 
     @app.exception_handler(RequestValidationError)
     async def invalid(request: Request, error: RequestValidationError):
+
+        set_error_category(request, "validation")
 
         problems = [
             f"{'.'.join(str(part) for part in item['loc'][1:])}: {item['msg']}" if len(item["loc"]) > 1 else item["msg"]
@@ -171,6 +242,8 @@ def create_app(state=None, settings=None):
 
         # Unreadable, too new, invalid, awaiting an upgrade, or an upgrade that failed: never an empty answer.
         # The messages name no path and no document text.
+        set_error_category(request, "database")
+
         return JSONResponse(status_code=503, content={"detail": str(error)})
 
     for kind in STORE_STATE_ERRORS:
@@ -182,6 +255,7 @@ def create_app(state=None, settings=None):
         # Ollama stopped, too slow, misconfigured or refusing (model_client): the message names no host or
         # library; the cause is logged without a stack trace (it holds no document text)
         log.warning("Model service error in %s %s: %s (%s)", request.method, request.url.path, error, error.__cause__)
+        set_error_category(request, "model_service")
 
         status = 504 if isinstance(error, ModelTimeout) else 422 if isinstance(error, ModelRejected) else 503
 
@@ -190,11 +264,14 @@ def create_app(state=None, settings=None):
     @app.exception_handler(ConfigError)
     async def misconfigured(request: Request, error: ConfigError):
 
+        set_error_category(request, "configuration")
+
         return JSONResponse(status_code=500, content={"detail": str(error)})
 
     @app.exception_handler(Exception)
     async def unexpected(request: Request, error: Exception):
 
+        # Reached only by an error outside RequestContext (which answers the others the same way).
         # The cause goes to the server log; the client never sees a stack trace or a path
         log.exception("Unhandled error in %s %s", request.method, request.url.path)
 

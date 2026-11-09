@@ -1,0 +1,39 @@
+# systemd unit for the LogiDoc-RAG API (docs/PRODUCTION_DEPLOYMENT.md)
+#
+#   sudo cp deploy/logidoc-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now logidoc-api
+#
+# One process only: the ingestion lock that keeps uploads, backups and document
+# changes apart works inside one process, so never add uvicorn workers.
+# Settings (and nothing secret in this file) come from the environment file,
+# readable by root and the service user only (chmod 640).
+
+[Unit]
+Description=LogiDoc-RAG API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=logidoc
+Group=logidoc
+WorkingDirectory=/opt/logidoc-rag
+EnvironmentFile=/etc/logidoc/logidoc.env
+ExecStart=/opt/logidoc-rag/venv/bin/python src/api/serve.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Hardening: the service writes only its data, index, backup and log folders
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/logidoc /var/backups/logidoc /var/log/logidoc
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

@@ -477,6 +477,7 @@ def test_the_restored_folder_runs_the_application(world):
     for url in ("/api/history/shipments/SHJ-2026-101", f"/api/exceptions/{DETENTION}/history", "/api/carrier-registry"):
         assert restored.get(url).json() == original.get(url).json(), url
 
+    assert restored.get("/api/ready").json()["checks"]["databases"] == {"ok": True, "unusable": []}
 
 
 @pytest.mark.parametrize("where", ["data", "inside data", "backups", "around data"])

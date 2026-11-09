@@ -44,6 +44,7 @@ import document_extraction
 import document_completeness as completeness
 import financial_exposure as exposure
 import ingestion_service
+import metrics
 import reconciliation
 from audit_analytics import build_exceptions, build_snapshot, source_fingerprint, with_reviews
 from chunker import read_chunks
@@ -387,7 +388,8 @@ class AuditService:
                 for item in snapshot["shipments"]:
                     audit_inputs.mark_corrections_unavailable(item["inputs"])
 
-            add_freight_audits(snapshot, by_key, self.locations.raw_dir, approved_of, self.extractions)
+            with metrics.timed("logidoc_freight_audit_duration_seconds"):
+                add_freight_audits(snapshot, by_key, self.locations.raw_dir, approved_of, self.extractions)
 
             # A correction the freight audit used is consumed by the audit like the
             # reconciliation's: history records it, staleness and supersession see it

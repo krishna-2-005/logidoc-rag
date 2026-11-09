@@ -192,6 +192,9 @@ const CHECK_NAMES: Record<string, string> = {
   data_writable: "Data folder",
   extraction_store: "Extraction store",
   model_service: "Language models",
+  databases: "Databases",
+  vector_index: "Vector index",
+  disk_space: "Free disk space",
 }
 
 /** Whether the server can do its work right now (GET /api/ready), refreshed every minute */
