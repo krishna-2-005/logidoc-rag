@@ -763,11 +763,12 @@ returns; it never calculates an audit.
 
 | File (default in `data/`) | Schema | Content |
 |---|---|---|
-| `audit_reviews.sqlite3` | v2 (migrates v1 in one transaction) | `exception_reviews` (state, assignee, evidence references, approval), `review_events` (append-only, hash-chained) |
-| `audit_history.sqlite3` | v3 (migrates v1, v2) | append-only runs, snapshots (with carrier, currency), findings, and per run the consumed `run_inputs`, `run_input_sets` and `run_supersessions` |
+| `audit_reviews.sqlite3` | v3 (migrates older versions in one transaction) | `exception_reviews` (state, assignee, evidence references, approval), `review_events` (append-only, hash-chained) |
+| `audit_history.sqlite3` | v5 (migrates v1 to v4) | append-only runs, snapshots (with carrier, currency), findings, freight audit records, and per run the consumed `run_inputs`, `run_input_sets` and `run_supersessions` |
 | `auth.sqlite3` | v1 | `users` (password hashes), `sessions` (token hashes), `auth_events` |
 | `ingestion_register.sqlite3` | v1 | `ingestion_files`, append-only `ingestion_events` and `ingestion_actions`; metadata only, never file contents |
 | `extractions.sqlite3` | v5 (an older file is never upgraded by opening it: it reads as "migration pending" until `python scripts/migrate_extraction_store.py` makes a verified backup and migrates in one transaction; `--dry-run` first) | `extractions` (typed fields per file hash and extractor version, no raw text, payload hash; no update/delete), append-only hash-chained `field_corrections` (proposals) and `correction_decisions` (one approval or rejection each), append-only `extraction_aliases` (every file name a content was seen under) |
+| `carrier_registry.sqlite3` | v1 | registered carriers and their identifiers, document-name links decided by a second administrator, append-only `carrier_events` |
 
 All databases are local runtime data and are git-ignored, as are
 `data/quarantine/` and `data/archive/`. A database with a newer schema than
@@ -775,17 +776,25 @@ the code is refused, not guessed at.
 
 ### Deploying
 
+The full procedure, the settings, HTTPS with Caddy or nginx and a deployment
+checklist are in [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md).
+In short:
+
 1. Python 3.10 (3.12 is also tested), `pip install -r requirements.txt`, Ollama running with both models.
 2. `npm ci && npm run build` in `frontend/`.
-3. Set `LOGIDOC_ENV=production`, `LOGIDOC_AUTH_MODE=required`,
-   `LOGIDOC_CORS_ORIGINS` (only if the UI is served from another origin) and
-   create the first administrator with `scripts/manage_users.py`.
-4. Run `python src/api/serve.py` behind a TLS-terminating reverse proxy (nginx,
-   Caddy, IIS). Do not expose it without TLS. Streamlit (`app.py`) can run the
-   same way with `LOGIDOC_AUTH_MODE=required`, but it has its own server: do
-   not publish it without the same proxy.
-5. One process, one writer: do not run two ingestion processes on one folder.
-   Back up `data/` (databases, raw PDFs, archive) and `chroma_db/`.
+3. Start from `deploy/logidoc.production.env.example`: `LOGIDOC_ENV=production`
+   refuses to start until sign-in, trusted hosts, HTTPS origins and the data,
+   index and backup folders are all set (`python src/api/serve.py --check`
+   validates without starting). Create the first administrator with
+   `scripts/manage_users.py`.
+4. Run `python src/api/serve.py` (one process) behind the HTTPS reverse proxy
+   in `deploy/`. Do not expose it without TLS. Streamlit (`app.py`) has its
+   own server: do not publish it, and do not let it write to the data the API
+   server uses.
+5. Backups: `LOGIDOC_BACKUP_SCHEDULE` runs verified backups in the server, and
+   `scripts/manage_backups.py` makes, verifies and restores them
+   ([docs/AUTOMATED_BACKUP_OPERATIONS.md](docs/AUTOMATED_BACKUP_OPERATIONS.md)).
+   Logs, metrics and alerts: [docs/OBSERVABILITY_AND_MONITORING.md](docs/OBSERVABILITY_AND_MONITORING.md).
 
 ## Setup (Windows, PowerShell)
 
@@ -1072,14 +1081,17 @@ The PDFs are in `tests/fixtures/`; SHJ-2026-001 is also the sample in
   itself is unchanged, so stored data keeps its keys; correcting the printed
   ID and uploading the document again resolves a collision.
 - **Single machine, single writer.** Authentication is local accounts only
-  (no SSO or MFA, and it needs HTTPS in front); no locking across
-  processes, backups or monitoring; ChromaDB caches indexes
-  per process, so do not ingest from another process while the app runs.
+  (no SSO or MFA, and it needs HTTPS in front). The API server holds a lock
+  on its data folder, but Streamlit does not take it; ChromaDB caches
+  indexes per process, so do not ingest from another process while the app
+  runs. Backups are written to one folder (copying them off the machine is
+  not built in), and metrics and alerts live in the server process.
 - **Full rebuild** (`python src/vector_store.py`) deletes and recreates all
   vectors and is not used by the app.
 - Text extraction quality limits answers (e.g. the "Special Instructions"
   line of the sample BOLs does not extract cleanly).
 
-A production version would need semantic answer verification, an
-evaluation set built from real documents, access control, audit logging,
-backups, and monitoring.
+Before real production use it still needs semantic answer verification, an
+evaluation set built from real documents, single sign-on, off-machine backup
+copies, and a deployment that has been operated and restored for real
+(docs/SPRINT_1_IMPLEMENTATION_REPORT.md lists what was and was not verified).

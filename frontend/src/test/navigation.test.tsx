@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { Route, Routes, useLocation } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -238,6 +238,22 @@ describe("Application shell", () => {
     await waitFor(() => expect(within(nav).getByText("4")).toBeInTheDocument())
     expect(within(nav).getByRole("link", { name: "Exception Center" })).toHaveAttribute("href", "/exceptions")
     expect(within(nav).getByRole("link", { name: "Invoice Register" })).toHaveAttribute("href", "/invoices")
+  })
+
+  it("names the checks that degrade the server, the vector index and free disk space among them", async () => {
+    const degraded = {
+      status: "degraded",
+      checks: { ...READY.checks, databases: { ok: true, unusable: [] }, vector_index: { ok: false, state: "unreadable" }, disk_space: { ok: true, level: "warning" } },
+    }
+    mockApi({ ...DASHBOARD, "/api/session": ADMIN_SESSION, "/api/ready": degraded })
+    renderPage(<App />)
+
+    const status = await screen.findByRole("button", { name: /Running degraded/ })
+    act(() => status.focus())
+
+    expect((await screen.findAllByText(/✗ Vector index/)).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/✓ Databases/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/✓ Free disk space/).length).toBeGreaterThan(0)
   })
 
   it("says the server is not ready when the readiness check answers 503", async () => {

@@ -37,6 +37,19 @@ from test_api import Rig  # noqa: E402
 BOTH_MODELS = {f"{config.EMBEDDING_MODEL}:latest", config.LLM_MODEL}
 
 
+class Space:
+
+    def __init__(self, megabytes):
+        self.free = megabytes * 1048576
+
+
+@pytest.fixture(autouse=True)
+def plenty_of_space(monkeypatch):
+    """The free-space check reads a stand-in disk, so this machine's own free space cannot change a result."""
+
+    monkeypatch.setattr(readiness, "disk_usage", lambda path: Space(100_000))
+
+
 @pytest.fixture
 def models(monkeypatch):
     """
@@ -73,8 +86,50 @@ def test_everything_usable_is_ready(tmp_path, models):
         "data_writable": {"ok": True},
         "extraction_store": {"ok": True, "state": "absent"},
         "model_service": {"ok": True, "reachable": True, "missing": []},
+        "databases": {"ok": True, "unusable": []},
+        "vector_index": {"ok": True, "state": "absent"},
+        "disk_space": {"ok": True, "level": "ok"},
     }
     assert_says_nothing_private(text, rig)
+
+
+def test_an_unreadable_database_is_not_ready_and_named_by_its_role(tmp_path, models):
+
+    rig = Rig(tmp_path, "local")
+    rig.locations.history_db.write_bytes(b"this is not a database" * 100)
+
+    status, body, text = ready(rig)
+
+    assert status == 503 and body["status"] == readiness.NOT_READY
+    assert body["checks"]["databases"] == {"ok": False, "unusable": ["audit_history"]}
+    assert_says_nothing_private(text, rig)
+
+
+def test_an_unreadable_vector_index_degrades_without_stopping_the_audit(tmp_path, models):
+
+    rig = Rig(tmp_path, "local")
+    rig.locations.chroma_dir.mkdir(parents=True, exist_ok=True)
+    (rig.locations.chroma_dir / "chroma.sqlite3").write_bytes(b"garbage" * 1000)
+
+    status, body, _ = ready(rig)
+
+    assert status == 200 and body["status"] == readiness.DEGRADED
+    assert body["checks"]["vector_index"] == {"ok": False, "state": "unreadable"}
+    assert rig.client().get("/api/overview").status_code == 200
+
+
+@pytest.mark.parametrize("free, level, status", [(100_000, "ok", "ready"), (1000, "warning", "ready"),
+                                                 (100, "critical", "degraded")])
+def test_free_space_is_a_level_and_only_critical_degrades(tmp_path, models, monkeypatch, free, level, status):
+
+    monkeypatch.setattr(readiness, "disk_usage", lambda path: Space(free))
+    rig = Rig(tmp_path, "local")
+
+    code, body, text = ready(rig)
+
+    assert code == 200 and body["status"] == status
+    assert body["checks"]["disk_space"] == {"ok": level != "critical", "level": level}
+    assert "MB" not in text and str(free) not in text
 
 
 def test_an_unreachable_model_service_is_degraded_not_down(tmp_path, models):

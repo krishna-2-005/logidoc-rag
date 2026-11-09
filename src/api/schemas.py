@@ -660,3 +660,75 @@ class AuditRunFeed(Contract):
     runs: list[FeedRun]
     next_after: int
     has_more: bool
+
+
+# ============================================================
+# OPERATIONS (administrators: backups, alerts)
+# ============================================================
+
+class BackupError(Contract):
+    category: str
+    message: str
+
+
+class BackupListed(Contract):
+    """A backup in the backup folder. usable: complete, verified when made, manifest intact."""
+
+    backup_id: str
+    origin: Literal["manual", "scheduled"]
+    created_at: str | None
+    status: str
+    usable: bool
+    incomplete: bool
+    label: str | None
+    bytes: int | None
+    error: BackupError | None
+    problems: list[str]
+
+
+class BackupAttempt(Contract):
+    at: str
+    outcome: Literal["success", "failed"]
+    origin: str
+    backup_id: str | None
+    category: str | None
+    message: str | None
+
+
+class BackupStatus(Contract):
+    last_attempt: BackupAttempt | None = None
+    last_success: BackupAttempt | None = None
+    last_failure: BackupAttempt | None = None
+    consecutive_failures: int = 0
+
+
+class RetentionPolicy(Contract):
+    daily: int
+    weekly: int
+    monthly: int
+
+
+class BackupOverview(Contract):
+    schedule: str
+    running: bool
+    retention: RetentionPolicy
+    status: BackupStatus
+    backups: list[BackupListed]
+
+
+class BackupStarted(Contract):
+    started: bool
+
+
+class Alert(Contract):
+    key: str
+    severity: Literal["warning", "critical"]
+    message: str
+    state: Literal["firing", "resolved"]
+    first_seen: str
+    last_seen: str
+
+
+class AlertsView(Contract):
+    active: list[Alert]
+    recent: list[Alert]

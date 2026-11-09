@@ -1,0 +1,43 @@
+# LogiDoc-RAG behind Caddy: HTTPS with automatic certificates (docs/PRODUCTION_DEPLOYMENT.md)
+#
+# Caddy obtains the certificate from Let's Encrypt (or ZeroSSL) on first start,
+# renews it on its own before it expires, and redirects HTTP to HTTPS. The
+# host name must resolve to this machine and ports 80 and 443 must reach it.
+# Replace logidoc.example.com with your host name (the same value goes in
+# LOGIDOC_TRUSTED_HOSTS and, as https://..., in LOGIDOC_CORS_ORIGINS).
+#
+# The API listens on 127.0.0.1:8000 only (LOGIDOC_API_HOST, LOGIDOC_API_PORT);
+# Ollama (11434) is never published.
+
+logidoc.example.com {
+	# The whole-upload limit: LOGIDOC_MAX_UPLOAD_FILES x LOGIDOC_MAX_UPLOAD_MB + 1 MB (20 x 25 + 1 by default)
+	request_body {
+		max_size 501MB
+	}
+
+	encode zstd gzip
+
+	# The metrics stay on the machine (they need an administrator's session anyway)
+	@internal path /api/admin/metrics*
+	respond @internal 404
+
+	reverse_proxy 127.0.0.1:8000 {
+		# Caddy sends X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host itself;
+		# the API trusts them from 127.0.0.1 (LOGIDOC_FORWARDED_ALLOW_IPS)
+		header_up X-Request-ID {http.request.uuid}
+
+		# A generated answer may take up to LOGIDOC_LLM_TIMEOUT (120 s)
+		transport http {
+			read_timeout 180s
+			write_timeout 180s
+		}
+
+		health_uri /api/health
+		health_interval 30s
+	}
+
+	log {
+		output file /var/log/caddy/logidoc-access.log
+		format json
+	}
+}
