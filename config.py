@@ -73,6 +73,12 @@ FREIGHT_TOLERANCES = os.environ.get("LOGIDOC_FREIGHT_TOLERANCES") or ""
 # identifiers and the approved links of document names to them
 CARRIER_DB_PATH = Path(os.environ.get("LOGIDOC_CARRIER_DB") or DATA_DIR / "carrier_registry.sqlite3")
 
+# Backups (src/backup.py, scripts/manage_backups.py): verified copies of the databases,
+# documents and vector index. Keep them on another disk than the data in
+# production (required there: LOGIDOC_BACKUP_DIR); development default:
+# backups/ in the project, ignored by git.
+BACKUP_DIR = Path(os.environ.get("LOGIDOC_BACKUP_DIR") or BASE_DIR / "backups")
+
 
 def ingestion_locations(raw_dir=RAW_DATA_DIR):
     """
