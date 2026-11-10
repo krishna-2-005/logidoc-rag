@@ -30,8 +30,10 @@ PATTERNS = (
         r"access[_-]?key|private[_-]?key|client[_-]?secret|logidoc_session)\b(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;&]+)"),
      r"\1\2<redacted>"),
     (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),
-    # Windows drive and UNC paths: keep the last part
-    (re.compile(r"(?i)(?:\b[a-z]:|\\\\[^\\\s]+)[\\/](?:[^\\/\s:*?\"'<>|]+[\\/])*([^\\/\s:*?\"'<>|]*)"), r"<path>/\1"),
+    # Windows drive and UNC paths: keep the last part. Separators may be doubled: Python's own error messages
+    # quote paths with repr ("[WinError 5] Access is denied: 'C:\\Users\\...'")
+    (re.compile(r"(?i)(?:\b[a-z]:|\\{2,4}[^\\/\s]+)(?:\\{1,2}|/)(?:[^\\/\s:*?\"'<>|]+(?:\\{1,2}|/))*([^\\/\s:*?\"'<>|]*)"),
+     r"<path>/\1"),
     # POSIX absolute paths of two or more parts, except API routes
     (re.compile(r"(?<![\w.:/<>-])/(?!api/)(?:[\w.@+-]+/)+([\w.@+-]*)"), r"<path>/\1"),
 )

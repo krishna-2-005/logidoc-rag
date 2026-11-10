@@ -234,6 +234,42 @@ def test_a_restore_target_whose_paths_windows_cannot_open_is_refused(world, monk
     assert not target.exists()
 
 
+def test_a_file_held_open_for_a_moment_does_not_fail_the_backup(world, monkeypatch):
+    """Windows: a scanner holding a file just written makes a rename fail with Access is denied, briefly."""
+
+    real_replace = backup.os.replace
+    refused = {"count": 0}
+
+    def busy_then_free(source, destination):
+        if refused["count"] < 3:
+            refused["count"] += 1
+            raise PermissionError(13, "Access is denied")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(backup.os, "replace", busy_then_free)
+    monkeypatch.setattr(backup, "RENAME_DELAY", 0)
+
+    manifest, folder = make(world)
+
+    assert refused["count"] == 3 and manifest["status"] == "complete" and backup.verify_backup(folder)["ok"]
+
+
+def test_a_file_that_stays_locked_fails_the_backup_cleanly(world, monkeypatch):
+
+    def always_busy(source, destination):
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(backup.os, "replace", always_busy)
+    monkeypatch.setattr(backup, "RENAME_DELAY", 0)
+
+    with pytest.raises(PermissionError):
+        make(world)
+
+    # Nothing usable was produced and no temporary file of the manifest was left behind
+    assert all(not item["usable"] for item in backup.list_backups(world.backups))
+    assert not list(world.backups.rglob(".manifest.json.*.tmp"))
+
+
 # ============================================================
 # INTERRUPTED AND FAILED BACKUPS
 # ============================================================
