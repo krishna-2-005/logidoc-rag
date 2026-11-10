@@ -8,11 +8,22 @@ covers four workstreams:
 - monitoring, structured logs and alerting
 - automated backup and restore procedures
 
-Everything is uncommitted, waiting for review.
+**Status.** The sprint was committed and pushed on the owner's instruction in
+three commits:
+- `0a1420d`: backups
+- `7444d1d`: the server
+- `1e592a7`: documentation
 
-Every result below was produced on the development machine (Windows 11) during
-this sprint, on synthetic data in temporary folders. Nothing was deployed to a
-server, no certificate was issued, and no restore was performed on real data.
+Release validation on 2026-11-10 found two defects in that pushed code
+(section 7). Their fixes, with regression tests, and this updated report
+are uncommitted.
+
+**How to read the results.** Every result below was produced on the
+development machine (Windows 11) during this sprint, on synthetic data in
+temporary folders. Nothing was deployed to a server, no certificate was
+issued, and no restore was performed on real data. Section 7 says, for each
+result, whether it was measured, estimated, synthetic, or untested in a real
+environment.
 
 ## 1. What was implemented
 
@@ -242,26 +253,99 @@ New settings, all in `.env.example`; production values are in
 
 ## 7. Test results
 
-Every check below was run during this sprint. The memory-heavy suites ran
-one at a time, with temporary files kept off the nearly full drives where
-possible.
+### Final results (release validation, 2026-11-10, on the code with both fixes)
 
-| Check | Result |
+Each check ran on its own (no heavy jobs in parallel), with temporary files
+on `C:\Users\kuchu\AppData\Local\Temp\ldt`. Exit codes were read from the
+runs.
+
+| Check | Command | Result |
+|---|---|---|
+| Full Python 3.12 suite | `venv312\Scripts\python.exe -m pytest -q -p no:cacheprovider tests` | **2,127 passed, 0 failed, 0 skipped, exit 0** (6 min 12 s; 10:39:35 to 10:45:49 UTC). Ollama was running, so its live tests ran. One warning (Starlette's httpx deprecation, already there before) |
+| Python 3.10 relevant tests | `venv\Scripts\python.exe -m pytest -q -p no:cacheprovider` on `test_backup_recovery`, `test_backup_automation`, `test_observability`, `test_production_config`, `test_readiness`, `test_api`, `test_api_contracts` | **262 passed, 0 failed, exit 0** (1 min 26 s), Python 3.10.11 |
+| Frontend type check | `npm run typecheck` (`tsc --noEmit`) | exit 0 |
+| Frontend tests | `npm test` (vitest) | **9 files, 229 passed, exit 0** (14.9 s) |
+| Production frontend build | `npm run build` | exit 0; main bundle 988.20 kB (988.12 kB at 068074e); the existing large-chunk warning is unchanged |
+| Dependencies | `python -m pip check` on both environments | no broken requirements, exit 0 on both |
+| OpenAPI contract | `python scripts/export_openapi.py --check` | up to date, exit 0 (three new admin paths, additions only) |
+| Evaluation | `python scripts/evaluate.py` (offline, deterministic, Python 3.10) on an extracted copy of 068074e and on the working tree | every metric identical: recall@5 1.00, hit@1 1.00, answer match 1.00, citation precision 1.00, abstention 1.00, cross-shipment leakage 0.00; every threshold passes. Only the two timing lines differ (retrieval p95 6 vs 5 ms, total 0.8 vs 0.7 s) |
+| Real data | SHA-256 of every file in `data/` and `chroma_db/`, compared with the hashes taken on 2026-11-09 before any Sprint 1 testing | **all 34 files byte-for-byte identical**; no `backups/` folder or server lock was created in the project |
+| Whitespace | `git diff --check` | clean |
+
+The suite grew between runs: 2,118 in the first run on 2026-11-09, 2,122 on
+the pushed code (also run again on 2026-11-10: 2,122 passed, exit 0), and
+2,127 now with the five regression tests below.
+
+Tests per new or extended file (collected):
+
+| File | Tests |
 |---|---|
-| Full Python 3.12 suite (final code) | **2,122 passed, 0 failed, 0 skipped** (10 min 43 s); Ollama was running |
-| Full Python 3.12 suite (first run, before the last fixes) | 2,118 passed, 0 failed, 0 skipped (15 min 54 s). Ollama was running, so its 3 live tests ran instead of being skipped |
-| Relevant tests on Python 3.10 (the new files, readiness, the API and the contracts) | 254 passed; the backup tests again after the last fixes: 70 passed |
-| New tests | `test_backup_recovery.py` 35, `test_backup_automation.py` 36, `test_observability.py` 28, `test_production_config.py` 47; `test_readiness.py` has 5 more (20) |
-| Frontend type check (`tsc --noEmit`) | clean |
-| Frontend tests (vitest) | 9 files, 229 passed (228 before, plus the readiness-names test) |
-| Production frontend build | succeeds; main bundle 988.20 kB (988.12 kB before); the large-chunk warning is the same as before |
-| `pip check` | no broken requirements on Python 3.10 and 3.12 |
-| OpenAPI contract | `export_openapi.py --check` up to date; three new paths, additions only; the contract and compatibility tests pass |
-| Evaluation (offline, deterministic, Python 3.10) | identical to commit 068074e: recall@5 1.00, hit@1 1.00, answer match 1.00, citation precision 1.00, abstention 1.00, cross-shipment leakage 0.00, every threshold passes. Only the timing lines differ |
-| Real data | all 34 files in `data/` and `chroma_db/` hashed before and after: identical; no backup or lock file was created in the project |
-| `git diff --check` | clean |
+| `test_backup_recovery.py` (backup, interruption, corruption, restore, migration compatibility, activation, locks) | 37 |
+| `test_backup_automation.py` (schedule, status, retention, runner, monitor and alerts, admin endpoints, command line) | 36 |
+| `test_observability.py` (request IDs, logs, redaction, metrics) | 31 |
+| `test_production_config.py` (environment validation, hosts, HTTPS, size limits, deployment files) | 47 |
+| `test_readiness.py` (5 more than the 15 before) | 20 |
 
-**Problems the new tests found, all fixed:**
+### Defects found by the release validation, fixed and re-tested
+
+1. **A momentary Windows file lock could fail a backup.** In the first
+   Python 3.10 run, `test_an_administrator_makes_a_backup_and_sees_it`
+   failed. The backup it started had failed with `[WinError 5] Access is
+   denied`, renaming its own `manifest.sha256` temporary file. Another
+   process, typically antivirus scanning a file just written, held the file
+   for a moment. The failure handling worked (the attempt was marked failed,
+   and the critical `backup_failed` alert fired), but a lock that brief
+   should not fail a backup, and the test passed when run again.
+   - **Fix:** renames in the backup (the atomic writes and the final
+     `.partial` rename) are retried on `PermissionError` for up to 2 s, and
+     a failed atomic write removes its own temporary file.
+   - **Tests:** `test_a_file_held_open_for_a_moment_does_not_fail_the_backup`
+     and `test_a_file_that_stays_locked_fails_the_backup_cleanly`.
+2. **Folder names leaked through redaction in Python's own error messages.**
+   The same failure's log line showed `<path>/\Users<path>/\AppData...`.
+   Python quotes Windows paths with doubled backslashes in `OSError`
+   messages (`'C:\\Users\\...'`), a format the path pattern did not cover,
+   so folder names such as `Users`, `AppData` and `Temp` stayed in logs,
+   alerts and backup error messages.
+   - **Fix:** the Windows and UNC path pattern accepts doubled separators.
+   - **Test:** `test_redaction_of_pythons_own_error_messages`, with three
+     real `OSError` formats.
+
+After both fixes, everything was rerun, with the results in the table
+above: the 3.10 set, the full 3.12 suite, the frontend, the dependency,
+contract and evaluation checks, and the data hashes.
+
+### What the evidence covers
+
+| Kind | What |
+|---|---|
+| Measured, on synthetic data in temporary folders | all test suites; backup, verify, restore and activation; interrupted, corrupted and locked backups; retention; alerts; the middleware and readiness timings; backup speed |
+| Measured, against the application's real settings and files | the deployment files checked against the application's settings (ports, upload limit, timeouts); `.env.example` checked against every setting the code reads; the production template refused until its placeholders are replaced; the OpenAPI contract; the evaluation; the real data's hashes (read only) |
+| Estimated, not measured | how backups scale beyond 50 MB; upload waits during a backup on large data; anything about a server other than this Windows machine |
+| Implemented but not tested in a real environment | HTTPS through Caddy or nginx with a real certificate; the systemd unit; a deployment; alert delivery to a real webhook; Prometheus scraping; a backup and restore of the real data; activation on a real installation |
+
+### Disk and storage during validation
+
+- **Free space moved a lot.** On 2026-11-09 the drives fell to about 1.1 GB
+  free on C: and 226 MB on D:, mostly because of other work on the machine.
+  The validation on 2026-11-10 started with 12 GB free on C: and 4.2 GB on D:.
+- **Space can fail a test.** One test failed on 2026-11-09 only because C:
+  was under the backup's default 1,024 MB free-space reserve, which is the
+  intended refusal. The test now sets the reserve to 0, and the reserve is
+  tested on its own.
+- **Path length on Windows.** Python 3.10's SQLite (3.40.1) cannot open paths
+  over 260 characters, which failed tests run from a deep temporary folder.
+  Backups and restores now refuse such paths up front, and the test suites
+  are run from a short temporary folder.
+
+### Earlier results (2026-11-09, before the release-validation fixes)
+
+These are kept for the record. The table above supersedes them.
+
+- Python 3.12: 2,118 passed, then 2,122 passed on the pushed code.
+- Python 3.10: 254 passed, then the backup tests 70 passed.
+
+**Problems the new tests found during development, all fixed:**
 - Verifying a truncated database copy raised an error instead of reporting
   it.
 - A path over 260 characters cannot be opened by the SQLite in Python 3.10
@@ -285,16 +369,67 @@ possible.
 
 ## 8. Performance impact
 
-These were measured on the development machine while it was busy: both
-disks were 99-100% full and other work was running. Read them as orders of
-magnitude, not as server figures. All data was synthetic.
+All measurements are on the development machine with synthetic data, so
+read them as orders of magnitude, not as server figures.
+
+### Middleware cost per request
+
+Measured on 2026-11-10 with Python 3.12.7, FastAPI 0.156.8, Starlette 1.7.0
+and uvicorn 0.54.0, on 20 logical CPUs at about 5% load, with 2.6 GB of RAM
+free.
+
+**Method.** The same route (`GET /api/x/{item}`, an async handler returning
+a small JSON object) was built three times:
+- `old`: the middleware of commit 068074e
+- `new`: the Sprint 1 stack, with logging off
+- `new+log`: the Sprint 1 stack, writing the production JSON access log to
+  a null stream, formatting and redaction included
+
+Each was called directly through ASGI in one event loop (no test client, no
+network), 300 warm-up calls each, then 10 rounds of 1,000 requests per
+scenario. The order rotated each round, so drift in machine load affects all
+three alike. Every request's latency was recorded. The benchmark was run
+twice:
+
+| Scenario | Median | p95 | p99 | Throughput (one client, sequential) | Round medians |
+|---|---|---|---|---|---|
+| old | 147.9 / 152.7 µs | 182.7 / 236.8 µs | 240.5 / 329.1 µs | 6,247 / 5,904 req/s | 146.6-149.9 / 148.4-159.1 µs |
+| new | 181.0 / 189.1 µs | 227.5 / 274.9 µs | 288.0 / 371.8 µs | 5,276 / 4,923 req/s | 178.0-183.1 / 185.5-195.7 µs |
+| new+log | 258.9 / 267.0 µs | 319.0 / 382.9 µs | 384.8 / 497.4 µs | 3,728 / 3,510 req/s | 257.6-261.4 / 261.3-274.0 µs |
+
+Each cell is run 1 / run 2, with 10,000 requests per scenario per run.
+
+| Result | Run 1 | Run 2 |
+|---|---|---|
+| Middleware alone (new minus old, medians) | +33 µs | +36 µs |
+| Middleware with the access log (new+log minus old) | +111 µs | +114 µs |
+
+The access line (JSON formatting and redaction regexes) costs about 80 µs of
+that.
+
+**Cross-check through the test client.** 900 requests per scenario, logging
+off. Medians were old 1,502 / 1,647 µs and new 1,611 / 1,658 µs. At that
+level the difference (+109 / +11 µs) is within the client's own run-to-run
+noise, so the direct ASGI figures are the result.
+
+**Limitations.**
+- Medians are stable between rounds (±2 µs in run 1, ±5 µs in run 2), but
+  p99 moves by about 25% between the runs, so treat the tails as indicative.
+- The figures cover the middleware only. A real request also pays for the
+  network, the reverse proxy and its own work; the audit endpoints take tens
+  to hundreds of milliseconds. An added 0.11 ms is therefore under 1% of a
+  typical request.
+- An earlier estimate of "about 0.9 ms" (2026-11-09, through the test client
+  while the machine was overloaded, when the client itself cost about 11 ms
+  per request) is withdrawn.
+
+### Other measurements
 
 | What | Measured | Note |
 |---|---|---|
-| New middleware per request (request IDs, access log, metrics, Host check, size limit, HTTPS policy, proxy headers) | about 0.9 ms added to about 11.2 ms per in-process request (8%) | one run, test client, the same route with the old and the new middleware stack; the base cost itself was inflated by the machine's load |
-| `GET /api/ready` | 26 ms median (50 calls) | now also opens the core databases read-only and reads the free space; the Ollama call was stubbed out, so its own time (bounded at 2 s) is not included |
-| Backup of 47.6 MB (400 PDFs of 100 KB, a 12,000-row database) | 11 to 27 s to create; 1.1 s to verify; 6.1 s to restore | |
-| Freight audit, ingestion, model calls | one timing call each | no measurable change |
+| `GET /api/ready` | 26 ms median (50 calls, 2026-11-09) | now also opens the core databases read-only and reads the free space; the Ollama call was stubbed out, so its own time (bounded at 2 s) is not included |
+| Backup of 47.6 MB (400 PDFs of 100 KB, a 12,000-row database) | 11 to 27 s to create; 1.1 s to verify; 6.1 s to restore (2026-11-09) | measured with both disks 99-100% full and antivirus scanning; see below |
+| Freight audit, ingestion, model calls | one timing call each | no measurable change expected or observed; not benchmarked separately |
 
 **What a backup costs.** Profiling the backup showed where the time goes:
 10 of 13.5 s was spent opening files, at about 6 ms per open, typical of
@@ -336,6 +471,10 @@ The evaluation's retrieval and answer figures are unchanged (section 7).
 - **Short paths on Windows.** Keep the backup and restore folders' paths
   short (for example `D:\backups\logidoc`). A backup or restore that would
   write a path over 259 characters is refused before it writes anything.
+- **Windows file locks.** A rename that another process blocks (an
+  antivirus scan, the search indexer) is retried for up to 2 s. A longer
+  lock still fails the backup: the attempt is marked failed and the
+  `backup_failed` alert fires.
 - **No Docker files.** No container image was built: the disks are nearly
   full, and the plain service setup needs none.
 
@@ -356,7 +495,9 @@ The evaluation's retrieval and answer figures are unchanged (section 7).
 
 ## 11. Needs your approval
 
-- **Committing and pushing** these changes. They are left uncommitted.
+- **Committing and pushing the release-validation fixes.** The Sprint 1 work
+  is on GitHub (`1e592a7`). The two defect fixes, their regression tests and
+  this report are local changes, waiting for a manual commit.
 - **Any deployment** to a real server, or opening ports to the internet.
 - **A first backup of your real data** (`scripts/manage_backups.py create`
   reads the live stores read-only and writes to `backups/`). It was not run

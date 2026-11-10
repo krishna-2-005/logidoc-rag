@@ -55,6 +55,7 @@ import secrets
 import shutil
 import sqlite3
 import stat
+import time
 from contextlib import closing, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -258,6 +259,28 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+RENAME_ATTEMPTS = 20
+RENAME_DELAY = 0.1
+
+
+def retrying(action):
+    """
+    Runs action (a rename). On Windows a file another process holds open for
+    a moment (an antivirus scanner reading a file just written, the search
+    indexer) makes a rename fail with PermissionError ("Access is denied"):
+    it is tried again for up to two seconds before the error is raised.
+    Seen in testing: a backup failed this way on its manifest checksum file.
+    """
+
+    for attempt in range(RENAME_ATTEMPTS):
+        try:
+            return action()
+        except PermissionError:
+            if attempt == RENAME_ATTEMPTS - 1:
+                raise
+            time.sleep(RENAME_DELAY)
+
+
 def write_atomic(path, text):
     """Writes text to path through a temporary file and a rename (never a half-written file)."""
 
@@ -269,7 +292,14 @@ def write_atomic(path, text):
         handle.flush()
         os.fsync(handle.fileno())
 
-    os.replace(temporary, path)
+    try:
+        retrying(lambda: os.replace(temporary, path))
+    except OSError:
+        try:
+            temporary.unlink()  # this function's own temporary file
+        except OSError:
+            pass
+        raise
 
 
 def is_link(path):
@@ -757,7 +787,7 @@ def create_backup(
             write_manifest(work, manifest)
 
             final = root / backup_id
-            work.rename(final)
+            retrying(lambda: work.rename(final))
 
             return manifest, final
 

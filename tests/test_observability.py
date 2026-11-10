@@ -182,6 +182,23 @@ def test_redaction(text, absent, present):
     assert absent not in cleaned and present in cleaned
 
 
+@pytest.mark.parametrize("error", [
+    PermissionError(13, "Access is denied", r"C:\Users\kuchu\AppData\Local\Temp\x\.manifest.sha256.ab.tmp", None,
+                    r"C:\Users\kuchu\AppData\Local\Temp\x\manifest.sha256"),
+    FileNotFoundError(2, "No such file or directory", r"D:\LogiDoc-RAG\data\audit_history.sqlite3"),
+    OSError(5, "Access is denied", "\\\\fileserver\\share\\logidoc\\data\\x.pdf"),
+])
+def test_redaction_of_pythons_own_error_messages(error):
+    """Python quotes paths with repr in OSError messages (doubled backslashes); no folder may survive."""
+
+    cleaned = redact(str(error))
+
+    for folder in ("Users", "kuchu", "AppData", "Temp", "LogiDoc-RAG", "fileserver", "share", "logidoc"):
+        assert folder not in cleaned, (folder, cleaned)
+
+    assert "<path>/" in cleaned and Path(error.filename).name in cleaned
+
+
 def test_redaction_keeps_api_routes_and_cuts_long_text():
 
     assert redact("GET /api/shipments/SHJ-1/freight-audit 500") == "GET /api/shipments/SHJ-1/freight-audit 500"
