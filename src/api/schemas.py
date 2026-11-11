@@ -582,11 +582,24 @@ class RegisteredCarrier(Contract):
     contact_phone: str | None
 
 
+RegistrationStatus = Literal["active", "on_hold", "inactive"]
+
+
 class RegisteredCarrierRecord(RegisteredCarrier):
     created_by: str
     created_at: str
     updated_at: str
     document_names: list[str]
+    # Schema version 2 of the registry (additive): registration status and address
+    status: RegistrationStatus = "active"
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    region: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    # The paged list and the detail only: link requests waiting for this carrier
+    pending_requests: int | None = None
 
 
 class LinkRequest(Contract):
@@ -618,6 +631,102 @@ class RegistryEvent(Contract):
     request_id: int | None
     before: Any
     after: Any
+
+
+class CarrierPage(Contract):
+    """A page of registered carriers (GET /api/carrier-registry/carriers)."""
+
+    carriers: list[RegisteredCarrierRecord]
+    total: int
+    offset: int
+    limit: int
+
+
+class NameLink(Contract):
+    """An approved link in force: the document name, its carrier, and the request that made it."""
+
+    name_key: str
+    display_name: str
+    carrier_id: int
+    request_id: int
+    linked_at: str
+    proposed_by: str | None
+    decided_by: str | None
+    legal_name: str
+
+
+class QueuedLinkRequest(LinkRequest):
+    carrier_legal_name: str | None
+    current_carrier_id: int | None
+    current_carrier_legal_name: str | None
+
+
+class LinkQueue(Contract):
+    requests: list[QueuedLinkRequest]
+    total: int
+    offset: int
+    limit: int
+
+
+class RegistryEventPage(Contract):
+    events: list[RegistryEvent]
+    total: int
+    offset: int
+    limit: int
+
+
+class CarrierRegistryDetail(Contract):
+    """history is null for a role that cannot read the registry's history (administrators only)."""
+
+    carrier: RegisteredCarrierRecord
+    name_links: list[NameLink]
+    pending_requests: list[QueuedLinkRequest]
+    recent_decisions: list[QueuedLinkRequest]
+    history: RegistryEventPage | None
+    intelligence_key: str | None
+
+
+class NameDocument(Contract):
+    shipment_id: str
+    file: str | None
+    document_type: str | None
+
+
+class CarrierReference(Contract):
+    id: int
+    legal_name: str
+
+
+class PendingNameRequest(Contract):
+    id: int
+    carrier_id: int | None
+    carrier_legal_name: str | None
+    proposed_by: str
+    proposed_at: str
+    reason: str
+
+
+class DocumentName(Contract):
+    """A carrier name printed on the documents. suggestions: a hint for a person, never applied by itself."""
+
+    name_key: str
+    name: str
+    spellings: list[str]
+    shipments: int
+    shipment_ids: list[str]
+    documents: list[NameDocument]
+    state: Literal["linked", "pending", "unlinked"]
+    linked_carrier: CarrierReference | None
+    pending_request: PendingNameRequest | None
+    suggestions: list[CarrierReference]
+
+
+class DocumentNamePage(Contract):
+    names: list[DocumentName]
+    total: int
+    offset: int
+    limit: int
+    counts: dict[str, int]
 
 
 CarrierCard.model_rebuild()

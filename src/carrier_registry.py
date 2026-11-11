@@ -31,6 +31,12 @@ Identity rules
       unlinking a name restores the earlier grouping.
     * Every change is an event (carrier_events, append-only: triggers refuse
       UPDATE and DELETE) with who made it, when, and the values before and after.
+
+Schema version 2 adds the registration status (active, on_hold, inactive) and
+a structured address. A version 1 store is upgraded when it is opened, in one
+transaction: the new columns get their defaults (status active, no address)
+and no row or event is changed. Indexes for the searches and the per-carrier
+history come with it.
 """
 
 import json
@@ -43,7 +49,7 @@ from pathlib import Path
 import authz
 from trend_analytics import carrier_key
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_info (version INTEGER NOT NULL);
@@ -102,14 +108,42 @@ CREATE TRIGGER IF NOT EXISTS carrier_events_no_delete BEFORE DELETE ON carrier_e
     BEGIN SELECT RAISE(ABORT, 'carrier history is append-only'); END;
 """
 
-FIELDS = ("legal_name", "trading_name", "scac", "mc_number", "dot_number", "contact_name", "contact_email", "contact_phone")
+# Registration status: active (in use), on_hold (do not use until checked), inactive (no longer used)
+STATUSES = ("active", "on_hold", "inactive")
+
+# Version 1 -> 2: one transaction, every row kept (new columns take their defaults)
+MIGRATION_V2 = (
+    "ALTER TABLE carriers ADD COLUMN status TEXT NOT NULL DEFAULT 'active' "
+    "CHECK (status IN ('active', 'on_hold', 'inactive'))",
+    "ALTER TABLE carriers ADD COLUMN address_line1 TEXT",
+    "ALTER TABLE carriers ADD COLUMN address_line2 TEXT",
+    "ALTER TABLE carriers ADD COLUMN city TEXT",
+    "ALTER TABLE carriers ADD COLUMN region TEXT",
+    "ALTER TABLE carriers ADD COLUMN postal_code TEXT",
+    "ALTER TABLE carriers ADD COLUMN country TEXT",
+    "CREATE INDEX IF NOT EXISTS carriers_by_status ON carriers (status)",
+    "CREATE INDEX IF NOT EXISTS carrier_events_by_carrier ON carrier_events (carrier_id, id)",
+    "CREATE INDEX IF NOT EXISTS carrier_events_by_request ON carrier_events (request_id, id)",
+    "CREATE INDEX IF NOT EXISTS link_requests_by_name ON link_requests (name_key, decision)",
+    "CREATE INDEX IF NOT EXISTS link_requests_by_carrier ON link_requests (carrier_id, decision)",
+)
+
+ADDRESS = ("address_line1", "address_line2", "city", "region", "postal_code", "country")
+
+FIELDS = ("legal_name", "trading_name", "scac", "mc_number", "dot_number", "contact_name", "contact_email", "contact_phone",
+          "status", *ADDRESS)
 IDENTIFIERS = ("scac", "mc_number", "dot_number")
+
+# Sorting of the carrier list: the columns a client may name
+SORTS = ("legal_name", "trading_name", "scac", "mc_number", "dot_number", "status", "created_at", "updated_at")
 
 SCAC = re.compile(r"^[A-Z]{2,4}$")
 MC = re.compile(r"^(?:MC)?[\s#:-]*(\d{1,8})$")
 DOT = re.compile(r"^(?:US\s*DOT|USDOT|DOT)?[\s#:-]*(\d{1,8})$")
 EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[A-Za-z]{2,}$")
 PHONE = re.compile(r"^\+?[0-9()\-\s.]{7,25}$")
+POSTAL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 -]{1,11}$")
+COUNTRY = re.compile(r"^[A-Za-z]{2}$")
 
 
 class RegistryError(ValueError):
@@ -118,6 +152,10 @@ class RegistryError(ValueError):
 
 class RegistryConflict(RegistryError):
     """The change would give one identifier or name to two carriers."""
+
+
+class RegistryVersionError(RegistryError):
+    """The store was written by a newer version of the application."""
 
 
 def now_text():
@@ -129,6 +167,12 @@ def loose_key(name):
     """Letters and digits only: to find possible duplicates (never to merge)."""
 
     return re.sub(r"[^0-9a-z]", "", str(name or "").casefold())
+
+
+def like_pattern(text):
+    """text for a LIKE ... ESCAPE '\\' pattern: its own %, _ and \\ match themselves."""
+
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def clean_text(value, field, required=False, limit=200):
@@ -160,8 +204,17 @@ def validate(values, partial=False):
 
         if field == "legal_name":
             cleaned[field] = clean_text(raw, "The legal name", required=True)
-        elif field in ("trading_name", "contact_name"):
-            cleaned[field] = clean_text(raw, field.replace("_", " ").capitalize())
+        elif field in ("trading_name", "contact_name", "address_line1", "address_line2"):
+            label = {"address_line1": "Address line 1", "address_line2": "Address line 2"}.get(
+                field, field.replace("_", " ").capitalize())
+            cleaned[field] = clean_text(raw, label)
+        elif field in ("city", "region"):
+            cleaned[field] = clean_text(raw, "City" if field == "city" else "Region (state or province)", limit=100)
+        elif field == "status":
+            text = str(raw or "").strip().lower()
+            if text not in STATUSES:
+                raise RegistryError(f"{raw!r} is not a registration status: {', '.join(STATUSES)}.")
+            cleaned[field] = text
         elif raw is None or not str(raw).strip():
             cleaned[field] = None
         elif field == "scac":
@@ -189,6 +242,16 @@ def validate(values, partial=False):
             if not PHONE.match(text) or sum(c.isdigit() for c in text) < 7:
                 raise RegistryError(f"{raw!r} is not a phone number.")
             cleaned[field] = text
+        elif field == "postal_code":
+            text = " ".join(str(raw).split())
+            if not POSTAL.match(text):
+                raise RegistryError(f"{raw!r} is not a postal code: 2 to 12 letters, digits, spaces or hyphens.")
+            cleaned[field] = text.upper()
+        elif field == "country":
+            text = str(raw).strip()
+            if not COUNTRY.match(text):
+                raise RegistryError(f"{raw!r} is not a country code: two letters (ISO 3166-1), such as US or CA.")
+            cleaned[field] = text.upper()
 
     if not partial and "legal_name" not in cleaned:
         raise RegistryError("The legal name is required.")
@@ -205,8 +268,53 @@ class CarrierRegistry:
 
         with closing(self.connect()) as connection, connection:
             connection.executescript(SCHEMA)
-            if connection.execute("SELECT version FROM schema_info").fetchone() is None:
-                connection.execute("INSERT INTO schema_info (version) VALUES (?)", (SCHEMA_VERSION,))
+            row = connection.execute("SELECT version FROM schema_info").fetchone()
+            if row is None:
+                # A new store starts at version 1 and takes the same upgrade path as an existing one
+                connection.execute("INSERT INTO schema_info (version) VALUES (1)")
+                version = 1
+            else:
+                version = row["version"]
+
+        if version > SCHEMA_VERSION:
+            raise RegistryVersionError(
+                f"The carrier registry has schema version {version}; this version of the application reads "
+                f"{SCHEMA_VERSION}. Update the application.")
+
+        if version < SCHEMA_VERSION:
+            self.migrate()
+
+    def migrate(self):
+        """
+        Brings the schema to SCHEMA_VERSION one step at a time. Each step is one
+        transaction (its statements and the version, or nothing); the version is
+        read again inside it, so two processes opening the store at once do not
+        apply a step twice.
+        """
+
+        steps = {2: MIGRATION_V2}
+        connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
+
+        try:
+            for target in range(2, SCHEMA_VERSION + 1):
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    if connection.execute("SELECT version FROM schema_info").fetchone()[0] == target - 1:
+                        for statement in steps[target]:
+                            connection.execute(statement)
+                        connection.execute("UPDATE schema_info SET version = ?", (target,))
+                    connection.execute("COMMIT")
+                except BaseException:
+                    if connection.in_transaction:
+                        connection.execute("ROLLBACK")
+                    raise
+        finally:
+            connection.close()
+
+    def version(self):
+
+        with closing(self.connect()) as connection:
+            return connection.execute("SELECT version FROM schema_info").fetchone()[0]
 
     def connect(self):
 
@@ -271,6 +379,189 @@ class CarrierRegistry:
             return {row["name_key"]: carriers[row["carrier_id"]] for row in connection.execute("SELECT * FROM carrier_names")}
 
     # --------------------------------------------------------
+    # Reading for the management screens (paged)
+    # --------------------------------------------------------
+
+    def search(self, query="", statuses=(), sort="legal_name", order="asc", offset=0, limit=25):
+        """
+        A page of carriers: {"carriers": [...], "total"}. query matches any part
+        of the legal or trading name (letter case ignored), the SCAC, and the MC
+        and USDOT numbers with or without their prefixes. statuses: keep only
+        these registration statuses. Each carrier carries its linked document
+        names and the number of link requests waiting for it.
+        """
+
+        if sort not in SORTS:
+            raise RegistryError(f"Sort by one of: {', '.join(SORTS)}.")
+        if order not in ("asc", "desc"):
+            raise RegistryError("The order is asc or desc.")
+        unknown = set(statuses) - set(STATUSES)
+        if unknown:
+            raise RegistryError(f"Unknown registration status: {', '.join(sorted(unknown))}.")
+
+        where, params = [], []
+        text = " ".join(str(query or "").split())
+
+        if text:
+            like = f"%{like_pattern(text)}%"
+            clauses = ["legal_name LIKE ? ESCAPE '\\'", "coalesce(trading_name, '') LIKE ? ESCAPE '\\'",
+                       "coalesce(scac, '') LIKE ? ESCAPE '\\'"]
+            params += [like, like, f"%{like_pattern(text.upper())}%"]
+
+            for pattern, column in ((MC, "mc_number"), (DOT, "dot_number")):
+                match = pattern.match(text.upper())
+                if match:
+                    clauses.append(f"coalesce({column}, '') LIKE ?")
+                    params.append(f"%{int(match.group(1))}%")
+
+            where.append("(" + " OR ".join(clauses) + ")")
+
+        if statuses:
+            where.append(f"status IN ({', '.join('?' for _ in statuses)})")
+            params += list(statuses)
+
+        condition = f" WHERE {' AND '.join(where)}" if where else ""
+        direction = "DESC" if order == "desc" else "ASC"
+
+        with closing(self.connect()) as connection:
+            total = connection.execute(f"SELECT COUNT(*) FROM carriers{condition}", params).fetchone()[0]
+            rows = [dict(row) for row in connection.execute(
+                f"SELECT * FROM carriers{condition} ORDER BY ({sort} IS NULL), {sort} COLLATE NOCASE {direction}, id "
+                f"LIMIT ? OFFSET ?", (*params, int(limit), int(offset)))]
+            self.attach(connection, rows)
+
+        return {"carriers": rows, "total": total}
+
+    def record(self, carrier_id):
+        """One carrier with its linked document names and waiting link requests, or None."""
+
+        with closing(self.connect()) as connection:
+            row = connection.execute("SELECT * FROM carriers WHERE id = ?", (carrier_id,)).fetchone()
+            if row is None:
+                return None
+            carrier = dict(row)
+            self.attach(connection, [carrier])
+
+        return carrier
+
+    @staticmethod
+    def attach(connection, carriers):
+        """Adds each carrier's linked document names and the count of link requests waiting for it."""
+
+        ids = [carrier["id"] for carrier in carriers]
+
+        if not ids:
+            return
+
+        marks = ", ".join("?" for _ in ids)
+        names, pending = {}, {}
+
+        for row in connection.execute(f"SELECT carrier_id, display_name FROM carrier_names WHERE carrier_id IN ({marks}) "
+                                      "ORDER BY display_name", ids):
+            names.setdefault(row["carrier_id"], []).append(row["display_name"])
+
+        for row in connection.execute(f"SELECT carrier_id, COUNT(*) AS waiting FROM link_requests WHERE decision IS NULL "
+                                      f"AND carrier_id IN ({marks}) GROUP BY carrier_id", ids):
+            pending[row["carrier_id"]] = row["waiting"]
+
+        for carrier in carriers:
+            carrier["document_names"] = names.get(carrier["id"], [])
+            carrier["pending_requests"] = pending.get(carrier["id"], 0)
+
+    def name_links(self, carrier_id=None):
+        """The approved links in force: document name, carrier, the request that made it, who proposed and approved it."""
+
+        query = ("SELECT n.name_key, n.display_name, n.carrier_id, n.request_id, n.linked_at, r.proposed_by, r.decided_by, "
+                 "c.legal_name FROM carrier_names n JOIN carriers c ON c.id = n.carrier_id "
+                 "LEFT JOIN link_requests r ON r.id = n.request_id")
+        params = ()
+
+        if carrier_id is not None:
+            query += " WHERE n.carrier_id = ?"
+            params = (carrier_id,)
+
+        with closing(self.connect()) as connection:
+            return [dict(row) for row in connection.execute(query + " ORDER BY n.display_name COLLATE NOCASE", params)]
+
+    def link_queue(self, state="pending", carrier_id=None, offset=0, limit=50):
+        """
+        A page of link requests, newest first: {"requests", "total"}. state:
+        pending, decided or all. carrier_id: the requests that concern that
+        carrier (proposed for it, or unlinking one of its names). Each request
+        names the proposed carrier and the carrier the name is linked to now.
+        """
+
+        if state not in ("pending", "decided", "all"):
+            raise RegistryError("The state is pending, decided or all.")
+
+        where, params = [], []
+
+        if state == "pending":
+            where.append("r.decision IS NULL")
+        elif state == "decided":
+            where.append("r.decision IS NOT NULL")
+
+        if carrier_id is not None:
+            where.append("(r.carrier_id = ? OR n.carrier_id = ?)")
+            params += [carrier_id, carrier_id]
+
+        condition = f" WHERE {' AND '.join(where)}" if where else ""
+        base = (" FROM link_requests r LEFT JOIN carrier_names n ON n.name_key = r.name_key "
+                "LEFT JOIN carriers p ON p.id = r.carrier_id LEFT JOIN carriers c ON c.id = n.carrier_id")
+
+        with closing(self.connect()) as connection:
+            total = connection.execute(f"SELECT COUNT(*){base}{condition}", params).fetchone()[0]
+            rows = connection.execute(
+                f"SELECT r.*, p.legal_name AS carrier_legal_name, n.carrier_id AS current_carrier_id, "
+                f"c.legal_name AS current_carrier_legal_name{base}{condition} ORDER BY r.id DESC LIMIT ? OFFSET ?",
+                (*params, int(limit), int(offset))).fetchall()
+
+        return {"requests": [dict(row) for row in rows], "total": total}
+
+    def pending_by_name(self):
+        """{document name key: the request waiting for a decision}."""
+
+        with closing(self.connect()) as connection:
+            return {row["name_key"]: dict(row) for row in connection.execute(
+                "SELECT r.*, p.legal_name AS carrier_legal_name FROM link_requests r "
+                "LEFT JOIN carriers p ON p.id = r.carrier_id WHERE r.decision IS NULL")}
+
+    def carrier_events(self, carrier_id, offset=0, limit=50):
+        """
+        A carrier's history, newest first: {"events", "total"}: its own changes,
+        the link requests proposed for it, and the requests that moved or unlinked
+        one of its names.
+        """
+
+        condition = (" WHERE carrier_id = ? OR request_id IN (SELECT id FROM link_requests WHERE carrier_id = ?) "
+                     "OR json_extract(before, '$.carrier_id') = ?")
+        params = (carrier_id, carrier_id, carrier_id)
+
+        with closing(self.connect()) as connection:
+            total = connection.execute(f"SELECT COUNT(*) FROM carrier_events{condition}", params).fetchone()[0]
+            rows = connection.execute(f"SELECT * FROM carrier_events{condition} ORDER BY id DESC LIMIT ? OFFSET ?",
+                                      (*params, int(limit), int(offset))).fetchall()
+
+        return {"events": [{**dict(row), "before": json.loads(row["before"]) if row["before"] else None,
+                            "after": json.loads(row["after"]) if row["after"] else None} for row in rows],
+                "total": total}
+
+    def events_after(self, after_id, limit=200):
+        """The events after id after_id, oldest first (the webhook collector reads committed events this way)."""
+
+        with closing(self.connect()) as connection:
+            rows = connection.execute("SELECT * FROM carrier_events WHERE id > ? ORDER BY id LIMIT ?",
+                                      (int(after_id), int(limit))).fetchall()
+
+        return [{**dict(row), "before": json.loads(row["before"]) if row["before"] else None,
+                 "after": json.loads(row["after"]) if row["after"] else None} for row in rows]
+
+    def last_event_id(self):
+
+        with closing(self.connect()) as connection:
+            return connection.execute("SELECT coalesce(max(id), 0) FROM carrier_events").fetchone()[0]
+
+    # --------------------------------------------------------
     # Carriers
     # --------------------------------------------------------
 
@@ -304,6 +595,7 @@ class CarrierRegistry:
 
             at = now_text()
             row = {field: cleaned.get(field) for field in FIELDS}
+            row["status"] = row["status"] or "active"
             cursor = connection.execute(
                 f"INSERT INTO carriers ({', '.join(FIELDS)}, created_by, created_at, updated_at) "
                 f"VALUES ({', '.join('?' for _ in FIELDS)}, ?, ?, ?)",
