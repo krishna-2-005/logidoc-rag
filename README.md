@@ -755,7 +755,8 @@ degraded means documents can be read but a model or the store is missing) or
 React screens: Overview, Shipment Explorer (and detail), Document
 Intelligence (documents, ingestion, ask), Freight Audit, Exception Center,
 Audit History (trends, shipment history, runs), Document Completeness,
-Reports, Settings. Language-model answers are labelled "Generated" and kept
+Reports, Settings, Carrier Registry (list, detail, name link approvals) and,
+for administrators, Webhooks, Scheduled Jobs and TMS / ERP integrations. Language-model answers are labelled "Generated" and kept
 apart from the verified findings. The interface only displays what the API
 returns; it never calculates an audit.
 
@@ -768,7 +769,8 @@ returns; it never calculates an audit.
 | `auth.sqlite3` | v1 | `users` (password hashes), `sessions` (token hashes), `auth_events` |
 | `ingestion_register.sqlite3` | v1 | `ingestion_files`, append-only `ingestion_events` and `ingestion_actions`; metadata only, never file contents |
 | `extractions.sqlite3` | v5 (an older file is never upgraded by opening it: it reads as "migration pending" until `python scripts/migrate_extraction_store.py` makes a verified backup and migrates in one transaction; `--dry-run` first) | `extractions` (typed fields per file hash and extractor version, no raw text, payload hash; no update/delete), append-only hash-chained `field_corrections` (proposals) and `correction_decisions` (one approval or rejection each), append-only `extraction_aliases` (every file name a content was seen under) |
-| `carrier_registry.sqlite3` | v1 | registered carriers and their identifiers, document-name links decided by a second administrator, append-only `carrier_events` |
+| `carrier_registry.sqlite3` | v2 (adds the registration status and address to v1 in one transaction when opened) | registered carriers and their identifiers, document-name links decided by a second administrator, append-only `carrier_events` |
+| `integrations.sqlite3` | v1 (created when the first webhook endpoint or integration is configured) | webhook endpoints (no secrets), the append-only event outbox and delivery attempts, deliveries, scheduled jobs and their runs, TMS/ERP integrations, sync runs and rejected records |
 
 All databases are local runtime data and are git-ignored, as are
 `data/quarantine/` and `data/archive/`. A database with a newer schema than
@@ -795,6 +797,12 @@ In short:
    `scripts/manage_backups.py` makes, verifies and restores them
    ([docs/AUTOMATED_BACKUP_OPERATIONS.md](docs/AUTOMATED_BACKUP_OPERATIONS.md)).
    Logs, metrics and alerts: [docs/OBSERVABILITY_AND_MONITORING.md](docs/OBSERVABILITY_AND_MONITORING.md).
+6. Carrier master data, webhooks, scheduled jobs and TMS/ERP integrations:
+   [docs/CARRIER_REGISTRY_OPERATIONS.md](docs/CARRIER_REGISTRY_OPERATIONS.md),
+   [docs/WEBHOOKS_AND_DELIVERY.md](docs/WEBHOOKS_AND_DELIVERY.md) (set `LOGIDOC_WEBHOOK_SECRET_KEY` to use
+   webhooks), [docs/SCHEDULED_SYNCHRONISATION.md](docs/SCHEDULED_SYNCHRONISATION.md) and
+   [docs/TMS_ERP_INTEGRATION_FRAMEWORK.md](docs/TMS_ERP_INTEGRATION_FRAMEWORK.md). Only a sandbox TMS on
+   synthetic data exists; no real vendor is integrated.
 
 ## Setup (Windows, PowerShell)
 

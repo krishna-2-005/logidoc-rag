@@ -1042,6 +1042,12 @@ class HistoryStore:
 
         return {"runs": runs, "next_after": runs[-1]["run_id"] if runs else after, "has_more": more}
 
+    def last_run_id(self):
+        """The newest recorded run's id (0 without any): where a new feed reader starts."""
+
+        with closing(self.connect()) as connection:
+            return connection.execute("SELECT coalesce(max(id), 0) FROM audit_runs").fetchone()[0]
+
     def runs(self, limit=50):
         """
         Recent runs, newest first, each with the shipments it superseded

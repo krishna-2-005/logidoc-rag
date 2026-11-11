@@ -582,11 +582,24 @@ class RegisteredCarrier(Contract):
     contact_phone: str | None
 
 
+RegistrationStatus = Literal["active", "on_hold", "inactive"]
+
+
 class RegisteredCarrierRecord(RegisteredCarrier):
     created_by: str
     created_at: str
     updated_at: str
     document_names: list[str]
+    # Schema version 2 of the registry (additive): registration status and address
+    status: RegistrationStatus = "active"
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    region: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    # The paged list and the detail only: link requests waiting for this carrier
+    pending_requests: int | None = None
 
 
 class LinkRequest(Contract):
@@ -618,6 +631,102 @@ class RegistryEvent(Contract):
     request_id: int | None
     before: Any
     after: Any
+
+
+class CarrierPage(Contract):
+    """A page of registered carriers (GET /api/carrier-registry/carriers)."""
+
+    carriers: list[RegisteredCarrierRecord]
+    total: int
+    offset: int
+    limit: int
+
+
+class NameLink(Contract):
+    """An approved link in force: the document name, its carrier, and the request that made it."""
+
+    name_key: str
+    display_name: str
+    carrier_id: int
+    request_id: int
+    linked_at: str
+    proposed_by: str | None
+    decided_by: str | None
+    legal_name: str
+
+
+class QueuedLinkRequest(LinkRequest):
+    carrier_legal_name: str | None
+    current_carrier_id: int | None
+    current_carrier_legal_name: str | None
+
+
+class LinkQueue(Contract):
+    requests: list[QueuedLinkRequest]
+    total: int
+    offset: int
+    limit: int
+
+
+class RegistryEventPage(Contract):
+    events: list[RegistryEvent]
+    total: int
+    offset: int
+    limit: int
+
+
+class CarrierRegistryDetail(Contract):
+    """history is null for a role that cannot read the registry's history (administrators only)."""
+
+    carrier: RegisteredCarrierRecord
+    name_links: list[NameLink]
+    pending_requests: list[QueuedLinkRequest]
+    recent_decisions: list[QueuedLinkRequest]
+    history: RegistryEventPage | None
+    intelligence_key: str | None
+
+
+class NameDocument(Contract):
+    shipment_id: str
+    file: str | None
+    document_type: str | None
+
+
+class CarrierReference(Contract):
+    id: int
+    legal_name: str
+
+
+class PendingNameRequest(Contract):
+    id: int
+    carrier_id: int | None
+    carrier_legal_name: str | None
+    proposed_by: str
+    proposed_at: str
+    reason: str
+
+
+class DocumentName(Contract):
+    """A carrier name printed on the documents. suggestions: a hint for a person, never applied by itself."""
+
+    name_key: str
+    name: str
+    spellings: list[str]
+    shipments: int
+    shipment_ids: list[str]
+    documents: list[NameDocument]
+    state: Literal["linked", "pending", "unlinked"]
+    linked_carrier: CarrierReference | None
+    pending_request: PendingNameRequest | None
+    suggestions: list[CarrierReference]
+
+
+class DocumentNamePage(Contract):
+    names: list[DocumentName]
+    total: int
+    offset: int
+    limit: int
+    counts: dict[str, int]
 
 
 CarrierCard.model_rebuild()
@@ -732,3 +841,415 @@ class Alert(Contract):
 class AlertsView(Contract):
     active: list[Alert]
     recent: list[Alert]
+
+
+# ============================================================
+# WEBHOOKS (administrators: integrations.manage)
+# ============================================================
+
+DeliveryStatus = Literal["pending", "sending", "retrying", "succeeded", "failed", "cancelled"]
+
+
+class EventTypeInfo(Contract):
+    type: str
+    description: str
+
+
+class SignatureScheme(Contract):
+    """How a receiver checks a delivery: HMAC-SHA256 of "<timestamp>.<event id>.<body>", hex, as v1=<signature>."""
+
+    signature_header: str
+    timestamp_header: str
+    event_id_header: str
+    scheme: str
+    tolerance_seconds: int
+
+
+class WebhookConfiguration(Contract):
+    """delivery_enabled false: problems says why (no signing key); nothing is registered or delivered then."""
+
+    delivery_enabled: bool
+    problems: list[str]
+    event_types: list[EventTypeInfo]
+    https_only: bool
+    private_destinations_allowed: bool
+    timeout_seconds: int
+    max_attempts: int
+    rotation_grace_hours: int
+    signature: SignatureScheme
+
+
+class EndpointStats(Contract):
+    """Deliveries created in the last window_days days (tests excluded). success_rate: null when none completed."""
+
+    deliveries: int
+    succeeded: int
+    failed: int
+    waiting: int
+    success_rate: float | None
+    last_attempt_at: str | None
+    last_success_at: str | None
+    last_failure_at: str | None
+    window_days: int
+
+
+class WebhookEndpoint(Contract):
+    """An endpoint as shown: never its secret. url: query values masked."""
+
+    id: int
+    name: str
+    url: str
+    event_types: list[str]
+    enabled: bool
+    archived: bool
+    secret_version: int
+    secret_rotated_at: str
+    previous_secret_expires_at: str | None
+    rotation_in_progress: bool
+    created_by: str
+    created_at: str
+    updated_at: str
+    archived_at: str | None
+    archived_by: str | None
+    stats: EndpointStats
+
+
+class EndpointChange(Contract):
+    id: int
+    endpoint_id: int
+    at: str
+    actor: str
+    action: str
+    before: Any
+    after: Any
+
+
+class WebhookEndpointDetail(WebhookEndpoint):
+    changes: list[EndpointChange]
+
+
+class WebhookEndpointList(Contract):
+    endpoints: list[WebhookEndpoint]
+
+
+class WebhookSecretIssued(Contract):
+    """The signing secret, shown this once: store it in the receiver now."""
+
+    endpoint: WebhookEndpoint
+    secret: str
+    note: str
+
+
+class DeliveryAttempt(Contract):
+    id: int
+    delivery_id: int
+    attempt: int
+    trigger: str
+    started_at: str
+    duration_ms: int | None
+    status_code: int | None
+    outcome: Literal["succeeded", "retry", "failed"]
+    error: str | None
+    detail: str | None
+
+
+class WebhookDelivery(Contract):
+    id: int
+    event_id: str
+    endpoint_id: int
+    endpoint_name: str
+    event_type: str
+    occurred_at: str
+    status: DeliveryStatus
+    attempts: int
+    cycle_attempts: int
+    next_attempt_at: str | None
+    last_attempt_at: str | None
+    last_status_code: int | None
+    last_error: str | None
+    test: bool
+    manual_retries: int
+    last_retry_by: str | None
+    last_retry_at: str | None
+    created_at: str
+    updated_at: str
+    completed_at: str | None
+
+
+class WebhookDeliveryDetail(WebhookDelivery):
+    """payload_preview: the delivered JSON with contact details and secret-like values masked."""
+
+    payload_preview: dict[str, Any]
+    attempt_log: list[DeliveryAttempt]
+    retryable: bool
+
+
+class DeliveryPage(Contract):
+    deliveries: list[WebhookDelivery]
+    total: int
+    offset: int
+    limit: int
+
+
+# ============================================================
+# SCHEDULED JOBS (administrators)
+# ============================================================
+
+class ScheduledJob(Contract):
+    """delayed: due for longer than its interval (at least a minute) and not running."""
+
+    name: str
+    description: str
+    enabled: bool
+    interval_seconds: int
+    next_run_at: str
+    last_started_at: str | None
+    last_finished_at: str | None
+    last_success_at: str | None
+    last_failure_at: str | None
+    last_error: str | None
+    consecutive_failures: int
+    max_retries: int
+    timeout_seconds: int
+    running: bool
+    running_here: bool
+    delayed: bool
+    delay_seconds: int
+    updated_at: str
+
+
+class SchedulerOwner(Contract):
+    since: str
+    heartbeat_at: str
+    this_process: bool
+    stale: bool
+
+
+class WebhookDeliveryState(Contract):
+    enabled: bool
+    problems: list[str]
+
+
+class SchedulerStatus(Contract):
+    """The scheduler's own health (never part of /api/health or /api/ready). configured: the store exists."""
+
+    configured: bool
+    running_here: bool
+    owner: SchedulerOwner | None
+    jobs: list[ScheduledJob]
+    webhook_delivery: WebhookDeliveryState
+
+
+class JobRun(Contract):
+    id: int
+    job: str
+    trigger: str
+    requested_by: str | None
+    started_at: str
+    finished_at: str | None
+    status: Literal["running", "succeeded", "failed", "interrupted"]
+    duration_ms: int | None
+    delay_seconds: int | None
+    summary: Any
+    error_category: str | None
+    error_message: str | None
+    ran_here: bool
+
+
+class JobRunPage(Contract):
+    runs: list[JobRun]
+    total: int
+    offset: int
+    limit: int
+
+
+class JobStarted(Contract):
+    run_id: int
+    job: str
+    trigger: Literal["manual", "retry"]
+
+
+# ============================================================
+# TMS / ERP INTEGRATIONS (administrators)
+# ============================================================
+
+class ProviderInfo(Contract):
+    key: str
+    label: str
+    description: str
+    entities: list[str]
+    accepts_audit_runs: bool
+    sandbox: bool
+    available: bool
+    unavailable_reason: str | None
+    default_credential_env: str | None
+
+
+class SyncRun(Contract):
+    id: int
+    integration_id: int
+    trigger: str
+    requested_by: str | None
+    started_at: str
+    finished_at: str | None
+    status: Literal["running", "succeeded", "partial", "failed", "interrupted"]
+    cursor_before: dict[str, Any]
+    cursor_after: dict[str, Any]
+    fetched: int
+    imported: int
+    updated: int
+    unchanged: int
+    duplicates: int
+    rejected: int
+    conflicts: int
+    pages: int
+    retries: int
+    error_category: str | None
+    error_message: str | None
+
+
+class SyncRejection(Contract):
+    id: int
+    run_id: int
+    entity: str
+    external_id: str | None
+    reason: str
+    at: str
+
+
+class SyncRunDetail(SyncRun):
+    rejections: list[SyncRejection]
+
+
+class SyncRunPage(Contract):
+    runs: list[SyncRun]
+    total: int
+    offset: int
+    limit: int
+
+
+class SyncTotals(Contract):
+    imported: int
+    updated: int
+    rejected: int
+    runs: int
+
+
+class Integration(Contract):
+    """Never a credential: credential_env names the environment variable; credential_configured says whether it is set."""
+
+    id: int
+    name: str
+    provider: str
+    enabled: bool
+    settings: dict[str, Any]
+    credential_env: str | None
+    credential_configured: bool
+    sync_interval_seconds: int
+    next_sync_at: str | None
+    cursor: dict[str, Any]
+    connection_status: Literal["untested", "connected", "auth_failed", "error"]
+    connection_checked_at: str | None
+    connection_error: str | None
+    last_success_at: str | None
+    last_failure_at: str | None
+    last_error: str | None
+    consecutive_failures: int
+    running: bool
+    created_by: str
+    created_at: str
+    updated_at: str
+    last_run: SyncRun | None
+    totals: SyncTotals
+    records: dict[str, int]
+
+
+class IntegrationChange(Contract):
+    id: int
+    integration_id: int
+    at: str
+    actor: str
+    action: str
+    before: Any
+    after: Any
+
+
+class IntegrationDetail(Integration):
+    changes: list[IntegrationChange]
+
+
+class IntegrationList(Contract):
+    integrations: list[Integration]
+    providers: list[ProviderInfo]
+
+
+class ConnectionTest(Contract):
+    ok: bool
+    category: str | None
+    detail: str
+    latency_ms: int
+
+
+class SyncStarted(Contract):
+    run_id: int
+
+
+class ImportedRecord(Contract):
+    """Provenance: integration, provider, external_id, the partner's change time and the runs that brought it."""
+
+    id: int
+    integration_id: int
+    provider: str
+    entity: Literal["shipments", "carriers"]
+    external_id: str
+    source_updated_at: str
+    content_hash: str
+    data: dict[str, Any]
+    first_run_id: int
+    last_run_id: int
+    created_at: str
+    updated_at: str
+    corrected_fields: list[str]
+
+
+class RecordVersion(Contract):
+    id: int
+    record_id: int
+    run_id: int | None
+    change: Literal["created", "updated", "override", "override_cleared"]
+    content_hash: str
+    received: Any
+    kept_fields: list[str]
+    actor: str | None
+    at: str
+
+
+class RecordCorrection(Contract):
+    id: int
+    record_id: int
+    field: str
+    value: Any
+    cleared: bool
+    reason: str
+    actor: str
+    at: str
+
+
+class ImportedRecordDetail(ImportedRecord):
+    """received: the partner's values; data: with the corrections in force applied (corrections win)."""
+
+    received: dict[str, Any]
+    corrections: dict[str, Any]
+    versions: list[RecordVersion]
+    override_history: list[RecordCorrection]
+
+
+class RecordPage(Contract):
+    records: list[ImportedRecord]
+    total: int
+    offset: int
+    limit: int
+
+
+class SandboxChanges(Contract):
+    changed: list[str]

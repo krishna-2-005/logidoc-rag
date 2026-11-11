@@ -26,6 +26,8 @@ data/auth.sqlite3*
 data/ingestion_register.sqlite3*
 data/extractions.sqlite3*
 data/carrier_registry.sqlite3*
+data/integrations.sqlite3*
+data/.integrations-scheduler.lock
 data/quarantine/
 data/archive/
 

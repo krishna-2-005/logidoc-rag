@@ -169,6 +169,54 @@ def carrier_of(item, resolver=None):
     return key, name, sorted(set(names))
 
 
+def document_names(shipments, limit_per_name=25):
+    """
+    Every carrier name printed on the documents, for the link screens:
+    {name key: {"name", "spellings", "shipment_ids", "shipments", "documents"}}.
+    The key is the one approved links use (carrier_key: case and spacing
+    ignored). documents lists up to limit_per_name (shipment, file, document
+    type) where the name was read; shipments counts every shipment. Reading
+    only: nothing is linked or merged here.
+    """
+
+    found = {}
+
+    for item in shipments:
+
+        audit = item.get("freight_audit") or {}
+        seen = []
+
+        for document in audit.get("inputs") or []:
+            name = extracted(document.get("fields") or {}, "carrier")
+            if name:
+                seen.append((" ".join(str(name).split()), document.get("file"), document.get("document_type")))
+
+        # A shipment the freight audit did not read: what the reconciliation read, without a file
+        if not audit.get("inputs"):
+            carrier = (item.get("result") or {}).get("carrier") or {}
+            seen = [(" ".join(str(carrier[role]).split()), None, role.upper()) for role in ("bol", "invoice", "pod")
+                    if carrier.get(role)]
+
+        for name, file, document_type in seen:
+
+            entry = found.setdefault(carrier_key(name), {"name": name, "spellings": Counter(), "shipment_ids": set(),
+                                                         "documents": []})
+            entry["spellings"][name] += 1
+            entry["shipment_ids"].add(item["shipment_id"])
+
+            if len(entry["documents"]) < limit_per_name:
+                entry["documents"].append({"shipment_id": item["shipment_id"], "file": file, "document_type": document_type})
+
+    for entry in found.values():
+        spellings = entry.pop("spellings")
+        entry["name"] = sorted(spellings, key=lambda value: (-spellings[value], value))[0]
+        entry["spellings"] = sorted(spellings)
+        entry["shipments"] = len(entry["shipment_ids"])
+        entry["shipment_ids"] = sorted(entry["shipment_ids"])
+
+    return found
+
+
 def iso_date(value):
 
     try:

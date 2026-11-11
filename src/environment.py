@@ -64,11 +64,21 @@ INTEGERS = {
     "LOGIDOC_ALERT_OLLAMA_FAILURES": (1, 1000),
     "LOGIDOC_ALERT_BACKUP_MAX_AGE_HOURS": (1, 8760),
     "LOGIDOC_ALERT_COOLDOWN_SECONDS": (0, 604800),
+    "LOGIDOC_WEBHOOK_TIMEOUT_SECONDS": (1, 60),
+    "LOGIDOC_WEBHOOK_MAX_ATTEMPTS": (1, 30),
+    "LOGIDOC_WEBHOOK_ROTATION_GRACE_HOURS": (0, 720),
 }
+
+# Webhook signing key (src/webhooks.py): signing secrets are derived from it, never stored
+WEBHOOK_KEY_MIN = 32
 
 NUMBERS = ("LOGIDOC_OLLAMA_CONNECT_TIMEOUT", "LOGIDOC_EMBED_TIMEOUT", "LOGIDOC_LLM_TIMEOUT")
 
-SWITCHES = ("LOGIDOC_COOKIE_SECURE", "LOGIDOC_HTTPS_REDIRECT", "LOGIDOC_REQUIRE_APPROVAL", "LOGIDOC_BACKGROUND_JOBS")
+SWITCHES = ("LOGIDOC_COOKIE_SECURE", "LOGIDOC_HTTPS_REDIRECT", "LOGIDOC_REQUIRE_APPROVAL", "LOGIDOC_BACKGROUND_JOBS",
+            "LOGIDOC_WEBHOOK_ALLOW_HTTP", "LOGIDOC_WEBHOOK_ALLOW_PRIVATE")
+
+# Development switches that weaken a protection: refused in production
+DEVELOPMENT_ONLY = ("LOGIDOC_WEBHOOK_ALLOW_HTTP", "LOGIDOC_WEBHOOK_ALLOW_PRIVATE")
 
 # Must be set explicitly in production (no development default)
 PRODUCTION_REQUIRED = ("LOGIDOC_AUTH_MODE", "LOGIDOC_CORS_ORIGINS", "LOGIDOC_TRUSTED_HOSTS", "LOGIDOC_DATA_DIR",
@@ -207,6 +217,20 @@ def validate(environ):
             if name in folders and other in folders and nested(folders[name], folders[other]):
                 errors.append(f"{name} must not be inside {other} (or contain it): backups are kept apart from the data.")
 
+    key = value_of(environ, "LOGIDOC_WEBHOOK_SECRET_KEY")
+    if key and len(key) < WEBHOOK_KEY_MIN:
+        errors.append(f"LOGIDOC_WEBHOOK_SECRET_KEY must be at least {WEBHOOK_KEY_MIN} characters (webhook signing secrets "
+                      "are derived from it).")
+
+    sandbox = value_of(environ, "LOGIDOC_INTEGRATION_SANDBOX_DIR")
+    if sandbox:
+        if not is_absolute(sandbox):
+            errors.append("LOGIDOC_INTEGRATION_SANDBOX_DIR must be an absolute path.")
+        for other in FOLDERS:
+            if other in folders and nested(sandbox, folders[other]):
+                errors.append(f"LOGIDOC_INTEGRATION_SANDBOX_DIR must not be inside {other} (or contain it): sandbox "
+                              "records are kept apart from the real data.")
+
     if production:
 
         for name in PRODUCTION_REQUIRED:
@@ -247,5 +271,12 @@ def validate(environ):
 
         if not webhook:
             warnings.append("No LOGIDOC_ALERT_WEBHOOK_URL: alerts go to the log only.")
+
+        for name in DEVELOPMENT_ONLY:
+            if value_of(environ, name).lower() in TRUE:
+                errors.append(f"{name} cannot be on in production (webhooks go to public HTTPS destinations only).")
+
+        if sandbox:
+            errors.append("LOGIDOC_INTEGRATION_SANDBOX_DIR cannot be set in production: the sandbox TMS is synthetic data.")
 
     return {"environment": environment, "errors": errors, "warnings": warnings}

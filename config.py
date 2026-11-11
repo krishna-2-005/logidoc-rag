@@ -73,6 +73,11 @@ FREIGHT_TOLERANCES = os.environ.get("LOGIDOC_FREIGHT_TOLERANCES") or ""
 # identifiers and the approved links of document names to them
 CARRIER_DB_PATH = Path(os.environ.get("LOGIDOC_CARRIER_DB") or DATA_DIR / "carrier_registry.sqlite3")
 
+# Integrations (src/integration_store.py): webhook endpoints, the event outbox and
+# deliveries, scheduled jobs, TMS/ERP integrations and their sync runs. Created
+# only when an administrator first configures a webhook or an integration
+INTEGRATION_DB_PATH = Path(os.environ.get("LOGIDOC_INTEGRATION_DB") or DATA_DIR / "integrations.sqlite3")
+
 # Backups (src/backup.py, scripts/manage_backups.py): verified copies of the databases,
 # documents and vector index. Keep them on another disk than the data in
 # production (required there: LOGIDOC_BACKUP_DIR); development default:

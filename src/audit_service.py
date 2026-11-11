@@ -186,6 +186,12 @@ class Locations:
     archive_dir: Path
     extraction_db: Path = None
     carrier_db: Path = None
+    integration_db: Path = None
+
+    def integration_path(self):
+        """The integration store (webhooks, jobs, TMS/ERP syncs): its own setting, or next to the raw folder."""
+
+        return Path(self.integration_db) if self.integration_db else Path(self.raw_dir).parent / "integrations.sqlite3"
 
     def extraction_path(self):
         """The extraction store: its own setting, or next to the raw folder."""
@@ -206,6 +212,7 @@ class Locations:
             Path(config.RAW_DATA_DIR), Path(config.CHROMA_DIR), Path(config.REVIEW_DB_PATH),
             Path(config.HISTORY_DB_PATH), places["register"], places["quarantine"], places["archive"], places["extractions"],
             Path(config.CARRIER_DB_PATH) if getattr(config, "CARRIER_DB_PATH", None) else None,
+            Path(config.INTEGRATION_DB_PATH) if getattr(config, "INTEGRATION_DB_PATH", None) else None,
         )
 
 

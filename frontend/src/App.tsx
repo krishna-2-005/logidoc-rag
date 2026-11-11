@@ -7,6 +7,14 @@ import { useSession } from "@/hooks/queries"
 import { UNAUTHORIZED_EVENT } from "@/lib/api"
 import { Assistant } from "@/pages/Assistant"
 import { CarrierIntelligence } from "@/pages/CarrierIntelligence"
+import { CarrierLinks } from "@/pages/CarrierLinks"
+import { CarrierRegistry } from "@/pages/CarrierRegistry"
+import { CarrierRegistryDetail } from "@/pages/CarrierRegistryDetail"
+import { IntegrationDetail } from "@/pages/IntegrationDetail"
+import { Integrations } from "@/pages/Integrations"
+import { ScheduledJobs } from "@/pages/ScheduledJobs"
+import { DeliveryDetail, WebhookDetail } from "@/pages/WebhookDetail"
+import { Webhooks } from "@/pages/Webhooks"
 import { Completeness } from "@/pages/Completeness"
 import { Corrections } from "@/pages/Corrections"
 import { Documents } from "@/pages/Documents"
@@ -68,6 +76,15 @@ export default function App() {
         <Route path="exceptions" element={<Exceptions />} />
         <Route path="history" element={<AuditHistory />} />
         <Route path="carriers" element={<CarrierIntelligence />} />
+        <Route path="carrier-registry" element={<CarrierRegistry />} />
+        <Route path="carrier-registry/links" element={<CarrierLinks />} />
+        <Route path="carrier-registry/:id" element={<CarrierRegistryDetail />} />
+        <Route path="integrations" element={<Integrations />} />
+        <Route path="integrations/connections/:id" element={<IntegrationDetail />} />
+        <Route path="integrations/webhooks" element={<Webhooks />} />
+        <Route path="integrations/webhooks/:id" element={<WebhookDetail />} />
+        <Route path="integrations/deliveries/:id" element={<DeliveryDetail />} />
+        <Route path="integrations/jobs" element={<ScheduledJobs />} />
         <Route path="corrections" element={<Corrections />} />
         <Route path="completeness" element={<Completeness />} />
         <Route path="reports" element={<Reports />} />

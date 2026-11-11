@@ -1019,3 +1019,416 @@ export interface CarrierDetail extends CarrierCard {
   limit: number
   shipment_rows: CarrierShipmentRow[]
 }
+
+// ---------------------------------------------------------------------------
+// Carrier registry management (GET /api/carrier-registry/...)
+// ---------------------------------------------------------------------------
+
+export type RegistrationStatus = "active" | "on_hold" | "inactive"
+
+export interface RegisteredCarrierRecord extends RegisteredCarrier {
+  created_by: string
+  created_at: string
+  updated_at: string
+  document_names: string[]
+  status: RegistrationStatus
+  address_line1: string | null
+  address_line2: string | null
+  city: string | null
+  region: string | null
+  postal_code: string | null
+  country: string | null
+  /** Link requests waiting for this carrier (the paged list and the detail only) */
+  pending_requests?: number | null
+}
+
+export interface CarrierPage {
+  carriers: RegisteredCarrierRecord[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface LinkRequest {
+  id: number
+  name_key: string
+  display_name: string
+  /** null: the request unlinks the name */
+  carrier_id: number | null
+  reason: string
+  proposed_by: string
+  proposed_at: string
+  decision: "approved" | "rejected" | null
+  decided_by: string | null
+  decided_at: string | null
+  decision_note: string | null
+  carrier_legal_name?: string | null
+  current_carrier_id?: number | null
+  current_carrier_legal_name?: string | null
+}
+
+export interface LinkQueue {
+  requests: LinkRequest[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface NameLink {
+  name_key: string
+  display_name: string
+  carrier_id: number
+  request_id: number
+  linked_at: string
+  proposed_by: string | null
+  decided_by: string | null
+  legal_name: string
+}
+
+export interface RegistryEvent {
+  id: number
+  at: string
+  actor: string
+  action: string
+  carrier_id: number | null
+  request_id: number | null
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+}
+
+export interface RegistryEventPage {
+  events: RegistryEvent[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface CarrierRegistryDetail {
+  carrier: RegisteredCarrierRecord
+  name_links: NameLink[]
+  pending_requests: LinkRequest[]
+  recent_decisions: LinkRequest[]
+  /** null for a role that cannot read the history of the registry */
+  history: RegistryEventPage | null
+  /** The Carrier Intelligence key of this carrier (GET /api/carriers/{key}); null until a document name is linked */
+  intelligence_key: string | null
+}
+
+export interface CarrierReference {
+  id: number
+  legal_name: string
+}
+
+export interface DocumentName {
+  name_key: string
+  name: string
+  spellings: string[]
+  shipments: number
+  shipment_ids: string[]
+  documents: { shipment_id: string; file: string | null; document_type: string | null }[]
+  state: "linked" | "pending" | "unlinked"
+  linked_carrier: CarrierReference | null
+  pending_request: { id: number; carrier_id: number | null; carrier_legal_name: string | null; proposed_by: string; proposed_at: string; reason: string } | null
+  /** Registered carriers with the same name apart from case and punctuation: a hint, never applied */
+  suggestions: CarrierReference[]
+}
+
+export interface DocumentNamePage {
+  names: DocumentName[]
+  total: number
+  offset: number
+  limit: number
+  counts: Record<"unlinked" | "pending" | "linked", number>
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks, scheduled jobs and TMS/ERP integrations (administrators)
+// ---------------------------------------------------------------------------
+
+export interface WebhookConfiguration {
+  delivery_enabled: boolean
+  problems: string[]
+  event_types: { type: string; description: string }[]
+  https_only: boolean
+  private_destinations_allowed: boolean
+  timeout_seconds: number
+  max_attempts: number
+  rotation_grace_hours: number
+  signature: { signature_header: string; timestamp_header: string; event_id_header: string; scheme: string; tolerance_seconds: number }
+}
+
+export interface EndpointStats {
+  deliveries: number
+  succeeded: number
+  failed: number
+  waiting: number
+  success_rate: number | null
+  last_attempt_at: string | null
+  last_success_at: string | null
+  last_failure_at: string | null
+  window_days: number
+}
+
+export interface WebhookEndpoint {
+  id: number
+  name: string
+  /** Query values masked */
+  url: string
+  event_types: string[]
+  enabled: boolean
+  archived: boolean
+  secret_version: number
+  secret_rotated_at: string
+  previous_secret_expires_at: string | null
+  rotation_in_progress: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+  archived_at: string | null
+  archived_by: string | null
+  stats: EndpointStats
+}
+
+export interface ChangeRecord {
+  id: number
+  at: string
+  actor: string
+  action: string
+  before: unknown
+  after: unknown
+}
+
+export interface WebhookEndpointDetail extends WebhookEndpoint {
+  changes: ChangeRecord[]
+}
+
+export interface WebhookSecretIssued {
+  endpoint: WebhookEndpoint
+  /** Shown this once */
+  secret: string
+  note: string
+}
+
+export type DeliveryStatus = "pending" | "sending" | "retrying" | "succeeded" | "failed" | "cancelled"
+
+export interface WebhookDelivery {
+  id: number
+  event_id: string
+  endpoint_id: number
+  endpoint_name: string
+  event_type: string
+  occurred_at: string
+  status: DeliveryStatus
+  attempts: number
+  cycle_attempts: number
+  next_attempt_at: string | null
+  last_attempt_at: string | null
+  last_status_code: number | null
+  last_error: string | null
+  test: boolean
+  manual_retries: number
+  last_retry_by: string | null
+  last_retry_at: string | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+export interface DeliveryAttempt {
+  id: number
+  attempt: number
+  trigger: string
+  started_at: string
+  duration_ms: number | null
+  status_code: number | null
+  outcome: "succeeded" | "retry" | "failed"
+  error: string | null
+  detail: string | null
+}
+
+export interface WebhookDeliveryDetail extends WebhookDelivery {
+  payload_preview: Record<string, unknown>
+  attempt_log: DeliveryAttempt[]
+  retryable: boolean
+}
+
+export interface DeliveryPage {
+  deliveries: WebhookDelivery[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface ScheduledJob {
+  name: string
+  description: string
+  enabled: boolean
+  interval_seconds: number
+  next_run_at: string
+  last_started_at: string | null
+  last_finished_at: string | null
+  last_success_at: string | null
+  last_failure_at: string | null
+  last_error: string | null
+  consecutive_failures: number
+  max_retries: number
+  timeout_seconds: number
+  running: boolean
+  running_here: boolean
+  delayed: boolean
+  delay_seconds: number
+  updated_at: string
+}
+
+export interface SchedulerStatus {
+  configured: boolean
+  running_here: boolean
+  owner: { since: string; heartbeat_at: string; this_process: boolean; stale: boolean } | null
+  jobs: ScheduledJob[]
+  webhook_delivery: { enabled: boolean; problems: string[] }
+}
+
+export interface JobRun {
+  id: number
+  job: string
+  trigger: string
+  requested_by: string | null
+  started_at: string
+  finished_at: string | null
+  status: "running" | "succeeded" | "failed" | "interrupted"
+  duration_ms: number | null
+  delay_seconds: number | null
+  summary: unknown
+  error_category: string | null
+  error_message: string | null
+  ran_here: boolean
+}
+
+export interface JobRunPage {
+  runs: JobRun[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface ProviderInfo {
+  key: string
+  label: string
+  description: string
+  entities: string[]
+  accepts_audit_runs: boolean
+  sandbox: boolean
+  available: boolean
+  unavailable_reason: string | null
+  default_credential_env: string | null
+}
+
+export type SyncStatus = "running" | "succeeded" | "partial" | "failed" | "interrupted"
+
+export interface SyncRun {
+  id: number
+  integration_id: number
+  trigger: string
+  requested_by: string | null
+  started_at: string
+  finished_at: string | null
+  status: SyncStatus
+  cursor_before: Record<string, unknown>
+  cursor_after: Record<string, unknown>
+  fetched: number
+  imported: number
+  updated: number
+  unchanged: number
+  duplicates: number
+  rejected: number
+  conflicts: number
+  pages: number
+  retries: number
+  error_category: string | null
+  error_message: string | null
+}
+
+export interface SyncRunDetail extends SyncRun {
+  rejections: { id: number; entity: string; external_id: string | null; reason: string; at: string }[]
+}
+
+export interface SyncRunPage {
+  runs: SyncRun[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface Integration {
+  id: number
+  name: string
+  provider: string
+  enabled: boolean
+  settings: Record<string, unknown>
+  /** The environment variable holding the credential (never its value) */
+  credential_env: string | null
+  credential_configured: boolean
+  sync_interval_seconds: number
+  next_sync_at: string | null
+  cursor: Record<string, unknown>
+  connection_status: "untested" | "connected" | "auth_failed" | "error"
+  connection_checked_at: string | null
+  connection_error: string | null
+  last_success_at: string | null
+  last_failure_at: string | null
+  last_error: string | null
+  consecutive_failures: number
+  running: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+  last_run: SyncRun | null
+  totals: { imported: number; updated: number; rejected: number; runs: number }
+  records: Record<string, number>
+}
+
+export interface IntegrationDetail extends Integration {
+  changes: ChangeRecord[]
+}
+
+export interface IntegrationList {
+  integrations: Integration[]
+  providers: ProviderInfo[]
+}
+
+export interface ConnectionTest {
+  ok: boolean
+  category: string | null
+  detail: string
+  latency_ms: number
+}
+
+export interface ImportedRecord {
+  id: number
+  integration_id: number
+  provider: string
+  entity: "shipments" | "carriers"
+  external_id: string
+  source_updated_at: string
+  content_hash: string
+  data: Record<string, unknown>
+  first_run_id: number
+  last_run_id: number
+  created_at: string
+  updated_at: string
+  corrected_fields: string[]
+}
+
+export interface ImportedRecordDetail extends ImportedRecord {
+  received: Record<string, unknown>
+  corrections: Record<string, unknown>
+  versions: { id: number; run_id: number | null; change: string; content_hash: string; kept_fields: string[]; actor: string | null; at: string }[]
+  override_history: { id: number; field: string; value: unknown; cleared: boolean; reason: string; actor: string; at: string }[]
+}
+
+export interface RecordPage {
+  records: ImportedRecord[]
+  total: number
+  offset: number
+  limit: number
+}

@@ -1,7 +1,12 @@
 import {
   BadgeCheck,
   Bot,
+  Building2,
+  Cable,
+  CalendarClock,
   ChevronRight,
+  Link2,
+  Webhook,
   ClipboardCheck,
   FileCheck2,
   FileDown,
@@ -21,7 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Tooltip } from "@/components/ui/tooltip"
 import { can, useLogout, useOverview, useReadiness } from "@/hooks/queries"
@@ -69,18 +74,39 @@ const NAV: { label: string; items: Item[] }[] = [
       { to: "/reports", label: "Reports", icon: FileDown },
     ],
   },
+  {
+    label: "Master data",
+    items: [
+      { to: "/carrier-registry", label: "Carrier Registry", icon: Building2, permission: "exceptions.view" },
+      { to: "/carrier-registry/links", label: "Name Link Approvals", icon: Link2, permission: "exceptions.view" },
+    ],
+  },
+  {
+    label: "Integrations",
+    items: [
+      { to: "/integrations", label: "TMS / ERP", icon: Cable, permission: "integrations.manage" },
+      { to: "/integrations/webhooks", label: "Webhooks", icon: Webhook, permission: "integrations.manage" },
+      { to: "/integrations/jobs", label: "Scheduled Jobs", icon: CalendarClock, permission: "integrations.manage" },
+    ],
+  },
   { label: "System", items: [{ to: "/settings", label: "Settings", icon: SettingsIcon }] },
 ]
 
-/** The section and screen of the current address, for the top bar */
+/** The section and screen of the current address, for the top bar (the most specific entry wins) */
 function whereAmI(pathname: string): { group: string; page: string; detail?: string } {
+  let found: { group: string; page: string; detail?: string; length: number } | null = null
+
   for (const group of NAV) {
     for (const item of group.items) {
       const exact = pathname === item.to
       const below = item.to !== "/" && pathname.startsWith(`${item.to}/`)
-      if (exact || below) return { group: group.label, page: item.label, detail: below ? decodeURIComponent(pathname.slice(item.to.length + 1)) : undefined }
+      if ((exact || below) && (!found || item.to.length > found.length)) {
+        found = { group: group.label, page: item.label, detail: below ? decodeURIComponent(pathname.slice(item.to.length + 1)) : undefined, length: item.to.length }
+      }
     }
   }
+
+  if (found) return { group: found.group, page: found.page, detail: found.detail }
   return { group: "Operations", page: "Overview" }
 }
 
@@ -107,9 +133,24 @@ const COUNT_TONE = {
   warn: "bg-warn-soft text-warn",
 }
 
+/** The entry the address belongs to: the longest matching path ("/carrier-registry/links" over "/carrier-registry") */
+function activeEntry(pathname: string): string | null {
+  let best: string | null = null
+
+  for (const group of NAV) {
+    for (const item of group.items) {
+      const match = pathname === item.to || (item.to !== "/" && !item.end && pathname.startsWith(`${item.to}/`))
+      if (match && (best === null || item.to.length > best.length)) best = item.to
+    }
+  }
+
+  return best
+}
+
 function Navigation({ session, onNavigate }: { session: Session; onNavigate?: () => void }) {
   const overview = useOverview()
   const data = overview.data && !overview.data.empty ? overview.data : null
+  const active = activeEntry(useLocation().pathname)
 
   return (
     <nav aria-label="Main" className="flex-1 space-y-4 overflow-y-auto px-3 pb-3">
@@ -121,21 +162,19 @@ function Navigation({ session, onNavigate }: { session: Session; onNavigate?: ()
           <div key={group.label}>
             <p className="px-3 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-navy-text/60">{group.label}</p>
             <div className="space-y-0.5">
-              {items.map(({ to, label, icon: Icon, end, count }) => {
+              {items.map(({ to, label, icon: Icon, count }) => {
                 const badge = data && count ? count(data) : null
 
                 return (
-                  <NavLink
+                  <Link
                     key={to}
                     to={to}
-                    end={end}
                     onClick={onNavigate}
-                    className={({ isActive }) =>
-                      cn(
-                        "relative flex items-center gap-3 rounded-lg px-3 py-[7px] text-[13.5px] font-medium text-navy-text/80 transition-colors hover:bg-white/[0.06] hover:text-white",
-                        isActive && "bg-white/[0.09] text-white before:absolute before:inset-y-2 before:-left-3 before:w-[3px] before:rounded-r-full before:bg-primary hover:bg-white/[0.09]",
-                      )
-                    }
+                    aria-current={to === active ? "page" : undefined}
+                    className={cn(
+                      "relative flex items-center gap-3 rounded-lg px-3 py-[7px] text-[13.5px] font-medium text-navy-text/80 transition-colors hover:bg-white/[0.06] hover:text-white",
+                      to === active && "bg-white/[0.09] text-white before:absolute before:inset-y-2 before:-left-3 before:w-[3px] before:rounded-r-full before:bg-primary hover:bg-white/[0.09]",
+                    )}
                   >
                     <Icon className="size-[18px] shrink-0" aria-hidden="true" />
                     <span className="truncate">{label}</span>
@@ -144,7 +183,7 @@ function Navigation({ session, onNavigate }: { session: Session; onNavigate?: ()
                         {badge.value}
                       </span>
                     )}
-                  </NavLink>
+                  </Link>
                 )
               })}
             </div>
