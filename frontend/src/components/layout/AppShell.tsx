@@ -2,8 +2,11 @@ import {
   BadgeCheck,
   Bot,
   Building2,
+  Cable,
+  CalendarClock,
   ChevronRight,
   Link2,
+  Webhook,
   ClipboardCheck,
   FileCheck2,
   FileDown,
@@ -76,6 +79,14 @@ const NAV: { label: string; items: Item[] }[] = [
     items: [
       { to: "/carrier-registry", label: "Carrier Registry", icon: Building2, permission: "exceptions.view" },
       { to: "/carrier-registry/links", label: "Name Link Approvals", icon: Link2, permission: "exceptions.view" },
+    ],
+  },
+  {
+    label: "Integrations",
+    items: [
+      { to: "/integrations", label: "TMS / ERP", icon: Cable, permission: "integrations.manage" },
+      { to: "/integrations/webhooks", label: "Webhooks", icon: Webhook, permission: "integrations.manage" },
+      { to: "/integrations/jobs", label: "Scheduled Jobs", icon: CalendarClock, permission: "integrations.manage" },
     ],
   },
   { label: "System", items: [{ to: "/settings", label: "Settings", icon: SettingsIcon }] },
