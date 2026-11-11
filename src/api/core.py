@@ -207,6 +207,10 @@ class ApiState:
         self.backup_dir = Path(backup_dir) if backup_dir else Path(locations.raw_dir).parent / "backups"
         self.operations_cache = None
         self.operations_lock = threading.Lock()
+        self.integrations_cache = None
+        self.integrations_lock = threading.Lock()
+        # Tests replace the webhook transport, the DNS resolver and the sync's sleep (never the server)
+        self.integration_options = {}
 
     @property
     def mode(self):
@@ -236,6 +240,23 @@ class ApiState:
                 )
 
             return self.operations_cache
+
+    @property
+    def integrations(self):
+        """Webhooks, TMS/ERP integrations and the scheduler (src/integration_runtime.py), built on first use."""
+
+        with self.integrations_lock:
+
+            if self.integrations_cache is None:
+
+                import integration_runtime
+                import metrics
+
+                environ = self.environ if self.environ is not None else dict(os.environ)
+                self.integrations_cache = integration_runtime.IntegrationRuntime(
+                    self, environ, metrics=metrics.REGISTRY, alerts=self.operations.alerts, **self.integration_options)
+
+            return self.integrations_cache
 
     def users(self):
         """

@@ -529,6 +529,7 @@ def cli(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "HISTORY_DB_PATH", data / "audit_history.sqlite3")
     monkeypatch.setattr(config, "AUTH_DB_PATH", data / "auth.sqlite3")
     monkeypatch.setattr(config, "CARRIER_DB_PATH", data / "carrier_registry.sqlite3")
+    monkeypatch.setattr(config, "INTEGRATION_DB_PATH", data / "integrations.sqlite3")
     monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
     for name in ("LOGIDOC_BACKUP_DIR", "LOGIDOC_INGESTION_DB", "LOGIDOC_EXTRACTION_DB", "LOGIDOC_BACKUP_SCHEDULE"):
         monkeypatch.delenv(name, raising=False)

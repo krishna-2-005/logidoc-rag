@@ -95,6 +95,8 @@ DATABASES = {
                     "upgraded with python scripts/migrate_extraction_store.py (the API refuses an outdated store)"),
     "carrier_registry": ("carrier_registry.sqlite3", "carrier_registry",
                          "upgraded by the application when it opens the store"),
+    "integrations": ("integrations.sqlite3", "integration_store",
+                     "upgraded by the application when it opens the store"),
 }
 
 # Document folders: name in the backup -> attribute of Sources
@@ -209,6 +211,7 @@ class Sources:
                 "ingestion_register": Path(locations.register_db),
                 "extractions": Path(locations.extraction_path()),
                 "carrier_registry": Path(locations.carrier_registry_path()),
+                "integrations": Path(locations.integration_path()),
             },
         )
 

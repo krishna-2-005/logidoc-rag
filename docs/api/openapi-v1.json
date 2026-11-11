@@ -1985,6 +1985,41 @@
         "title": "ConflictingShipment",
         "type": "object"
       },
+      "ConnectionTest": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "category",
+          "detail",
+          "latency_ms"
+        ],
+        "title": "ConnectionTest",
+        "type": "object"
+      },
       "CorrectionApplied": {
         "properties": {
           "approved_by": {
@@ -2159,6 +2194,97 @@
         "title": "DecisionBody",
         "type": "object"
       },
+      "DeliveryAttempt": {
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "delivery_id": {
+            "title": "Delivery Id",
+            "type": "integer"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "outcome": {
+            "enum": [
+              "succeeded",
+              "retry",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "delivery_id",
+          "attempt",
+          "trigger",
+          "started_at",
+          "duration_ms",
+          "status_code",
+          "outcome",
+          "error",
+          "detail"
+        ],
+        "title": "DeliveryAttempt",
+        "type": "object"
+      },
       "DeliveryFigures": {
         "properties": {
           "average_delay_days": {
@@ -2209,6 +2335,37 @@
           "not_measured"
         ],
         "title": "DeliveryFigures",
+        "type": "object"
+      },
+      "DeliveryPage": {
+        "properties": {
+          "deliveries": {
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            },
+            "title": "Deliveries",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deliveries",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "DeliveryPage",
         "type": "object"
       },
       "DocumentFigures": {
@@ -2375,6 +2532,225 @@
         "title": "DocumentNamePage",
         "type": "object"
       },
+      "EndpointBody": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Event Types",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url",
+          "event_types"
+        ],
+        "title": "EndpointBody",
+        "type": "object"
+      },
+      "EndpointChange": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "after": {
+            "title": "After"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "before": {
+            "title": "Before"
+          },
+          "endpoint_id": {
+            "title": "Endpoint Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "endpoint_id",
+          "at",
+          "actor",
+          "action",
+          "before",
+          "after"
+        ],
+        "title": "EndpointChange",
+        "type": "object"
+      },
+      "EndpointChanges": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "event_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Types"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "title": "EndpointChanges",
+        "type": "object"
+      },
+      "EndpointStats": {
+        "description": "Deliveries created in the last window_days days (tests excluded). success_rate: null when none completed.",
+        "properties": {
+          "deliveries": {
+            "title": "Deliveries",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "last_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt At"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "success_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success Rate"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          },
+          "window_days": {
+            "title": "Window Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deliveries",
+          "succeeded",
+          "failed",
+          "waiting",
+          "success_rate",
+          "last_attempt_at",
+          "last_success_at",
+          "last_failure_at",
+          "window_days"
+        ],
+        "title": "EndpointStats",
+        "type": "object"
+      },
       "ErrorResponse": {
         "properties": {
           "detail": {
@@ -2386,6 +2762,24 @@
           "detail"
         ],
         "title": "ErrorResponse",
+        "type": "object"
+      },
+      "EventTypeInfo": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "description"
+        ],
+        "title": "EventTypeInfo",
         "type": "object"
       },
       "ExceptionAmount": {
@@ -3767,6 +4161,198 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ImportedRecord": {
+        "description": "Provenance: integration, provider, external_id, the partner's change time and the runs that brought it.",
+        "properties": {
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "corrected_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Corrected Fields",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "entity": {
+            "enum": [
+              "shipments",
+              "carriers"
+            ],
+            "title": "Entity",
+            "type": "string"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "first_run_id": {
+            "title": "First Run Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "integration_id": {
+            "title": "Integration Id",
+            "type": "integer"
+          },
+          "last_run_id": {
+            "title": "Last Run Id",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source_updated_at": {
+            "title": "Source Updated At",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "integration_id",
+          "provider",
+          "entity",
+          "external_id",
+          "source_updated_at",
+          "content_hash",
+          "data",
+          "first_run_id",
+          "last_run_id",
+          "created_at",
+          "updated_at",
+          "corrected_fields"
+        ],
+        "title": "ImportedRecord",
+        "type": "object"
+      },
+      "ImportedRecordDetail": {
+        "description": "received: the partner's values; data: with the corrections in force applied (corrections win).",
+        "properties": {
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "corrected_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Corrected Fields",
+            "type": "array"
+          },
+          "corrections": {
+            "additionalProperties": true,
+            "title": "Corrections",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "entity": {
+            "enum": [
+              "shipments",
+              "carriers"
+            ],
+            "title": "Entity",
+            "type": "string"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "first_run_id": {
+            "title": "First Run Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "integration_id": {
+            "title": "Integration Id",
+            "type": "integer"
+          },
+          "last_run_id": {
+            "title": "Last Run Id",
+            "type": "integer"
+          },
+          "override_history": {
+            "items": {
+              "$ref": "#/components/schemas/RecordCorrection"
+            },
+            "title": "Override History",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "received": {
+            "additionalProperties": true,
+            "title": "Received",
+            "type": "object"
+          },
+          "source_updated_at": {
+            "title": "Source Updated At",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/RecordVersion"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "integration_id",
+          "provider",
+          "entity",
+          "external_id",
+          "source_updated_at",
+          "content_hash",
+          "data",
+          "first_run_id",
+          "last_run_id",
+          "created_at",
+          "updated_at",
+          "corrected_fields",
+          "received",
+          "corrections",
+          "versions",
+          "override_history"
+        ],
+        "title": "ImportedRecordDetail",
+        "type": "object"
+      },
       "InputField": {
         "properties": {
           "corrected": {
@@ -3831,6 +4417,584 @@
         "title": "InputLineItem",
         "type": "object"
       },
+      "Integration": {
+        "description": "Never a credential: credential_env names the environment variable; credential_configured says whether it is set.",
+        "properties": {
+          "connection_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Checked At"
+          },
+          "connection_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Error"
+          },
+          "connection_status": {
+            "enum": [
+              "untested",
+              "connected",
+              "auth_failed",
+              "error"
+            ],
+            "title": "Connection Status",
+            "type": "string"
+          },
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "credential_configured": {
+            "title": "Credential Configured",
+            "type": "boolean"
+          },
+          "credential_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Env"
+          },
+          "cursor": {
+            "additionalProperties": true,
+            "title": "Cursor",
+            "type": "object"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_sync_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Sync At"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "records": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Records",
+            "type": "object"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          },
+          "sync_interval_seconds": {
+            "title": "Sync Interval Seconds",
+            "type": "integer"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SyncTotals"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "enabled",
+          "settings",
+          "credential_env",
+          "credential_configured",
+          "sync_interval_seconds",
+          "next_sync_at",
+          "cursor",
+          "connection_status",
+          "connection_checked_at",
+          "connection_error",
+          "last_success_at",
+          "last_failure_at",
+          "last_error",
+          "consecutive_failures",
+          "running",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "last_run",
+          "totals",
+          "records"
+        ],
+        "title": "Integration",
+        "type": "object"
+      },
+      "IntegrationBody": {
+        "properties": {
+          "credential_env": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Env"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          },
+          "sync_interval_seconds": {
+            "default": 3600,
+            "maximum": 604800.0,
+            "minimum": 60.0,
+            "title": "Sync Interval Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "provider"
+        ],
+        "title": "IntegrationBody",
+        "type": "object"
+      },
+      "IntegrationChange": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "after": {
+            "title": "After"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "before": {
+            "title": "Before"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "integration_id": {
+            "title": "Integration Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "integration_id",
+          "at",
+          "actor",
+          "action",
+          "before",
+          "after"
+        ],
+        "title": "IntegrationChange",
+        "type": "object"
+      },
+      "IntegrationChanges": {
+        "properties": {
+          "credential_env": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Env"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings"
+          },
+          "sync_interval_seconds": {
+            "anyOf": [
+              {
+                "maximum": 604800.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Interval Seconds"
+          }
+        },
+        "title": "IntegrationChanges",
+        "type": "object"
+      },
+      "IntegrationDetail": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "connection_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Checked At"
+          },
+          "connection_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Error"
+          },
+          "connection_status": {
+            "enum": [
+              "untested",
+              "connected",
+              "auth_failed",
+              "error"
+            ],
+            "title": "Connection Status",
+            "type": "string"
+          },
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "credential_configured": {
+            "title": "Credential Configured",
+            "type": "boolean"
+          },
+          "credential_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Env"
+          },
+          "cursor": {
+            "additionalProperties": true,
+            "title": "Cursor",
+            "type": "object"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_sync_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Sync At"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "records": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Records",
+            "type": "object"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          },
+          "sync_interval_seconds": {
+            "title": "Sync Interval Seconds",
+            "type": "integer"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SyncTotals"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "enabled",
+          "settings",
+          "credential_env",
+          "credential_configured",
+          "sync_interval_seconds",
+          "next_sync_at",
+          "cursor",
+          "connection_status",
+          "connection_checked_at",
+          "connection_error",
+          "last_success_at",
+          "last_failure_at",
+          "last_error",
+          "consecutive_failures",
+          "running",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "last_run",
+          "totals",
+          "records",
+          "changes"
+        ],
+        "title": "IntegrationDetail",
+        "type": "object"
+      },
+      "IntegrationList": {
+        "properties": {
+          "integrations": {
+            "items": {
+              "$ref": "#/components/schemas/Integration"
+            },
+            "title": "Integrations",
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderInfo"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "integrations",
+          "providers"
+        ],
+        "title": "IntegrationList",
+        "type": "object"
+      },
       "InvoicedMonth": {
         "properties": {
           "currency": {
@@ -3852,6 +5016,214 @@
           "invoices"
         ],
         "title": "InvoicedMonth",
+        "type": "object"
+      },
+      "JobChanges": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "interval_seconds": {
+            "anyOf": [
+              {
+                "maximum": 604800.0,
+                "minimum": 10.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Seconds"
+          }
+        },
+        "title": "JobChanges",
+        "type": "object"
+      },
+      "JobRun": {
+        "properties": {
+          "delay_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Seconds"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Category"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job": {
+            "title": "Job",
+            "type": "string"
+          },
+          "ran_here": {
+            "title": "Ran Here",
+            "type": "boolean"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job",
+          "trigger",
+          "requested_by",
+          "started_at",
+          "finished_at",
+          "status",
+          "duration_ms",
+          "delay_seconds",
+          "summary",
+          "error_category",
+          "error_message",
+          "ran_here"
+        ],
+        "title": "JobRun",
+        "type": "object"
+      },
+      "JobRunPage": {
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/JobRun"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "JobRunPage",
+        "type": "object"
+      },
+      "JobStarted": {
+        "properties": {
+          "job": {
+            "title": "Job",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "trigger": {
+            "enum": [
+              "manual",
+              "retry"
+            ],
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "job",
+          "trigger"
+        ],
+        "title": "JobStarted",
         "type": "object"
       },
       "LinkBody": {
@@ -4259,6 +5631,76 @@
         "title": "Period",
         "type": "object"
       },
+      "ProviderInfo": {
+        "properties": {
+          "accepts_audit_runs": {
+            "title": "Accepts Audit Runs",
+            "type": "boolean"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "default_credential_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Credential Env"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "entities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Entities",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sandbox": {
+            "title": "Sandbox",
+            "type": "boolean"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "description",
+          "entities",
+          "accepts_audit_runs",
+          "sandbox",
+          "available",
+          "unavailable_reason",
+          "default_credential_env"
+        ],
+        "title": "ProviderInfo",
+        "type": "object"
+      },
       "QueuedLinkRequest": {
         "properties": {
           "carrier_id": {
@@ -4486,6 +5928,189 @@
           }
         },
         "title": "RecordBody",
+        "type": "object"
+      },
+      "RecordCorrection": {
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "cleared": {
+            "title": "Cleared",
+            "type": "boolean"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "id",
+          "record_id",
+          "field",
+          "value",
+          "cleared",
+          "reason",
+          "actor",
+          "at"
+        ],
+        "title": "RecordCorrection",
+        "type": "object"
+      },
+      "RecordCorrectionBody": {
+        "properties": {
+          "clear": {
+            "default": false,
+            "title": "Clear",
+            "type": "boolean"
+          },
+          "field": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Field",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "field",
+          "reason"
+        ],
+        "title": "RecordCorrectionBody",
+        "type": "object"
+      },
+      "RecordPage": {
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/ImportedRecord"
+            },
+            "title": "Records",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "records",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "RecordPage",
+        "type": "object"
+      },
+      "RecordVersion": {
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "change": {
+            "enum": [
+              "created",
+              "updated",
+              "override",
+              "override_cleared"
+            ],
+            "title": "Change",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kept_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kept Fields",
+            "type": "array"
+          },
+          "received": {
+            "title": "Received"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "integer"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "id",
+          "record_id",
+          "run_id",
+          "change",
+          "content_hash",
+          "received",
+          "kept_fields",
+          "actor",
+          "at"
+        ],
+        "title": "RecordVersion",
         "type": "object"
       },
       "RegisteredCarrier": {
@@ -5401,6 +7026,239 @@
         "title": "RunReference",
         "type": "object"
       },
+      "SandboxChanges": {
+        "properties": {
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "changed"
+        ],
+        "title": "SandboxChanges",
+        "type": "object"
+      },
+      "SandboxChangesBody": {
+        "properties": {
+          "count": {
+            "default": 3,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "title": "SandboxChangesBody",
+        "type": "object"
+      },
+      "ScheduledJob": {
+        "description": "delayed: due for longer than its interval (at least a minute) and not running.",
+        "properties": {
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "delay_seconds": {
+            "title": "Delay Seconds",
+            "type": "integer"
+          },
+          "delayed": {
+            "title": "Delayed",
+            "type": "boolean"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "interval_seconds": {
+            "title": "Interval Seconds",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Finished At"
+          },
+          "last_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Started At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "max_retries": {
+            "title": "Max Retries",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_run_at": {
+            "title": "Next Run At",
+            "type": "string"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "running_here": {
+            "title": "Running Here",
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "enabled",
+          "interval_seconds",
+          "next_run_at",
+          "last_started_at",
+          "last_finished_at",
+          "last_success_at",
+          "last_failure_at",
+          "last_error",
+          "consecutive_failures",
+          "max_retries",
+          "timeout_seconds",
+          "running",
+          "running_here",
+          "delayed",
+          "delay_seconds",
+          "updated_at"
+        ],
+        "title": "ScheduledJob",
+        "type": "object"
+      },
+      "SchedulerOwner": {
+        "properties": {
+          "heartbeat_at": {
+            "title": "Heartbeat At",
+            "type": "string"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "this_process": {
+            "title": "This Process",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "since",
+          "heartbeat_at",
+          "this_process",
+          "stale"
+        ],
+        "title": "SchedulerOwner",
+        "type": "object"
+      },
+      "SchedulerStatus": {
+        "description": "The scheduler's own health (never part of /api/health or /api/ready). configured: the store exists.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledJob"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SchedulerOwner"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "running_here": {
+            "title": "Running Here",
+            "type": "boolean"
+          },
+          "webhook_delivery": {
+            "$ref": "#/components/schemas/WebhookDeliveryState"
+          }
+        },
+        "required": [
+          "configured",
+          "running_here",
+          "owner",
+          "jobs",
+          "webhook_delivery"
+        ],
+        "title": "SchedulerStatus",
+        "type": "object"
+      },
       "ShipmentException": {
         "properties": {
           "category": {
@@ -5453,6 +7311,40 @@
           "financial_impact"
         ],
         "title": "ShipmentException",
+        "type": "object"
+      },
+      "SignatureScheme": {
+        "description": "How a receiver checks a delivery: HMAC-SHA256 of \"<timestamp>.<event id>.<body>\", hex, as v1=<signature>.",
+        "properties": {
+          "event_id_header": {
+            "title": "Event Id Header",
+            "type": "string"
+          },
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          },
+          "signature_header": {
+            "title": "Signature Header",
+            "type": "string"
+          },
+          "timestamp_header": {
+            "title": "Timestamp Header",
+            "type": "string"
+          },
+          "tolerance_seconds": {
+            "title": "Tolerance Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "signature_header",
+          "timestamp_header",
+          "event_id_header",
+          "scheme",
+          "tolerance_seconds"
+        ],
+        "title": "SignatureScheme",
         "type": "object"
       },
       "Snapshot": {
@@ -5867,6 +7759,421 @@
         "title": "StateChange",
         "type": "object"
       },
+      "SyncRejection": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "entity": {
+            "title": "Entity",
+            "type": "string"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "entity",
+          "external_id",
+          "reason",
+          "at"
+        ],
+        "title": "SyncRejection",
+        "type": "object"
+      },
+      "SyncRun": {
+        "properties": {
+          "conflicts": {
+            "title": "Conflicts",
+            "type": "integer"
+          },
+          "cursor_after": {
+            "additionalProperties": true,
+            "title": "Cursor After",
+            "type": "object"
+          },
+          "cursor_before": {
+            "additionalProperties": true,
+            "title": "Cursor Before",
+            "type": "object"
+          },
+          "duplicates": {
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "error_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Category"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "fetched": {
+            "title": "Fetched",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "integration_id": {
+            "title": "Integration Id",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "retries": {
+            "title": "Retries",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "succeeded",
+              "partial",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "integration_id",
+          "trigger",
+          "requested_by",
+          "started_at",
+          "finished_at",
+          "status",
+          "cursor_before",
+          "cursor_after",
+          "fetched",
+          "imported",
+          "updated",
+          "unchanged",
+          "duplicates",
+          "rejected",
+          "conflicts",
+          "pages",
+          "retries",
+          "error_category",
+          "error_message"
+        ],
+        "title": "SyncRun",
+        "type": "object"
+      },
+      "SyncRunDetail": {
+        "properties": {
+          "conflicts": {
+            "title": "Conflicts",
+            "type": "integer"
+          },
+          "cursor_after": {
+            "additionalProperties": true,
+            "title": "Cursor After",
+            "type": "object"
+          },
+          "cursor_before": {
+            "additionalProperties": true,
+            "title": "Cursor Before",
+            "type": "object"
+          },
+          "duplicates": {
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "error_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Category"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "fetched": {
+            "title": "Fetched",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "integration_id": {
+            "title": "Integration Id",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "rejections": {
+            "items": {
+              "$ref": "#/components/schemas/SyncRejection"
+            },
+            "title": "Rejections",
+            "type": "array"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "retries": {
+            "title": "Retries",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "succeeded",
+              "partial",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "integration_id",
+          "trigger",
+          "requested_by",
+          "started_at",
+          "finished_at",
+          "status",
+          "cursor_before",
+          "cursor_after",
+          "fetched",
+          "imported",
+          "updated",
+          "unchanged",
+          "duplicates",
+          "rejected",
+          "conflicts",
+          "pages",
+          "retries",
+          "error_category",
+          "error_message",
+          "rejections"
+        ],
+        "title": "SyncRunDetail",
+        "type": "object"
+      },
+      "SyncRunPage": {
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/SyncRun"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "SyncRunPage",
+        "type": "object"
+      },
+      "SyncStarted": {
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "SyncStarted",
+        "type": "object"
+      },
+      "SyncTotals": {
+        "properties": {
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "imported",
+          "updated",
+          "rejected",
+          "runs"
+        ],
+        "title": "SyncTotals",
+        "type": "object"
+      },
       "TimelineEntry": {
         "properties": {
           "changes": {
@@ -5997,6 +8304,706 @@
           "current"
         ],
         "title": "ValueChange",
+        "type": "object"
+      },
+      "WebhookConfiguration": {
+        "description": "delivery_enabled false: problems says why (no signing key); nothing is registered or delivered then.",
+        "properties": {
+          "delivery_enabled": {
+            "title": "Delivery Enabled",
+            "type": "boolean"
+          },
+          "event_types": {
+            "items": {
+              "$ref": "#/components/schemas/EventTypeInfo"
+            },
+            "title": "Event Types",
+            "type": "array"
+          },
+          "https_only": {
+            "title": "Https Only",
+            "type": "boolean"
+          },
+          "max_attempts": {
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "private_destinations_allowed": {
+            "title": "Private Destinations Allowed",
+            "type": "boolean"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "rotation_grace_hours": {
+            "title": "Rotation Grace Hours",
+            "type": "integer"
+          },
+          "signature": {
+            "$ref": "#/components/schemas/SignatureScheme"
+          },
+          "timeout_seconds": {
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "delivery_enabled",
+          "problems",
+          "event_types",
+          "https_only",
+          "private_destinations_allowed",
+          "timeout_seconds",
+          "max_attempts",
+          "rotation_grace_hours",
+          "signature"
+        ],
+        "title": "WebhookConfiguration",
+        "type": "object"
+      },
+      "WebhookDelivery": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "cycle_attempts": {
+            "title": "Cycle Attempts",
+            "type": "integer"
+          },
+          "endpoint_id": {
+            "title": "Endpoint Id",
+            "type": "integer"
+          },
+          "endpoint_name": {
+            "title": "Endpoint Name",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_retry_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Retry At"
+          },
+          "last_retry_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Retry By"
+          },
+          "last_status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status Code"
+          },
+          "manual_retries": {
+            "title": "Manual Retries",
+            "type": "integer"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "sending",
+              "retrying",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "test": {
+            "title": "Test",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event_id",
+          "endpoint_id",
+          "endpoint_name",
+          "event_type",
+          "occurred_at",
+          "status",
+          "attempts",
+          "cycle_attempts",
+          "next_attempt_at",
+          "last_attempt_at",
+          "last_status_code",
+          "last_error",
+          "test",
+          "manual_retries",
+          "last_retry_by",
+          "last_retry_at",
+          "created_at",
+          "updated_at",
+          "completed_at"
+        ],
+        "title": "WebhookDelivery",
+        "type": "object"
+      },
+      "WebhookDeliveryDetail": {
+        "description": "payload_preview: the delivered JSON with contact details and secret-like values masked.",
+        "properties": {
+          "attempt_log": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "title": "Attempt Log",
+            "type": "array"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "cycle_attempts": {
+            "title": "Cycle Attempts",
+            "type": "integer"
+          },
+          "endpoint_id": {
+            "title": "Endpoint Id",
+            "type": "integer"
+          },
+          "endpoint_name": {
+            "title": "Endpoint Name",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_retry_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Retry At"
+          },
+          "last_retry_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Retry By"
+          },
+          "last_status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status Code"
+          },
+          "manual_retries": {
+            "title": "Manual Retries",
+            "type": "integer"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload_preview": {
+            "additionalProperties": true,
+            "title": "Payload Preview",
+            "type": "object"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "sending",
+              "retrying",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "test": {
+            "title": "Test",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event_id",
+          "endpoint_id",
+          "endpoint_name",
+          "event_type",
+          "occurred_at",
+          "status",
+          "attempts",
+          "cycle_attempts",
+          "next_attempt_at",
+          "last_attempt_at",
+          "last_status_code",
+          "last_error",
+          "test",
+          "manual_retries",
+          "last_retry_by",
+          "last_retry_at",
+          "created_at",
+          "updated_at",
+          "completed_at",
+          "payload_preview",
+          "attempt_log",
+          "retryable"
+        ],
+        "title": "WebhookDeliveryDetail",
+        "type": "object"
+      },
+      "WebhookDeliveryState": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "problems"
+        ],
+        "title": "WebhookDeliveryState",
+        "type": "object"
+      },
+      "WebhookEndpoint": {
+        "description": "An endpoint as shown: never its secret. url: query values masked.",
+        "properties": {
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "archived_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived By"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Event Types",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "previous_secret_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Secret Expires At"
+          },
+          "rotation_in_progress": {
+            "title": "Rotation In Progress",
+            "type": "boolean"
+          },
+          "secret_rotated_at": {
+            "title": "Secret Rotated At",
+            "type": "string"
+          },
+          "secret_version": {
+            "title": "Secret Version",
+            "type": "integer"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EndpointStats"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "event_types",
+          "enabled",
+          "archived",
+          "secret_version",
+          "secret_rotated_at",
+          "previous_secret_expires_at",
+          "rotation_in_progress",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "archived_at",
+          "archived_by",
+          "stats"
+        ],
+        "title": "WebhookEndpoint",
+        "type": "object"
+      },
+      "WebhookEndpointDetail": {
+        "properties": {
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "archived_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived By"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/EndpointChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Event Types",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "previous_secret_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Secret Expires At"
+          },
+          "rotation_in_progress": {
+            "title": "Rotation In Progress",
+            "type": "boolean"
+          },
+          "secret_rotated_at": {
+            "title": "Secret Rotated At",
+            "type": "string"
+          },
+          "secret_version": {
+            "title": "Secret Version",
+            "type": "integer"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EndpointStats"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "event_types",
+          "enabled",
+          "archived",
+          "secret_version",
+          "secret_rotated_at",
+          "previous_secret_expires_at",
+          "rotation_in_progress",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "archived_at",
+          "archived_by",
+          "stats",
+          "changes"
+        ],
+        "title": "WebhookEndpointDetail",
+        "type": "object"
+      },
+      "WebhookEndpointList": {
+        "properties": {
+          "endpoints": {
+            "items": {
+              "$ref": "#/components/schemas/WebhookEndpoint"
+            },
+            "title": "Endpoints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "endpoints"
+        ],
+        "title": "WebhookEndpointList",
+        "type": "object"
+      },
+      "WebhookSecretIssued": {
+        "description": "The signing secret, shown this once: store it in the receiver now.",
+        "properties": {
+          "endpoint": {
+            "$ref": "#/components/schemas/WebhookEndpoint"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "secret",
+          "note"
+        ],
+        "title": "WebhookSecretIssued",
         "type": "object"
       }
     }
@@ -9349,6 +12356,2369 @@
           }
         },
         "summary": "Audit Run Feed"
+      }
+    },
+    "/api/integrations/connections": {
+      "get": {
+        "operationId": "connection_list_api_integrations_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Connection List",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "post": {
+        "operationId": "connection_create_api_integrations_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integration"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Connection Create",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/connections/{integration_id}": {
+      "get": {
+        "operationId": "connection_detail_api_integrations_connections__integration_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Connection Detail",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "patch": {
+        "operationId": "connection_change_api_integrations_connections__integration_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integration"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Connection Change",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/connections/{integration_id}/records": {
+      "get": {
+        "operationId": "record_list_api_integrations_connections__integration_id__records_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "shipments",
+                    "carriers"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Record List",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/connections/{integration_id}/records/{record_id}": {
+      "get": {
+        "operationId": "record_detail_api_integrations_connections__integration_id__records__record_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "title": "Record Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportedRecordDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Record Detail",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/connections/{integration_id}/records/{record_id}/corrections": {
+      "post": {
+        "description": "Corrects one imported field by hand (with a reason). Later imports never overwrite it; clear removes it.",
+        "operationId": "record_correct_api_integrations_connections__integration_id__records__record_id__corrections_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "title": "Record Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordCorrectionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportedRecordDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Record Correct",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/connections/{integration_id}/runs": {
+      "get": {
+        "operationId": "connection_runs_api_integrations_connections__integration_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncRunPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Connection Runs",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/connections/{integration_id}/sandbox/changes": {
+      "post": {
+        "description": "Sandbox only: the simulated TMS moves some shipments forward, so the next sync finds changed records.",
+        "operationId": "sandbox_changes_api_integrations_connections__integration_id__sandbox_changes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxChangesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxChanges"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Sandbox Changes",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/connections/{integration_id}/sync": {
+      "post": {
+        "operationId": "connection_sync_api_integrations_connections__integration_id__sync_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Running already, or not possible in this state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Connection Sync",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/connections/{integration_id}/test": {
+      "post": {
+        "operationId": "connection_test_api_integrations_connections__integration_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Connection Test",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/deliveries": {
+      "get": {
+        "operationId": "delivery_list_api_integrations_deliveries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "endpoint_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Endpoint Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "pending",
+                  "sending",
+                  "retrying",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "title": "Status",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Delivery List",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/deliveries/{delivery_id}": {
+      "get": {
+        "operationId": "delivery_detail_api_integrations_deliveries__delivery_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Delivery Detail",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/deliveries/{delivery_id}/retry": {
+      "post": {
+        "description": "A failed (or retrying) delivery, attempted again now with a new cycle of retries.",
+        "operationId": "delivery_retry_api_integrations_deliveries__delivery_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Running already, or not possible in this state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Delivery Retry",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/job-runs/{run_id}": {
+      "get": {
+        "operationId": "job_run_detail_api_integrations_job_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Job Run Detail",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/jobs": {
+      "get": {
+        "operationId": "job_status_api_integrations_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Job Status",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/jobs/{name}": {
+      "patch": {
+        "operationId": "job_change_api_integrations_jobs__name__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Job Change",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/jobs/{name}/retry": {
+      "post": {
+        "operationId": "job_retry_api_integrations_jobs__name__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Running already, or not possible in this state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Job Retry",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/jobs/{name}/run": {
+      "post": {
+        "operationId": "job_run_api_integrations_jobs__name__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Running already, or not possible in this state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Job Run",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/jobs/{name}/runs": {
+      "get": {
+        "operationId": "job_runs_api_integrations_jobs__name__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "running",
+                  "succeeded",
+                  "failed",
+                  "interrupted"
+                ],
+                "type": "string"
+              },
+              "title": "Status",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRunPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Job Runs",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/sync-runs/{run_id}": {
+      "get": {
+        "operationId": "sync_run_detail_api_integrations_sync_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncRunDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Sync Run Detail",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/webhooks": {
+      "get": {
+        "operationId": "endpoint_list_api_integrations_webhooks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Endpoint List",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "post": {
+        "operationId": "endpoint_create_api_integrations_webhooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecretIssued"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Running already, or not possible in this state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Endpoint Create",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/webhooks/settings": {
+      "get": {
+        "operationId": "webhook_settings_api_integrations_webhooks_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookConfiguration"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Webhook Settings",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/webhooks/{endpoint_id}": {
+      "get": {
+        "operationId": "endpoint_detail_api_integrations_webhooks__endpoint_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "title": "Endpoint Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Endpoint Detail",
+        "tags": [
+          "integrations"
+        ]
+      },
+      "patch": {
+        "operationId": "endpoint_change_api_integrations_webhooks__endpoint_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "title": "Endpoint Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Endpoint Change",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/webhooks/{endpoint_id}/archive": {
+      "post": {
+        "operationId": "endpoint_archive_api_integrations_webhooks__endpoint_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "title": "Endpoint Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Endpoint Archive",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/webhooks/{endpoint_id}/rotate-secret": {
+      "post": {
+        "operationId": "endpoint_rotate_api_integrations_webhooks__endpoint_id__rotate_secret_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "title": "Endpoint Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecretIssued"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Running already, or not possible in this state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Endpoint Rotate",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/webhooks/{endpoint_id}/test": {
+      "post": {
+        "description": "Sends a webhook.test event to this endpoint now (one attempt, never retried by itself).",
+        "operationId": "endpoint_test_api_integrations_webhooks__endpoint_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "title": "Endpoint Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Running already, or not possible in this state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Endpoint Test",
+        "tags": [
+          "integrations"
+        ]
       }
     },
     "/api/overview": {

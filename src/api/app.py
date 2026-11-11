@@ -48,7 +48,7 @@ import config
 import metrics
 import readiness
 from api import (routes_assistant, routes_audit, routes_auth, routes_carriers, routes_extraction, routes_ingestion,
-                 routes_operations, routes_workflow)
+                 routes_integrations, routes_operations, routes_workflow)
 from api.core import ApiSettings, ApiState, csrf_guard
 from api.middleware import BodyLimit, HttpsPolicy, TrustedHosts
 from observability import RequestContext, set_error_category
@@ -141,13 +141,17 @@ def create_app(state=None, settings=None):
     @asynccontextmanager
     async def lifespan(application):
 
-        # The backup schedule and the monitor run only in the server process (serve.py), never in the tests
+        # The backup schedule, the monitor and the integration scheduler run only in the server process
+        # (serve.py), never in the tests
         if state.settings.background_jobs:
             state.operations.start()
+            state.integrations.start()
 
         try:
             yield
         finally:
+            if state.integrations_cache is not None:
+                state.integrations_cache.stop()
             if state.operations_cache is not None:
                 state.operations_cache.stop()
 
@@ -196,7 +200,7 @@ def create_app(state=None, settings=None):
 
     for router in (routes_auth.router, routes_audit.router, routes_workflow.router, routes_ingestion.router,
                    routes_assistant.router, routes_extraction.router, routes_extraction.history_router,
-                   routes_carriers.router, routes_operations.router):
+                   routes_carriers.router, routes_operations.router, routes_integrations.router):
         app.include_router(router, dependencies=[Depends(csrf_guard)])
 
     @app.get("/api/health")

@@ -66,6 +66,10 @@ def world(rig, monkeypatch, tmp_path):
                       json={"action": "dispute", "note": "No detention receipt with the POD."}).status_code == 200
     assert admin.post("/api/carrier-registry", json={"legal_name": "Swift Lines Inc", "scac": "SWFT",
                                                      "mc_number": "MC-123456"}).status_code == 201
+    # The integration store: an endpoint registered (nothing is sent: no delivery runs in this test)
+    rig.state.environ["LOGIDOC_WEBHOOK_SECRET_KEY"] = "test-signing-key-" + "k" * 32
+    assert admin.post("/api/integrations/webhooks", json={"name": "ERP", "url": "https://erp.partner-example.net/hooks",
+                                                          "event_types": ["carrier.created"]}).status_code == 201
 
     rig.sources = backup.Sources.from_locations(rig.locations, rig.state.user_db)
     rig.backups = tmp_path / "backups"
@@ -103,7 +107,8 @@ def test_a_backup_holds_every_store_verified_and_described(world):
     databases = manifest["components"]["databases"]["items"]
     supported = backup.supported_versions()
 
-    for name in ("audit_reviews", "audit_history", "auth", "ingestion_register", "extractions", "carrier_registry"):
+    for name in ("audit_reviews", "audit_history", "auth", "ingestion_register", "extractions", "carrier_registry",
+                 "integrations"):
         item = databases[name]
         assert item["present"] and item["integrity"] == "ok" and item["foreign_key_problems"] == 0, name
         assert item["schema_version"] == supported[name], name
@@ -115,6 +120,7 @@ def test_a_backup_holds_every_store_verified_and_described(world):
     assert databases["audit_history"]["tables"]["freight_audit_records"] >= 1
     assert databases["audit_reviews"]["tables"]["review_events"] >= 1
     assert databases["carrier_registry"]["tables"]["carriers"] == 1
+    assert databases["integrations"]["tables"]["webhook_endpoints"] == 1
     assert databases["ingestion_register"]["tables"]["ingestion_files"] == 1
 
     documents = manifest["components"]["documents"]
