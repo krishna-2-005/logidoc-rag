@@ -7,6 +7,9 @@ import { useSession } from "@/hooks/queries"
 import { UNAUTHORIZED_EVENT } from "@/lib/api"
 import { Assistant } from "@/pages/Assistant"
 import { CarrierIntelligence } from "@/pages/CarrierIntelligence"
+import { CarrierLinks } from "@/pages/CarrierLinks"
+import { CarrierRegistry } from "@/pages/CarrierRegistry"
+import { CarrierRegistryDetail } from "@/pages/CarrierRegistryDetail"
 import { Completeness } from "@/pages/Completeness"
 import { Corrections } from "@/pages/Corrections"
 import { Documents } from "@/pages/Documents"
@@ -68,6 +71,9 @@ export default function App() {
         <Route path="exceptions" element={<Exceptions />} />
         <Route path="history" element={<AuditHistory />} />
         <Route path="carriers" element={<CarrierIntelligence />} />
+        <Route path="carrier-registry" element={<CarrierRegistry />} />
+        <Route path="carrier-registry/links" element={<CarrierLinks />} />
+        <Route path="carrier-registry/:id" element={<CarrierRegistryDetail />} />
         <Route path="corrections" element={<Corrections />} />
         <Route path="completeness" element={<Completeness />} />
         <Route path="reports" element={<Reports />} />

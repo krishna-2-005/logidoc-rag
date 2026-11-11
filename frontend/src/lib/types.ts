@@ -1019,3 +1019,124 @@ export interface CarrierDetail extends CarrierCard {
   limit: number
   shipment_rows: CarrierShipmentRow[]
 }
+
+// ---------------------------------------------------------------------------
+// Carrier registry management (GET /api/carrier-registry/...)
+// ---------------------------------------------------------------------------
+
+export type RegistrationStatus = "active" | "on_hold" | "inactive"
+
+export interface RegisteredCarrierRecord extends RegisteredCarrier {
+  created_by: string
+  created_at: string
+  updated_at: string
+  document_names: string[]
+  status: RegistrationStatus
+  address_line1: string | null
+  address_line2: string | null
+  city: string | null
+  region: string | null
+  postal_code: string | null
+  country: string | null
+  /** Link requests waiting for this carrier (the paged list and the detail only) */
+  pending_requests?: number | null
+}
+
+export interface CarrierPage {
+  carriers: RegisteredCarrierRecord[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface LinkRequest {
+  id: number
+  name_key: string
+  display_name: string
+  /** null: the request unlinks the name */
+  carrier_id: number | null
+  reason: string
+  proposed_by: string
+  proposed_at: string
+  decision: "approved" | "rejected" | null
+  decided_by: string | null
+  decided_at: string | null
+  decision_note: string | null
+  carrier_legal_name?: string | null
+  current_carrier_id?: number | null
+  current_carrier_legal_name?: string | null
+}
+
+export interface LinkQueue {
+  requests: LinkRequest[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface NameLink {
+  name_key: string
+  display_name: string
+  carrier_id: number
+  request_id: number
+  linked_at: string
+  proposed_by: string | null
+  decided_by: string | null
+  legal_name: string
+}
+
+export interface RegistryEvent {
+  id: number
+  at: string
+  actor: string
+  action: string
+  carrier_id: number | null
+  request_id: number | null
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+}
+
+export interface RegistryEventPage {
+  events: RegistryEvent[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface CarrierRegistryDetail {
+  carrier: RegisteredCarrierRecord
+  name_links: NameLink[]
+  pending_requests: LinkRequest[]
+  recent_decisions: LinkRequest[]
+  /** null for a role that cannot read the history of the registry */
+  history: RegistryEventPage | null
+  /** The Carrier Intelligence key of this carrier (GET /api/carriers/{key}); null until a document name is linked */
+  intelligence_key: string | null
+}
+
+export interface CarrierReference {
+  id: number
+  legal_name: string
+}
+
+export interface DocumentName {
+  name_key: string
+  name: string
+  spellings: string[]
+  shipments: number
+  shipment_ids: string[]
+  documents: { shipment_id: string; file: string | null; document_type: string | null }[]
+  state: "linked" | "pending" | "unlinked"
+  linked_carrier: CarrierReference | null
+  pending_request: { id: number; carrier_id: number | null; carrier_legal_name: string | null; proposed_by: string; proposed_at: string; reason: string } | null
+  /** Registered carriers with the same name apart from case and punctuation: a hint, never applied */
+  suggestions: CarrierReference[]
+}
+
+export interface DocumentNamePage {
+  names: DocumentName[]
+  total: number
+  offset: number
+  limit: number
+  counts: Record<"unlinked" | "pending" | "linked", number>
+}
