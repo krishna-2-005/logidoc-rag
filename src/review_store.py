@@ -487,6 +487,32 @@ class ReviewStore:
                 )
             ]
 
+    def events_after(self, after_id, limit=500):
+        """
+        The events after id after_id, oldest first, each with its exception's
+        shipment and category. Only committed events are visible here, so the
+        webhook collector (src/webhooks.py) never reports a change that was
+        rolled back.
+        """
+
+        with closing(self.connect()) as connection:
+
+            return [
+                self.decode(row)
+                for row in connection.execute(
+                    "SELECT review_events.*, exception_reviews.shipment_id, exception_reviews.shipment_key, "
+                    "exception_reviews.category FROM review_events "
+                    "JOIN exception_reviews USING (exception_key) "
+                    "WHERE review_events.id > ? ORDER BY review_events.id LIMIT ?",
+                    (int(after_id), int(limit)),
+                )
+            ]
+
+    def last_event_id(self):
+
+        with closing(self.connect()) as connection:
+            return connection.execute("SELECT coalesce(max(id), 0) FROM review_events").fetchone()[0]
+
     def list_reviews(
         self,
         assignee=None,

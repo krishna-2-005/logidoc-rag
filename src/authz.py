@@ -45,6 +45,9 @@ EXCEPTIONS_WAIVE = "exceptions.waive"
 # Carrier master data: register carriers and propose or decide name links (administrators;
 # a link is decided by a different administrator than the one who proposed it)
 CARRIERS_MANAGE = "carriers.manage"
+# Webhooks, scheduled jobs and TMS/ERP integrations: configure, run, read their delivery and run history
+# (administrators; the history can name external systems and carries business identifiers)
+INTEGRATIONS_MANAGE = "integrations.manage"
 EXCEPTIONS_APPROVE = "exceptions.approve"
 EXCEPTIONS_REOPEN = "exceptions.reopen"
 
@@ -71,7 +74,7 @@ REVIEWER_PERMISSIONS = frozenset({
 })
 
 ADMIN_PERMISSIONS = REVIEWER_PERMISSIONS | frozenset({
-    EXCEPTIONS_ASSIGN_ANY, EXCEPTIONS_DISMISS, EXCEPTIONS_WAIVE, EXCEPTIONS_APPROVE, CARRIERS_MANAGE,
+    EXCEPTIONS_ASSIGN_ANY, EXCEPTIONS_DISMISS, EXCEPTIONS_WAIVE, EXCEPTIONS_APPROVE, CARRIERS_MANAGE, INTEGRATIONS_MANAGE,
     HISTORY_RECORD, INGESTION_WRITE, EXTRACTION_RUN, EXTRACTION_APPROVE,
     ADMIN_USERS, ADMIN_SETTINGS, ADMIN_MAINTENANCE,
 })
