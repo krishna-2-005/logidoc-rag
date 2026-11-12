@@ -41,7 +41,9 @@ adding safety here. One thread runs the jobs, and SQLite keeps their state.
 | Job locking, no overlap | A run first claims the job's lease in one `BEGIN IMMEDIATE` transaction: free, or expired. A second claim, from the schedule or an administrator, is refused (`JobBusy`, 409 at the API) |
 | Long runs | Each job has a timeout (5 minutes; 15 for syncs). `should_stop()`, checked between items, renews the lease and says when to stop |
 | Retry limits | A failed run is retried after 60 s × 2^(n−1), within the interval, up to 3 failures in a row. After that the job waits its normal interval and the critical alert `job_failing:<job>` is raised |
-| Restart recovery | A run left `running` when the process stopped is marked `interrupted` once its lease expires, and the job is due at once. Nothing is silently lost. A manual run interrupted by a stop is run again the same way |
+| Restart recovery | A run left `running` when the process stopped is marked `interrupted` once its lease expires, and the job is due at once. Nothing is silently lost. A manual run interrupted by a stop is run again the same way. A run whose lease is still valid is left alone (it may be running elsewhere) |
+| No repeat from a stale list | `tick()` reads the due jobs, then claims them one by one. A scheduled claim checks again, under the write lock, that the job is still enabled and due (`NotDue` otherwise). A job that ran meanwhile (a manual run, another process) is not run a second time |
+| A run that outlived its lease | If another process recovered it and started a new run, the old run's late outcome is not recorded. Its `interrupted` record and the new run's lease stay as they are (log line, `logidoc_jobs_lease_lost_total`), so no third claim can run the job beside the new run |
 | Catch-up | A job overdue at start runs once, not once per missed interval |
 | Graceful shutdown | The server's shutdown stops the loop: the running job ends at its next check, then the lease, the owner row and the lock are released |
 | Idempotency | Every job can run again on the same data without a second effect (the outbox, deliveries and imported records are keyed) |

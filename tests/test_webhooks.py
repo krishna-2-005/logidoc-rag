@@ -419,6 +419,89 @@ def test_a_timeout_is_retried_later_with_back_off_and_jitter(rig):
     assert service.retry_delay(1) == service.settings.base_delay_seconds // 2
 
 
+def due_now(rig):
+
+    with closing(sqlite3.connect(rig.locations.integration_path())) as connection, connection:
+        connection.execute("UPDATE webhook_deliveries SET next_attempt_at = '2000-01-01T00:00:00+00:00' "
+                           "WHERE status IN ('pending', 'retrying')")
+
+
+def table_count(rig, table):
+
+    with closing(sqlite3.connect(rig.locations.integration_path())) as connection:
+        return connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
+
+def test_every_retry_is_the_same_event_with_the_same_idempotency_key_and_payload(rig):
+    """Two failures, then success: three attempts of one logical event, never a new one."""
+
+    service, delivery_id = one_delivery(rig, [503, socket.timeout("timed out"), 204])
+
+    for _ in range(3):
+        due_now(rig)
+        service.deliver_due(("pending", "retrying"))
+
+    requests = rig.receiver.requests
+    event_id = json.loads(requests[0]["body"])["id"]
+
+    assert len(requests) == 3
+    assert {request["body"] for request in requests} == {requests[0]["body"]}                   # byte for byte
+    assert [request["headers"][webhooks.EVENT_HEADER] for request in requests] == [event_id] * 3
+    assert [request["headers"][webhooks.IDEMPOTENCY_HEADER] for request in requests] == [event_id] * 3
+    assert [request["headers"]["LogiDoc-Delivery-Id"] for request in requests] == [str(delivery_id)] * 3
+    assert [request["headers"]["LogiDoc-Delivery-Attempt"] for request in requests] == ["1", "2", "3"]
+
+    detail = service.delivery(delivery_id)
+    assert detail["status"] == "succeeded" and detail["attempts"] == 3 and detail["event_id"] == event_id
+    assert [item["outcome"] for item in detail["attempt_log"]] == ["retry", "retry", "succeeded"]
+
+    # One logical event and one delivery, however often it was sent, and reading the log again adds none
+    assert table_count(rig, "webhook_events") == 1 and table_count(rig, "webhook_deliveries") == 1
+    assert service.collect(only=["carrier_events"]) == {"carrier_events": 0}
+
+
+def test_a_manual_retry_after_a_failure_resends_the_same_event(rig):
+
+    service, delivery_id = one_delivery(rig, [400, 200])
+    service.deliver_due(("pending",))
+    assert service.delivery(delivery_id)["status"] == "failed"
+
+    retried = rig.client("alice").post(f"/api/integrations/deliveries/{delivery_id}/retry").json()
+    first, second = rig.receiver.requests
+
+    assert retried["status"] == "succeeded" and retried["event_id"] == json.loads(first["body"])["id"]
+    assert second["body"] == first["body"]
+    assert second["headers"][webhooks.IDEMPOTENCY_HEADER] == first["headers"][webhooks.IDEMPOTENCY_HEADER] == retried["event_id"]
+    assert table_count(rig, "webhook_events") == 1 and table_count(rig, "webhook_deliveries") == 1
+
+
+def test_each_attempt_is_signed_afresh_and_verifies_on_its_own(rig):
+    """The timestamp (and so the signature) is per attempt; the receiver's check passes for every one."""
+
+    alice = rig.client("alice")
+    secret = register(alice, event_types=["carrier.created"])["secret"]
+    alice.post("/api/carrier-registry", json={"legal_name": "Swift Lines Inc"})
+    service = runtime(rig).webhooks
+    service.collect(only=["carrier_events"])
+    rig.receiver.answers = [503, 200]
+
+    for _ in range(2):
+        due_now(rig)
+        service.deliver_due(("pending", "retrying"))
+
+    guard = webhooks.ReplayGuard()
+    seen = []
+    for request in rig.receiver.requests:
+        headers = request["headers"]
+        event_id = webhooks.verify_signature(secret, headers, request["body"], now=int(headers[webhooks.TIMESTAMP_HEADER]))
+        seen.append(guard.seen(headers[webhooks.IDEMPOTENCY_HEADER]))
+        assert event_id == headers[webhooks.IDEMPOTENCY_HEADER]
+
+    # The receiver treats the second arrival as the same event (it had refused the first with 503 here,
+    # but a receiver that processed one and failed to answer would deduplicate exactly like this)
+    assert seen == [False, True]
+
+
 def test_a_delivery_gives_up_after_its_attempts(rig):
 
     service, delivery_id = one_delivery(rig, [503] * 10)

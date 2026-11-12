@@ -57,6 +57,7 @@ POST <endpoint URL>
 Content-Type: application/json
 User-Agent: LogiDoc-Webhooks/1
 LogiDoc-Event-Id: evt_41e06349072b9aa5ddf0bffc870acdbd
+Idempotency-Key: evt_41e06349072b9aa5ddf0bffc870acdbd
 LogiDoc-Event-Type: carrier.created
 LogiDoc-Delivery-Id: 17
 LogiDoc-Delivery-Attempt: 1
@@ -74,6 +75,10 @@ LogiDoc-Signature: v1=5f2c...e9
    time, with each `v1=` value of the header. During a secret rotation there are two.
 4. **Refuse an event id you have already processed** and answer 2xx: delivery is *at least once*. A retry, or a
    delivery interrupted by a server restart, can arrive again. Keep processed ids in your own database.
+   - `Idempotency-Key` carries the same event id, for receivers and gateways that deduplicate on that header.
+   - Every attempt of a delivery sends the same event id, `Idempotency-Key` and body bytes (rebuilt from the
+     stored event). Only `LogiDoc-Delivery-Attempt`, the timestamp and therefore the signature change, so verify
+     each attempt on its own.
 5. Answer 2xx within 10 seconds, then do the work. Any 2xx is success.
 
 `webhooks.verify_signature()` and `webhooks.ReplayGuard` are a reference implementation of steps 1 to 4. The test

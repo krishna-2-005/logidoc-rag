@@ -344,6 +344,208 @@ def test_a_job_past_its_deadline_stops_and_continues_next_time(tmp_path, clock):
 
 
 # ============================================================
+# CRASH RECOVERY AND DUPLICATE RUNS
+# ============================================================
+
+def runs_of(scheduler, name):
+    """Every run of a job, oldest first, as stored."""
+
+    return list(reversed(scheduler.runs(name, limit=200)["runs"]))
+
+
+def test_a_run_interrupted_by_a_crash_is_recovered_once_and_the_job_completes(tmp_path, clock):
+
+    spec, calls = counting(interval=3600)
+    crashed = make(tmp_path, clock, [spec])
+    store = crashed.store()
+    crashed.ensure_jobs(store)
+    first, _ = crashed.claim(store, "count.job", "schedule")            # the process dies here
+
+    # Restarted before the lease ran out: the run may still be going elsewhere, so it is left alone
+    clock.advance(30)
+    early = Scheduler(crashed.path, [spec], clock=clock)
+    assert early.tick() == [] and early.recover(store) == [] and crashed.run(first)["status"] == "running"
+
+    # Restarted after the lease ran out: recovered once, then run once
+    clock.advance(spec.timeout_seconds + 120)
+    restarted = Scheduler(crashed.path, [spec], clock=clock)
+
+    assert restarted.tick() == ["count.job"] and calls == ["schedule"]
+    assert restarted.tick() == [] and restarted.recover(store) == []
+
+    history = runs_of(restarted, "count.job")
+    assert [(run["id"], run["status"]) for run in history] == [(first, "interrupted"), (first + 1, "succeeded")]
+    assert history[0]["finished_at"] is not None and history[0]["error_category"] == "interrupted"
+    job = restarted.job("count.job")
+    assert job["running"] is False and job["consecutive_failures"] == 0 and job["last_success_at"] is not None
+
+
+def test_two_schedulers_ticking_together_run_a_due_job_once(tmp_path, clock):
+
+    calls = []
+    started = threading.Event()
+
+    def slow(context):
+        calls.append(context.trigger)
+        started.set()
+        time.sleep(0.3)
+        return {}
+
+    spec = JobSpec("slow.job", "Slow.", 60, slow)
+    first = make(tmp_path, clock, [spec])
+    second = Scheduler(first.path, [spec], clock=clock)
+    gate = threading.Barrier(2)
+    ran = {}
+
+    def tick(name, scheduler):
+        gate.wait()
+        ran[name] = scheduler.tick()
+
+    threads = [threading.Thread(target=tick, args=(name, scheduler)) for name, scheduler in (("first", first), ("second", second))]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+
+    assert len(calls) == 1 and sorted(ran["first"] + ran["second"]) == ["slow.job"]
+    assert [run["status"] for run in runs_of(first, "slow.job")] == ["succeeded"]
+
+
+def test_a_job_finished_meanwhile_is_not_run_again_from_a_stale_due_list(tmp_path, clock):
+    """
+    tick() reads which jobs are due, then claims them one by one. A job that
+    completes in between (a manual run, or another process) is no longer due:
+    the schedule must not run it a second time.
+    """
+
+    calls = []
+    scheduler = None
+
+    def first(context):
+        # While the schedule works through its list, an administrator runs the second job by hand
+        scheduler.run_job("b.job", trigger="manual", requested_by="alice")
+        return {}
+
+    def second(context):
+        calls.append(context.trigger)
+        return {}
+
+    scheduler = make(tmp_path, clock, [JobSpec("a.job", "First.", 600, first), JobSpec("b.job", "Second.", 600, second)])
+
+    assert scheduler.tick() == ["a.job"]
+    assert calls == ["manual"]
+    assert [run["trigger"] for run in runs_of(scheduler, "b.job")] == ["manual"]
+
+    # The guard is in the claim itself: a scheduled claim of a job that is not due is refused
+    with pytest.raises(scheduler_module.NotDue):
+        scheduler.claim(scheduler.store(), "b.job", "schedule")
+
+
+def test_a_completed_job_is_not_repeated_after_a_restart(tmp_path, clock):
+
+    spec, calls = counting(interval=3600)
+    scheduler = make(tmp_path, clock, [spec])
+    assert scheduler.tick() == ["count.job"]
+
+    clock.advance(600)
+    restarted = Scheduler(scheduler.path, [spec], clock=clock)
+
+    assert restarted.recover(restarted.store()) == [] and restarted.tick() == []
+    assert calls == ["schedule"] and [run["status"] for run in runs_of(restarted, "count.job")] == ["succeeded"]
+
+    clock.advance(3000)                                                  # its interval has passed
+    assert restarted.tick() == ["count.job"] and len(calls) == 2
+
+
+def test_failed_runs_keep_an_accurate_history_through_retries_and_restarts(tmp_path, clock):
+
+    state = {"fail": True}
+
+    def flaky(context):
+        if state["fail"]:
+            raise ConnectionError("The partner refused the connection.")
+        return {"ok": True}
+
+    spec = JobSpec("flaky.job", "Flaky.", 600, flaky, retry_delay_seconds=60)
+    scheduler = make(tmp_path, clock, [spec])
+    scheduler.tick()
+    clock.advance(60)
+    scheduler.tick()
+
+    failed = runs_of(scheduler, "flaky.job")
+    assert [(run["status"], run["error_category"]) for run in failed] == [("failed", "ConnectionError")] * 2
+    assert all(run["finished_at"] and run["duration_ms"] is not None and "refused" in run["error_message"] for run in failed)
+    assert scheduler.job("flaky.job")["consecutive_failures"] == 2
+
+    # The cause is fixed; the server restarts and the retry succeeds
+    state["fail"] = False
+    clock.advance(120)
+    restarted = Scheduler(scheduler.path, [spec], clock=clock)
+    assert restarted.tick() == ["flaky.job"]
+
+    history = runs_of(restarted, "flaky.job")
+    stored = lambda run: {key: value for key, value in run.items() if key != "ran_here"}  # noqa: E731 (relative to the reader)
+    assert [stored(run) for run in history[:2]] == [stored(run) for run in failed]   # the failures are kept as recorded
+    assert history[2]["status"] == "succeeded" and len(history) == 3
+    job = restarted.job("flaky.job")
+    assert job["consecutive_failures"] == 0 and job["last_error"] is None
+    assert job["last_failure_at"] == failed[-1]["finished_at"]           # the last failure is still on record
+
+
+def test_two_processes_restarting_after_a_crash_create_one_new_run(tmp_path, clock):
+
+    spec, calls = counting(interval=3600)
+    crashed = make(tmp_path, clock, [spec])
+    store = crashed.store()
+    crashed.ensure_jobs(store)
+    first, _ = crashed.claim(store, "count.job", "schedule")
+
+    clock.advance(spec.timeout_seconds + 120)
+    one, two = Scheduler(crashed.path, [spec], clock=clock), Scheduler(crashed.path, [spec], clock=clock)
+
+    assert one.recover(store) == ["count.job"] and two.recover(store) == []    # recovered once
+    assert one.tick() == ["count.job"]
+
+    # The second process read the job as due before the first one ran it: its claim is refused
+    with pytest.raises(scheduler_module.NotDue):
+        two.claim(store, "count.job", "schedule")
+    assert two.tick() == []
+
+    assert calls == ["schedule"]
+    assert [run["status"] for run in runs_of(one, "count.job")] == ["interrupted", "succeeded"]
+    assert rows(one, "SELECT COUNT(*) FROM job_runs WHERE error_category = 'interrupted'")[0][0] == 1
+
+
+def test_a_run_finishing_after_its_lease_was_recovered_does_not_take_the_job_back(tmp_path, clock):
+    """
+    A run that outlives its lease is recovered by another process, which marks it
+    interrupted and starts a new run. When the old run finishes after all, it must
+    neither rewrite that record nor release the new run's lease: otherwise a third
+    claim could run the job beside the new run.
+    """
+
+    spec, calls = counting(interval=3600)
+    slow_process = make(tmp_path, clock, [spec])
+    store = slow_process.store()
+    slow_process.ensure_jobs(store)
+    old_run, _ = slow_process.claim(store, "count.job", "schedule")
+
+    clock.advance(spec.timeout_seconds + 120)                            # its lease runs out while it still works
+    other = Scheduler(slow_process.path, [spec], clock=clock)
+    assert other.recover(store) == ["count.job"]
+    new_run, _ = other.claim(store, "count.job", "schedule")             # the new run is under way
+
+    slow_process.execute(store, "count.job", old_run, 0, "schedule")     # the old run finally finishes
+
+    assert slow_process.run(old_run)["status"] == "interrupted"          # the recovery record stands
+    assert other.run(new_run)["status"] == "running"
+    job = other.job("count.job")
+    assert job["running"] is True and job["running_here"] is True       # still the other process's lease
+    with pytest.raises(JobBusy):
+        Scheduler(slow_process.path, [spec], clock=clock).claim(store, "count.job", "manual")
+
+
+# ============================================================
 # THE API
 # ============================================================
 
