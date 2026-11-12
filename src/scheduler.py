@@ -66,6 +66,10 @@ class JobBusy(RuntimeError):
     """The job is running (its lease is held)."""
 
 
+class NotDue(RuntimeError):
+    """A scheduled claim of a job that is disabled or not due (any more): it already ran, or was turned off."""
+
+
 class SchedulerError(ValueError):
     """A request that is refused (the message says why)."""
 
@@ -212,6 +216,12 @@ class Scheduler:
                 raise JobBusy(f"The job {name} is running.")
 
             scheduled = parse_time(job["next_run_at"])
+
+            # The due list is read before the claims; checked again under the write lock, a job that ran in
+            # between (a manual run, another process) or was disabled is not run a second time by the schedule
+            if trigger == "schedule" and (not job["enabled"] or (scheduled is not None and scheduled > now)):
+                raise NotDue(f"The job {name} is not due.")
+
             delay = max(int((now - scheduled).total_seconds()), 0) if trigger == "schedule" and scheduled else 0
             connection.execute(
                 "UPDATE scheduled_jobs SET lease_owner = ?, lease_until = ?, last_started_at = ?, updated_at = ? WHERE name = ?",
@@ -255,8 +265,16 @@ class Scheduler:
         with store.write() as connection:
             job = connection.execute("SELECT * FROM scheduled_jobs WHERE name = ?", (name,)).fetchone()
             interval = job["interval_seconds"]
+            status = connection.execute("SELECT status FROM job_runs WHERE id = ?", (run_id,)).fetchone()[0]
 
-            if error is None:
+            # The run outlived its lease and another process recovered it (marked interrupted) and owns the job
+            # now: its record and lease stay as they are, or a third claim could run the job beside the new run
+            lost = status != "running" or job["lease_owner"] != self.owner
+
+            if lost:
+                log.warning("Job %s run %s finished after its lease was recovered; its outcome is not recorded.",
+                            name, run_id, extra={"operation": "job", "job": name, "outcome": "lease_lost"})
+            elif error is None:
                 connection.execute("UPDATE job_runs SET status = 'succeeded', finished_at = ?, duration_ms = ?, summary = ? "
                                    "WHERE id = ?", (text_time(now), duration_ms, dumps(summary), run_id))
                 connection.execute(
@@ -277,6 +295,11 @@ class Scheduler:
                     "UPDATE scheduled_jobs SET lease_owner = NULL, lease_until = NULL, last_finished_at = ?, last_failure_at = ?, "
                     "last_error = ?, consecutive_failures = ?, next_run_at = ?, updated_at = ? WHERE name = ?",
                     (text_time(now), text_time(now), f"{category}: {message}", failures, later(now, wait), text_time(now), name))
+
+        if lost:
+            if self.metrics is not None:
+                self.metrics.inc("logidoc_jobs_lease_lost_total", {"job": name})
+            return self.run(run_id)
 
         if self.metrics is not None:
             outcome = "succeeded" if error is None else "failed"
@@ -407,7 +430,7 @@ class Scheduler:
                 break
             try:
                 run_id, delay = self.claim(store, name, "schedule")
-            except JobBusy:
+            except (JobBusy, NotDue):
                 continue
             self.execute(store, name, run_id, delay, "schedule")
             ran.append(name)

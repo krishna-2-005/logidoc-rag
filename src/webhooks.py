@@ -40,9 +40,13 @@ Delivery
 
     with the headers
 
-        LogiDoc-Event-Id, LogiDoc-Event-Type, LogiDoc-Delivery-Id,
-        LogiDoc-Delivery-Attempt, LogiDoc-Timestamp (Unix seconds),
+        LogiDoc-Event-Id, Idempotency-Key (the event id again), LogiDoc-Event-Type,
+        LogiDoc-Delivery-Id, LogiDoc-Delivery-Attempt, LogiDoc-Timestamp (Unix seconds),
         LogiDoc-Signature: v1=<hex HMAC-SHA256 of "<timestamp>.<event id>.<body>">
+
+    A retry sends the same event: the same event id and Idempotency-Key and the
+    same body bytes (rebuilt from the stored, append-only event). Only the
+    attempt number, the timestamp and so the signature change.
 
     During a secret rotation's grace period the header carries a second v1=
     signature made with the previous secret. verify_signature() is the
@@ -107,6 +111,8 @@ TEST_EVENT = "webhook.test"
 SIGNATURE_HEADER = "LogiDoc-Signature"
 TIMESTAMP_HEADER = "LogiDoc-Timestamp"
 EVENT_HEADER = "LogiDoc-Event-Id"
+# The event id again, under the conventional name receivers deduplicate on: the same on every attempt
+IDEMPOTENCY_HEADER = "Idempotency-Key"
 
 TOLERANCE_SECONDS = 300
 MAX_PAYLOAD_BYTES = 256 * 1024
@@ -1115,7 +1121,7 @@ class WebhookService:
                 timestamp = int(started.timestamp())
                 headers = {
                     "Content-Type": "application/json", "User-Agent": "LogiDoc-Webhooks/1",
-                    "LogiDoc-Event-Id": event["id"], "LogiDoc-Event-Type": event["event_type"],
+                    "LogiDoc-Event-Id": event["id"], IDEMPOTENCY_HEADER: event["id"], "LogiDoc-Event-Type": event["event_type"],
                     "LogiDoc-Delivery-Id": str(row["id"]), "LogiDoc-Delivery-Attempt": str(row["attempts"]),
                     TIMESTAMP_HEADER: str(timestamp),
                     SIGNATURE_HEADER: signature_header(self.secrets_of(endpoint, started), timestamp, event["id"], body),
