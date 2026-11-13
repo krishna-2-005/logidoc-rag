@@ -242,3 +242,27 @@ one passes its own tests:
 4. The documentation and this report.
 
 Their hashes, the push and the CI result are recorded in section 12 by a follow-up commit, after the push.
+
+## 12. Push and CI result
+
+| Commit | Content |
+|---|---|
+| `f231bc8` | integrations: sync leases and recovery, stale guard, webhook monitoring, integration health, API, tests, contract |
+| `c665cac` | backups: verification, restore drills, history, alert, API, command line, tests, contract |
+| `bf33337` | the screens |
+| `c4a0271` | the documentation and this report |
+
+- **Before committing:** attribution, identity and whitespace checks on the new history were all empty.
+- **Push:** `git push origin feature/production-readiness`, a fast-forward `ab46461..c4a0271` with no force.
+  `git ls-remote` showed the remote branch at `c4a02712c5c872eab2b7026c85dde89b356f9044`, the local `HEAD`.
+- **CI run 43464072186 (push) on `c4a0271`: success.**
+
+  | Job | Result | Duration |
+  |---|---|---|
+  | Frontend typecheck, tests and build | success | 40 s |
+  | Python 3.12 tests | success | 18 min |
+  | Python 3.10 tests | success | 25 min |
+  | Whitespace and authorship checks | success | 6 s |
+
+  The full suite passed on both Python versions in CI, including the backup test that failed locally only for
+  lack of disk space.
