@@ -14,6 +14,7 @@ Run from the project root:
 
 import json
 import sqlite3
+import threading
 from contextlib import closing
 
 import pytest
@@ -22,6 +23,7 @@ from integration_support import ALICE, BOB, integration_rig
 
 import integration_framework as framework  # noqa: E402
 import sandbox_tms  # noqa: E402
+from integration_store import later, parse_time  # noqa: E402
 
 
 @pytest.fixture
@@ -458,6 +460,267 @@ def test_the_contract_mapping_refuses_rather_than_guesses():
     assert framework.map_carrier({"id": "C", "legal_name": "X", "mc_number": "MC-12", "updated_at": "2026-10-03T10:00:00Z"}).mc_number == "12"
 
 
+# ============================================================
+# SYNC CONCURRENCY AND RECOVERY
+# ============================================================
+
+def expire_lease(rig, integration_id):
+
+    with closing(sqlite3.connect(rig.locations.integration_path())) as connection, connection:
+        connection.execute("UPDATE integrations SET lease_until = '2000-01-01T00:00:00+00:00' WHERE id = ?", (integration_id,))
+
+
+def test_a_scheduled_sync_does_not_repeat_a_sync_that_finished_meanwhile(rig):
+    """run_due reads the due list, then claims: a manual sync that completes in between is not run again."""
+
+    integration_id = configure(rig)
+    integrations = service(rig)
+    claim = integrations.claim
+    interleaved = {"done": False}
+
+    def manual_sync_first(identifier, trigger, requested_by):
+        if trigger == "schedule" and not interleaved["done"]:
+            interleaved["done"] = True
+            integrations.execute(identifier, claim(identifier, "manual", "alice"))      # an administrator's sync
+        return claim(identifier, trigger, requested_by)
+
+    integrations.claim = manual_sync_first
+    result = integrations.run_due()
+
+    assert result["synced"] == 0
+    assert [run["trigger"] for run in integrations.runs(integration_id)["runs"]] == ["manual"]
+
+    with pytest.raises(framework.SyncNotDue):
+        claim(integration_id, "schedule", None)
+
+
+def test_two_simultaneous_claims_start_one_sync(rig):
+
+    integration_id = configure(rig)
+    integrations = service(rig)
+    gate = threading.Barrier(2)
+    outcomes = []
+
+    def claim():
+        gate.wait()
+        try:
+            outcomes.append(integrations.claim(integration_id, "manual", "alice"))
+        except framework.SyncBusy:
+            outcomes.append("busy")
+
+    threads = [threading.Thread(target=claim) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+
+    assert sorted(outcomes, key=str).count("busy") == 1 and integrations.runs(integration_id)["total"] == 1
+
+
+def test_a_late_worker_neither_records_its_outcome_nor_releases_the_new_runs_lease(rig):
+    """
+    A sync that outlives its lease is recovered (marked interrupted) and a new
+    sync starts. When the slow worker carries on, it must not import, move the
+    cursor, rewrite its run or release the new run's lease.
+    """
+
+    integration_id = configure(rig)
+    integrations = service(rig)
+    old_run = integrations.claim(integration_id, "manual", "alice")
+    late = framework.SyncEngine(integrations, integrations.integration(integration_id), old_run, lambda: False)
+
+    expire_lease(rig, integration_id)
+    assert integrations.recover() == 1
+    new_run = integrations.claim(integration_id, "schedule", None)          # recovery made it due at once
+
+    late.run()                                                               # the slow worker carries on
+
+    assert integrations.run(old_run)["status"] == "interrupted"
+    assert integrations.run(new_run)["status"] == "running"
+    current = integrations.integration(integration_id)
+    assert current["running"] is True and current["cursor"] == {} and current["records"] == {}
+    with pytest.raises(framework.SyncBusy):
+        integrations.claim(integration_id, "manual", "alice")
+
+
+def test_a_manual_sync_after_a_crash_closes_the_crashed_run(rig):
+    """
+    An administrator syncs after a crash, before the scheduler's recovery: the
+    crashed run must not stay 'running' in the history, and its worker, if it
+    is still alive, must not write.
+    """
+
+    integration_id = configure(rig)
+    integrations = service(rig)
+    crashed = integrations.claim(integration_id, "schedule", None)
+    late = framework.SyncEngine(integrations, integrations.integration(integration_id), crashed, lambda: False)
+    expire_lease(rig, integration_id)
+
+    new_run = integrations.claim(integration_id, "manual", "alice")          # no recover() in between
+    late.run()
+
+    old = integrations.run(crashed)
+    assert old["status"] == "interrupted" and old["error_category"] == "interrupted" and old["finished_at"]
+    assert integrations.run(new_run)["status"] == "running"
+    assert [run["status"] for run in integrations.runs(integration_id)["runs"]].count("running") == 1
+    assert integrations.integration(integration_id)["records"] == {}
+
+    finished = integrations.execute(integration_id, new_run)
+    assert finished["status"] in ("succeeded", "partial")
+    assert integrations.run(crashed)["status"] == "interrupted"
+
+
+def test_a_late_worker_never_moves_the_cursor_back(rig):
+
+    integration_id = configure(rig)
+    integrations = service(rig)
+    old_run = integrations.claim(integration_id, "manual", "alice")
+    one_page = iter([False, True])                                            # stops after its first page
+    late = framework.SyncEngine(integrations, integrations.integration(integration_id), old_run,
+                                lambda: next(one_page, True))
+
+    expire_lease(rig, integration_id)
+    integrations.recover()
+    finished = integrations.execute(integration_id, integrations.claim(integration_id, "schedule", None))
+    cursor = integrations.integration(integration_id)["cursor"]
+    assert finished["status"] == "partial" and cursor["shipments"]["id"] == "SBX-SHP-0040"
+
+    late.run()
+
+    assert integrations.integration(integration_id)["cursor"] == cursor
+    assert integrations.run(old_run)["status"] == "interrupted"
+
+
+def test_an_older_version_of_a_record_never_replaces_a_newer_one(tmp_path):
+
+    store = framework.ExternalRecordStore(tmp_path / "records.sqlite3")
+    newer = {"external_id": "A", "reference": "R2", "source_updated_at": "2026-10-02T00:00:00+00:00"}
+    older = {"external_id": "A", "reference": "R1", "source_updated_at": "2026-10-01T00:00:00+00:00"}
+
+    assert store.apply(1, "p", 1, "shipments", newer, "t")[0] == "created"
+    assert store.apply(1, "p", 2, "shipments", older, "t")[0] == "stale"
+    assert store.apply(1, "p", 3, "shipments", newer, "t")[0] == "unchanged"
+
+    record = store.records(1)["records"][0]
+    assert record["data"]["reference"] == "R2" and record["last_run_id"] == 3
+    assert [version["change"] for version in store.record(record["id"])["versions"]] == ["created"]
+
+
+def test_a_stale_record_is_counted_in_the_run(rig):
+
+    integration_id = configure(rig)
+    sync(rig, integration_id)
+    records = service(rig).records_store(service(rig).integration(integration_id))
+    newest = service(rig).records(integration_id, "shipments", search="SBX-SHP-0001")["records"][0]
+
+    # The partner sends an older copy of a record it has already sent in a newer state
+    with closing(sqlite3.connect(records.path)) as connection, connection:
+        connection.execute("UPDATE external_records SET source_updated_at = '2099-01-01T00:00:00+00:00', content_hash = 'x' "
+                           "WHERE id = ?", (newest["id"],))
+    with closing(sqlite3.connect(rig.locations.integration_path())) as connection, connection:
+        connection.execute("UPDATE integrations SET cursor = '{}' WHERE id = ?", (integration_id,))
+
+    run = sync(rig, integration_id)
+
+    assert run["stale"] == 1 and run["updated"] == 0
+    assert service(rig).record(integration_id, newest["id"])["source_updated_at"] == "2099-01-01T00:00:00+00:00"
+
+
+def test_the_lease_is_renewed_while_a_long_sync_progresses(rig):
+
+    integration_id = configure(rig)
+    integrations = service(rig)
+    run_id = integrations.claim(integration_id, "manual", "alice")
+    engine = framework.SyncEngine(integrations, integrations.integration(integration_id), run_id, lambda: False)
+
+    with closing(sqlite3.connect(rig.locations.integration_path())) as connection, connection:
+        connection.execute("UPDATE integrations SET lease_until = ? WHERE id = ?",
+                           (later(integrations.clock(), 5), integration_id))
+
+    engine.save_progress()
+
+    with closing(sqlite3.connect(rig.locations.integration_path())) as connection:
+        lease, owner = connection.execute("SELECT lease_until, lease_owner FROM integrations WHERE id = ?",
+                                          (integration_id,)).fetchone()
+    assert (parse_time(lease) - integrations.clock()).total_seconds() > framework.SYNC_LEASE_SECONDS - 60
+    assert owner == framework.lease_token(run_id)
+
+
+def test_after_a_crash_one_recovery_and_one_new_sync(rig):
+
+    integration_id = configure(rig)
+    integrations = service(rig)
+    crashed = integrations.claim(integration_id, "schedule", None)
+    expire_lease(rig, integration_id)
+
+    first, second = integrations.run_due(), integrations.run_due()
+
+    assert first["synced"] == 1 and second["synced"] == 0
+    statuses = [run["status"] for run in reversed(integrations.runs(integration_id)["runs"])]
+    assert statuses == ["interrupted", "partial"] and integrations.run(crashed)["error_category"] == "interrupted"
+
+    with closing(sqlite3.connect(rig.locations.integration_path())) as connection:
+        assert connection.execute("SELECT lease_until, lease_owner FROM integrations").fetchone() == (None, None)
+
+
+def test_a_version_1_integration_store_is_upgraded_keeping_its_rows(tmp_path):
+
+    import integration_store
+
+    path = tmp_path / "integrations.sqlite3"
+    with closing(sqlite3.connect(path)) as connection, connection:
+        connection.executescript(integration_store.SCHEMA)
+        connection.execute("INSERT INTO schema_info (version) VALUES (1)")
+        connection.execute("INSERT INTO integrations (name, provider, settings, sync_interval_seconds, created_by, created_at, "
+                           "updated_at) VALUES ('Old', 'sandbox_tms', '{}', 3600, 'alice', 't', 't')")
+
+    store = integration_store.IntegrationStore(path)
+
+    assert store.version() == integration_store.SCHEMA_VERSION == 2
+    with closing(sqlite3.connect(path)) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(integrations)")}
+        run_columns = {row[1] for row in connection.execute("PRAGMA table_info(sync_runs)")}
+        assert connection.execute("SELECT name FROM integrations").fetchall() == [("Old",)]
+    assert "lease_owner" in columns and "stale" in run_columns
+
+
+# ============================================================
+# THE HEALTH DASHBOARD (recorded runs only)
+# ============================================================
+
+def test_the_dashboard_reports_recorded_runs_records_retries_and_errors(rig):
+
+    healthy = configure(rig, rate_limit_every=3)
+    sync(rig, healthy)
+    refused = configure_named(rig, "Refused TMS", simulate_auth_failure=True)
+    sync(rig, refused)
+
+    view = rig.client("alice").get("/api/integrations/monitoring/connections", params={"days": 7}).json()
+    totals = view["totals"]
+
+    assert (totals["runs"], totals["succeeded"], totals["partial"], totals["failed"]) == (2, 0, 1, 1)
+    assert totals["success_rate"] == 0.0                                  # finished runs: one partial, one failed
+    assert (totals["imported"], totals["rejected"]) == (42, 4) and totals["retries"] >= 2
+    assert view["errors"] == [{"category": "authentication_failed", "runs": 1}]
+    assert len(view["daily"]) == 7 and view["daily"][-1]["partial"] == 1 and view["daily"][-1]["imported"] == 42
+    assert all(day["partial"] == day["failed"] == day["imported"] == 0 for day in view["daily"][:-1])
+
+    named = {item["name"]: item for item in view["integrations"]}
+    assert named["Sandbox TMS"]["window"]["imported"] == 42 and named["Sandbox TMS"]["records"] == VALID
+    assert named["Refused TMS"]["window"]["error_categories"] == {"authentication_failed": 1}
+    assert named["Refused TMS"]["connection_status"] == "auth_failed" and len(named["Refused TMS"]["recent_runs"]) == 1
+
+
+def test_an_empty_dashboard_has_no_rate_and_no_invented_figures(rig):
+
+    view = rig.client("alice").get("/api/integrations/monitoring/connections").json()
+
+    assert view["totals"]["runs"] == 0 and view["totals"]["success_rate"] is None and view["integrations"] == []
+    assert all(day["succeeded"] == day["failed"] == day["imported"] == 0 for day in view["daily"])
+    assert rig.client("bob").get("/api/integrations/monitoring/connections").status_code == 403
+    assert rig.client("alice").get("/api/integrations/monitoring/connections", params={"days": 91}).status_code == 422
+
+
 def test_a_touch_without_a_change_is_not_a_new_version(tmp_path):
 
     store = framework.ExternalRecordStore(tmp_path / "records.sqlite3")
@@ -465,7 +728,10 @@ def test_a_touch_without_a_change_is_not_a_new_version(tmp_path):
 
     assert store.apply(1, "p", 1, "shipments", values, "t")[0] == "created"
     assert store.apply(1, "p", 2, "shipments", {**values, "source_updated_at": "2026-10-02T00:00:00+00:00"}, "t")[0] == "unchanged"
-    assert store.apply(1, "p", 3, "shipments", {**values, "reference": "R2"}, "t")[0] == "updated"
+    # A real change comes with a newer change time; the same change dated before what is stored is stale
+    assert store.apply(1, "p", 3, "shipments", {**values, "reference": "R2"}, "t")[0] == "stale"
+    changed = {**values, "reference": "R2", "source_updated_at": "2026-10-03T00:00:00+00:00"}
+    assert store.apply(1, "p", 4, "shipments", changed, "t")[0] == "updated"
 
     with closing(sqlite3.connect(tmp_path / "records.sqlite3")) as connection:
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):

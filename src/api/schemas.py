@@ -793,6 +793,7 @@ class BackupListed(Contract):
     bytes: int | None
     error: BackupError | None
     problems: list[str]
+    # The newest recorded check of this backup (null: never checked since it was made)
 
 
 class BackupAttempt(Contract):
@@ -1099,6 +1100,8 @@ class SyncRun(Contract):
     imported: int
     updated: int
     unchanged: int
+    # Records ignored because a newer version was already stored (integration store version 2)
+    stale: int = 0
     duplicates: int
     rejected: int
     conflicts: int
@@ -1253,3 +1256,145 @@ class RecordPage(Contract):
 
 class SandboxChanges(Contract):
     changed: list[str]
+
+
+# ============================================================
+# MONITORING (administrators: recorded deliveries and sync runs only)
+# ============================================================
+
+class Window(Contract):
+    start: str
+    end: str
+    days: int
+
+
+class DeliveryTotals(Contract):
+    """success_rate: succeeded / (succeeded + failed); null when none finished. retry_attempts: attempts after the first."""
+
+    deliveries: int
+    succeeded: int
+    failed: int
+    waiting: int
+    cancelled: int
+    attempts: int
+    retry_attempts: int
+    success_rate: float | None
+
+
+class EndpointHealth(Contract):
+    endpoint_id: int
+    name: str
+    enabled: bool
+    archived: bool
+    deliveries: int
+    succeeded: int
+    failed: int
+    waiting: int
+    last_success_at: str | None
+    last_failure_at: str | None
+
+
+class EventTypeCount(Contract):
+    event_type: str
+    deliveries: int
+    succeeded: int
+    failed: int
+    waiting: int
+
+
+class AttemptErrors(Contract):
+    category: str
+    attempts: int
+
+
+class DeliveryDay(Contract):
+    """latency: nearest-rank median and 95th percentile of the day's attempt durations; null without attempts."""
+
+    day: str
+    succeeded: int
+    failed: int
+    waiting: int
+    attempts: int
+    latency_p50_ms: int | None
+    latency_p95_ms: int | None
+
+
+class WebhookMonitoring(Contract):
+    window: Window
+    totals: DeliveryTotals
+    last_success_at: str | None
+    last_failure_at: str | None
+    endpoints: list[EndpointHealth]
+    event_types: list[EventTypeCount]
+    errors: list[AttemptErrors]
+    daily: list[DeliveryDay]
+
+
+class SyncWindow(Contract):
+    runs: int
+    succeeded: int
+    partial: int
+    failed: int
+    interrupted: int
+    imported: int
+    updated: int
+    rejected: int
+    retries: int
+    error_categories: dict[str, int]
+
+
+class SyncTotalsWindow(Contract):
+    """success_rate: succeeded / finished runs (succeeded, partial, failed); null without any."""
+
+    runs: int
+    succeeded: int
+    partial: int
+    failed: int
+    interrupted: int
+    imported: int
+    updated: int
+    rejected: int
+    retries: int
+    success_rate: float | None
+
+
+class SyncDay(Contract):
+    day: str
+    succeeded: int
+    partial: int
+    failed: int
+    interrupted: int
+    imported: int
+    updated: int
+    rejected: int
+
+
+class SyncErrors(Contract):
+    category: str
+    runs: int
+
+
+class IntegrationHealth(Contract):
+    id: int
+    name: str
+    provider: str
+    enabled: bool
+    connection_status: Literal["untested", "connected", "auth_failed", "error"]
+    connection_error: str | None
+    last_success_at: str | None
+    last_failure_at: str | None
+    next_sync_at: str | None
+    last_error: str | None
+    consecutive_failures: int
+    running: bool
+    records: dict[str, int]
+    window: SyncWindow
+    recent_runs: list[SyncRun]
+
+
+class IntegrationDashboard(Contract):
+    window: Window
+    totals: SyncTotalsWindow
+    daily: list[SyncDay]
+    errors: list[SyncErrors]
+    integrations: list[IntegrationHealth]
