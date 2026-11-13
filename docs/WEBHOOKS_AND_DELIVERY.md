@@ -172,11 +172,25 @@ header. The service checks the permission again itself.
 | `POST /api/integrations/webhooks/{id}/rotate-secret` | `WebhookSecretIssued` |
 | `POST /api/integrations/webhooks/{id}/archive` | the endpoint, archived |
 | `POST /api/integrations/webhooks/{id}/test` | `WebhookDeliveryDetail` of the test delivery |
-| `GET /api/integrations/deliveries?endpoint_id=&status=&offset=&limit=` | `DeliveryPage` |
+| `GET /api/integrations/deliveries?endpoint_id=&status=&event_type=&from=&to=&offset=&limit=` | `DeliveryPage`; `event_type` repeatable, `from`/`to` are UTC days (inclusive) of creation, 422 when `from` is after `to` |
 | `GET /api/integrations/deliveries/{id}` | `WebhookDeliveryDetail`: masked payload, every attempt |
 | `POST /api/integrations/deliveries/{id}/retry` | `WebhookDeliveryDetail` after the new attempt |
+| `GET /api/integrations/monitoring/webhooks?days=&endpoint_id=&event_type=` | `WebhookMonitoring` for the last 1 to 90 days (default 14) |
 
 Deleting is done by archiving: no route removes an endpoint or its history.
+
+### Monitoring
+
+The Webhooks page's **Monitoring** and **Delivery history** tabs read only the stored deliveries and attempts. Test
+deliveries are left out of the monitoring. Over the chosen period (deliveries created in it, UTC days):
+
+- totals: deliveries, succeeded, failed, waiting (pending, retrying or sending), cancelled, attempts, and retry
+  attempts (any attempt after a delivery's first);
+- success rate = succeeded / (succeeded + failed). Waiting deliveries are not in the denominator, and with none
+  finished the rate is `null` (n/a), never 0 % or 100 %;
+- per endpoint: its counts and its last success and failure in the period, endpoints with failures first;
+- per event type, per attempt error category, and per day: outcomes, attempts, and the attempts' measured duration
+  as median and 95th percentile (nearest rank). A day without an attempt has no latency, not 0 ms.
 
 ## 6. Storage
 

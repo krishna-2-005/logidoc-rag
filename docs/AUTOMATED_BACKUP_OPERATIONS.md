@@ -20,6 +20,9 @@ Code: `src/backup_automation.py` (schedule, runner, retention, status),
 | `LOGIDOC_BACKUP_KEEP_MONTHLY` | 6 | months for which the newest scheduled backup is kept |
 | `LOGIDOC_BACKUP_MIN_FREE_MB` | 1024 | free space that must remain after a backup, or it does not start |
 | `LOGIDOC_BACKUP_RETRY_MINUTES` | 60 | how long after a failed scheduled backup it is tried again |
+| `LOGIDOC_BACKUP_VERIFY_HOURS` | 24 | how often every complete backup is checked again; 0 = never |
+| `LOGIDOC_BACKUP_DRILL_HOURS` | 168 | how often the newest usable backup is restored into an isolated folder and checked; 0 = never |
+| `LOGIDOC_BACKUP_DRILL_DIR` | the system temporary folder, `logidoc-restore-drills` | where drills restore; absolute in production, not inside the data, index or backup folder |
 
 ## The schedule
 
@@ -50,6 +53,7 @@ python scripts/manage_backups.py create [--label "before the upgrade"] [--requir
 python scripts/manage_backups.py list
 python scripts/manage_backups.py status
 python scripts/manage_backups.py verify <backup id>
+python scripts/manage_backups.py drill <backup id>
 python scripts/manage_backups.py restore <backup id> --target <new folder> [--skip-index-open]
 python scripts/manage_backups.py prune [--apply]
 python scripts/manage_backups.py activate --restored <folder> --backup-id <id> --confirm <id>
@@ -84,9 +88,11 @@ Administrators (the `admin.maintenance` permission):
 
 | Request | Result |
 |---|---|
-| `GET /api/admin/backups` | the schedule, retention, `running`, the status record and every backup (usable or incomplete) |
+| `GET /api/admin/backups` | the schedule, retention, `running`, the status record, every backup (usable or incomplete) with its `last_check`, and the `verification` schedule with the last scheduled verification and drill |
 | `POST /api/admin/backups` with `{"label": "..."}` | 202: a backup starts in the background; 409 while one runs |
-| `GET /api/admin/alerts` | active alerts, including `backup_failed` and `backup_stale` |
+| `POST /api/admin/backups/{id}/verify` with `{"restore_drill": false}` | 202: the backup is checked again in the background (with `true`, also restored in a drill); 409 while a backup or check runs; 404 for an unknown backup; 422 for an incomplete one |
+| `GET /api/admin/backups/checks?limit=` | the recorded verifications and drills, newest first (1 to 1000, default 100) |
+| `GET /api/admin/alerts` | active alerts, including `backup_failed`, `backup_stale` and `backup_verification_failed` |
 
 Restores are not offered over HTTP. They run on the server from the command
 line, into a separate folder.
@@ -118,6 +124,42 @@ Two backups never run at once:
   turn
 - across processes, the backup folder's lock makes the second attempt fail
   as `busy`
+
+## Verification and restore drills
+
+A backup that was good when it was made can be damaged later (disk, copy,
+someone editing a file). The server checks again on its own schedule, and an
+administrator can check one at any time (the API or `verify` / `drill`).
+
+**Verification** (`verify`, every `LOGIDOC_BACKUP_VERIFY_HOURS`, all complete
+backups) reports each problem with a category:
+
+| Category | Found when |
+|---|---|
+| `manifest` | the manifest is missing, unreadable, or does not match its `.sha256` sidecar |
+| `incomplete` | the folder is still `.partial`, or the manifest is not complete |
+| `missing_file` | a file listed in the manifest is gone |
+| `checksum` | a file has another size or SHA-256 than the manifest records |
+| `integrity` | a database copy fails SQLite's `PRAGMA integrity_check` |
+| `contents` | a database copy no longer holds what was recorded: schema version, row count of a table, new foreign-key problems |
+
+**Restore drill** (`drill`, every `LOGIDOC_BACKUP_DRILL_HOURS`, the newest
+usable backup): the backup is restored with the real restore code into a new
+`.restore-drill-<id>-<random>` folder under `LOGIDOC_BACKUP_DRILL_DIR`, with
+every check of a real restore (checksums, compatibility, each database's
+integrity, schema version, rows and foreign keys, the documents, the vector
+index opened). The copy is then removed. A drill never touches the live data:
+a drill folder inside the data, index or backup folder is refused. The drill
+fails as `insufficient_space` before copying anything when the free space is
+short, as `refused` or `restore` when the backup cannot be restored, and as
+`cleanup` when the copy could not be removed afterwards.
+
+Every result is appended to `<backups>/verification-history.jsonl` (never
+rewritten; problems are redacted and at most 10 per entry). A failed check
+fires the `backup_verification_failed` alert (critical); the next check
+without a failure clears it. `logidoc_backup_verifications_total{kind,outcome}`
+counts them. A check holds the same locks as a backup, so the two never
+overlap; a scheduled check that finds a backup running waits for the next tick.
 
 ## Retention
 
@@ -185,7 +227,10 @@ folder and Ollama running.
 
 - **Weekly.** Run `status`: `last_success` should be recent and
   `consecutive_failures` 0.
+- **Weekly.** Look at the last drill (`GET /api/admin/backups`, or the
+  history file): it should be recent and without problems.
 - **Monthly.** Restore the newest backup into a scratch folder and read the
-  report. This is the only real test of a backup.
+  report. The drills automate this, but a restore by hand also proves the
+  runbook and the operator.
 - **After upgrading the application.** Make a manual backup first
   (`create --label "before upgrade to <commit>"`), and keep it.

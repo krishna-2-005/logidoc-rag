@@ -31,7 +31,7 @@ reference data in their own store. The freight audit engine contains no vendor l
 ## 2. How a sync runs
 
 1. **Lease.** The integration's lease is claimed: one sync of an integration at a time, scheduled or requested
-   (409 otherwise).
+   (409 otherwise). See "Concurrency and recovery" below.
 2. **Pages.** For each entity the provider supports (carriers, then shipments), pages are fetched from the
    stored cursor.
    - A rate limit, timeout or unavailability is retried 3 times with back-off, honouring the partner's
@@ -49,6 +49,8 @@ reference data in their own store. The freight audit engine contains no vendor l
    - An item an earlier page of the same run brought with the same content: a duplicate.
    - Content equal to what is stored: unchanged (a change of the partner's timestamp alone is not a change).
    - Different content: a new version (updated).
+   - Content older than what is stored (an earlier `source_updated_at`): **stale**, counted and never stored, so
+     a late or re-ordered page cannot put an old version back.
 5. **Manual corrections win.** A field an administrator corrected is never overwritten. The received value is kept
    in the record's version and counted as a conflict. Clearing the correction brings the partner's value back.
 6. **Cursor.** The cursor is saved after each page, after that page's records. A crash re-reads at most one page,
@@ -64,6 +66,29 @@ reference data in their own store. The freight audit engine contains no vendor l
    - `interrupted`: found after a stop
 
    A failure backs off from 60 s, doubling, within the interval.
+
+### Concurrency and recovery
+
+- **Atomic claim.** The claim runs in one write transaction (`BEGIN IMMEDIATE`). It refuses while another run
+  holds a valid lease (`SyncBusy`, 409), inserts the run, and records the run as the lease owner
+  (`lease_owner = "sync-run:<id>"`) with a 15-minute lease.
+- **Scheduled claims re-check.** A scheduled claim checks again, under the lock, that the integration is still
+  enabled and due (`SyncNotDue`). A manual sync that finished a moment earlier has moved `next_sync_at`, so the
+  scheduler's stale list of due integrations cannot start a second, duplicate sync.
+- **Ownership on every write.** Before saving each page (records, cursor, counts), the run renews its lease
+  inside the same transaction, and only while it still owns it and is still `running`. The final outcome is
+  written the same way.
+- **Late workers.** A run that lost its lease (it outlived it, or a restart marked it `interrupted`) writes
+  nothing more: not its records, not its cursor, not its outcome. It logs the loss and counts it in
+  `logidoc_sync_lease_lost_total`. Its run stays `interrupted` in the history.
+- **Crash recovery.** Each scheduler pass first recovers expired leases: the runs left `running` become
+  `interrupted` once, the lease and its owner are cleared, the integration is due at once, and
+  `logidoc_sync_runs_interrupted_total` counts them. A claim does the same for its own integration, so an
+  administrator who syncs after a crash, before the scheduler's pass, closes the crashed run too. The next sync
+  resumes from the saved cursor.
+- **Idempotent import.** Re-reading a page changes nothing: same content is unchanged, older content is stale.
+- The store upgrades itself to version 2 on open (`integrations.lease_owner`, `sync_runs.stale`); runs recorded
+  before keep `stale = 0`.
 
 ## 3. Provenance
 
@@ -133,6 +158,15 @@ All routes need `integrations.manage`, and the CSRF header for changes.
 | `GET /api/integrations/connections/{id}/records/{record}` | `ImportedRecordDetail`: provenance, versions, corrections |
 | `POST /api/integrations/connections/{id}/records/{record}/corrections` | `{"field", "value", "reason", "clear"}` → the record |
 | `POST /api/integrations/connections/{id}/sandbox/changes` | sandbox only: `{"changed": [ids]}` |
+| `GET /api/integrations/monitoring/connections?days=` | `IntegrationDashboard`: the runs of the last 1 to 90 days (default 30) |
+
+The health dashboard (Integrations, **Health** tab) is computed from the recorded sync runs only:
+
+- runs, outcomes, records imported, updated and rejected, retries and error categories, per UTC day and per
+  integration, by the day each run started;
+- each integration's connection status, last success, last failure, next scheduled sync and its five latest runs;
+- success rate = succeeded / (succeeded + partial + failed). Running and interrupted runs are not in the
+  denominator, and with no finished run the rate is `null` (shown as n/a), never 0 % or 100 %.
 
 ## 7. Adding a real TMS or ERP provider
 
