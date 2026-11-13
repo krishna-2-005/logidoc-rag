@@ -402,6 +402,123 @@
         "title": "BackupBody",
         "type": "object"
       },
+      "BackupCheck": {
+        "description": "One recorded check of a backup: verify (manifest, checksums, each database's\nintegrity and recorded contents) or restore_drill (restored into an\nisolated folder and checked like a real restore, then removed).\ncategories: what kinds of problem were found (empty when ok).",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "backup_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Id"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "databases": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Databases"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "files_checked": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files Checked"
+          },
+          "kind": {
+            "enum": [
+              "verify",
+              "restore_drill"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "origin": {
+            "enum": [
+              "manual",
+              "scheduled"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "origin",
+          "backup_id",
+          "ok",
+          "categories",
+          "problems"
+        ],
+        "title": "BackupCheck",
+        "type": "object"
+      },
+      "BackupChecks": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/BackupCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "checks"
+        ],
+        "title": "BackupChecks",
+        "type": "object"
+      },
       "BackupError": {
         "properties": {
           "category": {
@@ -474,6 +591,16 @@
             ],
             "title": "Label"
           },
+          "last_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "origin": {
             "enum": [
               "manual",
@@ -535,6 +662,16 @@
           },
           "status": {
             "$ref": "#/components/schemas/BackupStatus"
+          },
+          "verification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerificationSchedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -8915,6 +9052,58 @@
         "title": "ValueChange",
         "type": "object"
       },
+      "VerificationSchedule": {
+        "description": "Hours between scheduled checks (0: off), and the last scheduled ones.",
+        "properties": {
+          "drill_hours": {
+            "title": "Drill Hours",
+            "type": "integer"
+          },
+          "last_drill": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_verification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verify_hours": {
+            "title": "Verify Hours",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "verify_hours",
+          "drill_hours",
+          "last_verification",
+          "last_drill"
+        ],
+        "title": "VerificationSchedule",
+        "type": "object"
+      },
+      "VerifyBody": {
+        "properties": {
+          "restore_drill": {
+            "default": false,
+            "title": "Restore Drill",
+            "type": "boolean"
+          }
+        },
+        "title": "VerifyBody",
+        "type": "object"
+      },
       "WebhookConfiguration": {
         "description": "delivery_enabled false: problems says why (no signing key); nothing is registered or delivered then.",
         "properties": {
@@ -9914,6 +10103,175 @@
           }
         },
         "summary": "Start Backup",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/admin/backups/checks": {
+      "get": {
+        "description": "Recorded verifications and restore drills, newest first (append-only history beside the backups).",
+        "operationId": "backup_checks_api_admin_backups_checks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupChecks"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Backup Checks",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/admin/backups/{backup_id}/verify": {
+      "post": {
+        "description": "Checks one backup again now (manifest, checksums, integrity, recorded\ncontents); with restore_drill, also restores it into an isolated folder and\nchecks it like a real restore. The result is added to the history.",
+        "operationId": "verify_backup_api_admin_backups__backup_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backup_id",
+            "required": true,
+            "schema": {
+              "title": "Backup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A backup or check is running"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Verify Backup",
         "tags": [
           "operations"
         ]

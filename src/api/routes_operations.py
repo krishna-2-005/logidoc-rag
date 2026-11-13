@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 import authz
 import backup
+import backup_automation
 import metrics
 from api import schemas
 from api.core import ApiState, get_state, require
@@ -38,12 +39,21 @@ class BackupBody(BaseModel):
     label: str | None = Field(default=None, max_length=80)
 
 
+class VerifyBody(BaseModel):
+
+    restore_drill: bool = False
+
+
 @router.get("/backups", response_model=schemas.BackupOverview, responses=schemas.ERRORS)
 def backups(principal=Maintain, state: ApiState = Depends(get_state)):
 
     operations = state.operations
     settings = operations.backup_settings
     status = operations.runner.status()
+    latest = backup_automation.latest_verifications(settings.root)
+
+    def last_scheduled(kind):
+        return backup_automation.last_scheduled_check(settings.root, kind)
 
     return {
         "schedule": settings.schedule.describe(),
@@ -51,8 +61,38 @@ def backups(principal=Maintain, state: ApiState = Depends(get_state)):
         "retention": {"daily": settings.retention.daily, "weekly": settings.retention.weekly,
                       "monthly": settings.retention.monthly},
         "status": {name: status.get(name) for name in STATUS_FIELDS if status.get(name) is not None},
-        "backups": backup.list_backups(settings.root),
+        "backups": [{**item, "last_check": latest.get(item["backup_id"])} for item in backup.list_backups(settings.root)],
+        "verification": {"verify_hours": settings.verify_hours, "drill_hours": settings.drill_hours,
+                         "last_verification": last_scheduled(backup_automation.VERIFY),
+                         "last_drill": last_scheduled(backup_automation.DRILL)},
     }
+
+
+@router.get("/backups/checks", response_model=schemas.BackupChecks, responses=schemas.ERRORS)
+def backup_checks(principal=Maintain, state: ApiState = Depends(get_state), limit: int = Query(100, ge=1, le=1000)):
+    """Recorded verifications and restore drills, newest first (append-only history beside the backups)."""
+
+    return {"checks": backup_automation.read_verifications(state.operations.backup_settings.root, limit=limit)}
+
+
+@router.post("/backups/{backup_id}/verify", status_code=202, response_model=schemas.BackupStarted,
+             responses={**schemas.ERRORS, 409: {"model": schemas.ErrorResponse, "description": "A backup or check is running"}})
+def verify_backup(backup_id: str, body: VerifyBody, principal=Maintain, state: ApiState = Depends(get_state)):
+    """
+    Checks one backup again now (manifest, checksums, integrity, recorded
+    contents); with restore_drill, also restores it into an isolated folder and
+    checks it like a real restore. The result is added to the history.
+    """
+
+    try:
+        state.operations.start_verification(backup_id, drill=body.restore_drill)
+    except backup.BackupBusy as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    except backup.RestoreRefused as error:
+        status = 404 if str(error).startswith(("No backup", "That is not")) else 422
+        raise HTTPException(status_code=status, detail=str(error)) from None
+
+    return {"started": True}
 
 
 @router.post("/backups", status_code=202, response_model=schemas.BackupStarted,

@@ -64,6 +64,8 @@ INTEGERS = {
     "LOGIDOC_ALERT_OLLAMA_FAILURES": (1, 1000),
     "LOGIDOC_ALERT_BACKUP_MAX_AGE_HOURS": (1, 8760),
     "LOGIDOC_ALERT_COOLDOWN_SECONDS": (0, 604800),
+    "LOGIDOC_BACKUP_VERIFY_HOURS": (0, 8760),
+    "LOGIDOC_BACKUP_DRILL_HOURS": (0, 8760),
     "LOGIDOC_WEBHOOK_TIMEOUT_SECONDS": (1, 60),
     "LOGIDOC_WEBHOOK_MAX_ATTEMPTS": (1, 30),
     "LOGIDOC_WEBHOOK_ROTATION_GRACE_HOURS": (0, 720),
@@ -221,6 +223,15 @@ def validate(environ):
     if key and len(key) < WEBHOOK_KEY_MIN:
         errors.append(f"LOGIDOC_WEBHOOK_SECRET_KEY must be at least {WEBHOOK_KEY_MIN} characters (webhook signing secrets "
                       "are derived from it).")
+
+    drill = value_of(environ, "LOGIDOC_BACKUP_DRILL_DIR")
+    if drill:
+        if production and not is_absolute(drill):
+            errors.append("LOGIDOC_BACKUP_DRILL_DIR must be an absolute path in production.")
+        for other in FOLDERS:
+            if other in folders and nested(drill, folders[other]):
+                errors.append(f"LOGIDOC_BACKUP_DRILL_DIR must not be inside {other} (or contain it): a restore drill "
+                              "is restored apart from the data and the backups.")
 
     sandbox = value_of(environ, "LOGIDOC_INTEGRATION_SANDBOX_DIR")
     if sandbox:

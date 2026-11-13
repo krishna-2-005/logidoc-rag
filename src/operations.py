@@ -65,6 +65,7 @@ class Operations:
             quiesce=ingestion_quiesce, include_index=True, configuration=configuration,
             application=backup.application_version(PROJECT_ROOT), on_failure=self.backup_failed,
             on_success=self.backup_succeeded, metrics=self.registry, disk_usage=disk_usage,
+            on_verification=self.backups_verified,
         )
 
     # --------------------------------------------------------
@@ -80,6 +81,40 @@ class Operations:
         self.alerts.resolve("backup_failed")
         log.info("Backup %s completed (%s files).", manifest["backup_id"], manifest["totals"]["files"],
                  extra={"operation": "backup", "outcome": "success", "backup_id": manifest["backup_id"]})
+
+    def backups_verified(self, results):
+        """A verification or drill that failed raises the critical alert; a clean round resolves it."""
+
+        failed = [result for result in results if not result["ok"]]
+
+        if failed:
+            names = ", ".join(f"{result['backup_id']} ({result['kind'].replace('_', ' ')}: "
+                              f"{', '.join(result.get('categories') or ['failed'])})" for result in failed[:3])
+            self.alerts.fire("backup_verification_failed", alerts_module.CRITICAL,
+                             f"{len(failed)} backup check(s) failed: {names}.")
+        elif results:
+            self.alerts.resolve("backup_verification_failed")
+
+    def start_verification(self, backup_id, drill=False):
+        """A check of one backup now, in its own thread; raises backup.BackupBusy or backup.RestoreRefused at once."""
+
+        if self.runner.running:
+            raise backup.BackupBusy("A backup or a verification is already running.")
+
+        backup.find_backup(self.backup_settings.root, backup_id)
+
+        def work():
+            try:
+                self.runner.verify(backup_id, drill=drill, origin=backup.MANUAL)
+            except backup.BackupBusy:
+                pass
+            except Exception:
+                log.exception("The backup verification could not run.")
+
+        thread = threading.Thread(target=work, name="logidoc-backup-verification", daemon=True)
+        thread.start()
+
+        return thread
 
     def start_backup(self, label=None):
         """A manual backup in its own thread; raises backup.BackupBusy while one runs."""
@@ -135,6 +170,11 @@ class Operations:
             self.runner.run_if_due()
         except Exception:
             log.exception("The scheduled backup could not run.")
+
+        try:
+            self.runner.verify_if_due()
+        except Exception:
+            log.exception("The scheduled backup verification could not run.")
 
         now = self.clock()
 

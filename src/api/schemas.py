@@ -780,6 +780,39 @@ class BackupError(Contract):
     message: str
 
 
+class BackupCheck(Contract):
+    """
+    One recorded check of a backup: verify (manifest, checksums, each database's
+    integrity and recorded contents) or restore_drill (restored into an
+    isolated folder and checked like a real restore, then removed).
+    categories: what kinds of problem were found (empty when ok).
+    """
+
+    at: str
+    kind: Literal["verify", "restore_drill"]
+    origin: Literal["manual", "scheduled"]
+    backup_id: str | None
+    ok: bool
+    categories: list[str]
+    problems: list[str]
+    files_checked: int | None = None
+    databases: dict[str, str] | None = None
+    duration_ms: int | None = None
+
+
+class BackupChecks(Contract):
+    checks: list[BackupCheck]
+
+
+class VerificationSchedule(Contract):
+    """Hours between scheduled checks (0: off), and the last scheduled ones."""
+
+    verify_hours: int
+    drill_hours: int
+    last_verification: BackupCheck | None
+    last_drill: BackupCheck | None
+
+
 class BackupListed(Contract):
     """A backup in the backup folder. usable: complete, verified when made, manifest intact."""
 
@@ -794,6 +827,7 @@ class BackupListed(Contract):
     error: BackupError | None
     problems: list[str]
     # The newest recorded check of this backup (null: never checked since it was made)
+    last_check: BackupCheck | None = None
 
 
 class BackupAttempt(Contract):
@@ -824,6 +858,7 @@ class BackupOverview(Contract):
     retention: RetentionPolicy
     status: BackupStatus
     backups: list[BackupListed]
+    verification: VerificationSchedule | None = None
 
 
 class BackupStarted(Contract):

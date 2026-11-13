@@ -20,11 +20,23 @@ that never overlaps, a status record, failure reporting and retention.
     overlap      one run at a time in this process (a lock taken without
                  waiting), one per backup folder across processes
                  (backup.create_backup's file lock)
+    verification every LOGIDOC_BACKUP_VERIFY_HOURS (24; 0 = off) every
+                 complete backup is checked again (manifest, checksums,
+                 integrity, contents as recorded), and every
+                 LOGIDOC_BACKUP_DRILL_HOURS (168; 0 = off) the newest usable
+                 one is restored into an isolated folder under
+                 LOGIDOC_BACKUP_DRILL_DIR (default: the system temporary
+                 folder) and checked like a real restore, then the copy is
+                 removed. Every result is appended to
+                 <backups>/verification-history.jsonl; a failure alerts.
+                 Verification takes the same locks as a backup, so it never
+                 overlaps one (or the retention after it)
 """
 
 import json
 import re
 import shutil
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
@@ -34,6 +46,9 @@ import backup
 from redaction import redact
 
 STATUS_NAME = "backup-status.json"
+VERIFICATION_LOG = "verification-history.jsonl"
+VERIFY = "verify"
+DRILL = "restore_drill"
 
 SCHEDULE_PATTERN = re.compile(r"^(?:(off)|daily@([01]\d|2[0-3]):([0-5]\d)|every:([1-9]\d{0,3})h)$")
 
@@ -110,14 +125,21 @@ class BackupSettings:
     retention: Retention
     min_free_mb: int = 1024
     retry_minutes: int = 60
+    verify_hours: int = 24
+    drill_hours: int = 168
+    drill_root: Path | None = None
 
     @staticmethod
     def from_env(environ, default_root):
         """Raises ValueError for a malformed value (environment.validate reports it at startup)."""
 
         root = (environ.get("LOGIDOC_BACKUP_DIR") or "").strip()
+        drill = (environ.get("LOGIDOC_BACKUP_DRILL_DIR") or "").strip()
 
         return BackupSettings(
+            verify_hours=positive_int(environ, "LOGIDOC_BACKUP_VERIFY_HOURS", 24, 0, 8760),
+            drill_hours=positive_int(environ, "LOGIDOC_BACKUP_DRILL_HOURS", 168, 0, 8760),
+            drill_root=Path(drill) if drill else Path(tempfile.gettempdir()) / "logidoc-restore-drills",
             root=Path(root) if root else Path(default_root),
             schedule=parse_schedule(environ.get("LOGIDOC_BACKUP_SCHEDULE")),
             retention=Retention(
@@ -287,6 +309,97 @@ def apply_retention(root, policy, dry_run=False, now=None):
 # THE RUNNER
 # ============================================================
 
+# ============================================================
+# VERIFICATION HISTORY
+# ============================================================
+
+def record_verification(root, result, origin):
+    """Appends one verification or drill result (never rewritten) to <backups>/verification-history.jsonl."""
+
+    entry = {
+        "at": result.get("at") or backup.iso(backup.utc_now()), "kind": result.get("kind", VERIFY), "origin": origin,
+        "backup_id": result.get("backup_id"), "ok": bool(result.get("ok")), "categories": list(result.get("categories") or []),
+        "problems": [redact(str(problem), limit=300) for problem in (result.get("problems") or [])[:10]],
+        "files_checked": result.get("files_checked"), "databases": result.get("databases") or (result.get("steps") or {}).get("databases"),
+        "duration_ms": result.get("duration_ms"),
+    }
+    path = Path(root) / VERIFICATION_LOG
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+
+    return entry
+
+
+# The history only grows, and the scheduler asks for it every tick: parsed once per change of the file
+_HISTORY_CACHE = {}
+
+
+def verification_history(root):
+    """Every recorded verification and drill, newest first (a damaged line is skipped, never fatal). Do not modify."""
+
+    path = Path(root) / VERIFICATION_LOG
+
+    try:
+        stat = path.stat()
+    except OSError:
+        return []
+
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    cached = _HISTORY_CACHE.get(str(path))
+
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+
+    entries = []
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and "at" in entry:
+            entries.append(entry)
+
+    entries.reverse()
+    _HISTORY_CACHE[str(path)] = (stamp, entries)
+
+    return entries
+
+
+def read_verifications(root, limit=200):
+    """The recorded verifications and drills, newest first, at most limit."""
+
+    return verification_history(root)[:limit]
+
+
+def latest_verifications(root):
+    """{backup_id: its newest verification or drill}."""
+
+    found = {}
+
+    for entry in verification_history(root):
+        found.setdefault(entry.get("backup_id"), entry)
+
+    return found
+
+
+def last_scheduled_check(root, kind):
+    """The newest scheduled check of this kind (verify or restore_drill), or None."""
+
+    return next((entry for entry in verification_history(root)
+                 if entry.get("kind") == kind and entry.get("origin") == backup.SCHEDULED), None)
+
+
+def last_scheduled(root, kind):
+    """When a scheduled check of this kind last ran (a datetime), or None."""
+
+    entry = last_scheduled_check(root, kind)
+
+    return backup.parse_iso(entry["at"]) if entry else None
+
+
 class BackupRunner:
     """
     Runs backups for the server and the command line: never two at once in
@@ -301,7 +414,7 @@ class BackupRunner:
 
     def __init__(self, sources, settings, *, quiesce=None, include_index=True, index_skip_reason=None,
                  configuration=None, application=None, on_failure=None, on_success=None, metrics=None,
-                 clock=None, disk_usage=shutil.disk_usage):
+                 clock=None, disk_usage=shutil.disk_usage, on_verification=None):
 
         self.sources = sources
         self.settings = settings
@@ -315,6 +428,7 @@ class BackupRunner:
         self.metrics = metrics
         self.clock = clock or backup.utc_now
         self.disk_usage = disk_usage
+        self.on_verification = on_verification
         self.lock = threading.Lock()
 
     @property
@@ -403,6 +517,96 @@ class BackupRunner:
 
         try:
             return self.run(backup.SCHEDULED)
+        except backup.BackupBusy:
+            return None
+
+    # --------------------------------------------------------
+    # Verification and restore drills
+    # --------------------------------------------------------
+
+    def verify(self, backup_id=None, drill=False, origin=backup.MANUAL, verify_all=True):
+        """
+        Checks backups again and records every result. backup_id: that backup
+        (else every complete backup when verify_all). drill: also restore it (or
+        the newest usable backup) into an isolated folder and check it. Raises
+        backup.BackupBusy while a backup or another check runs, and
+        backup.RestoreRefused for an unknown or incomplete backup_id.
+        Returns the results; on_verification(results) reports them.
+        """
+
+        if not self.lock.acquire(blocking=False):
+            raise backup.BackupBusy("A backup or a verification is already running.")
+
+        root = Path(self.settings.root)
+        folder_lock = backup.FileLock(root / backup.LOCK_NAME)
+
+        try:
+            try:
+                folder_lock.acquire()
+            except backup.LockBusy:
+                raise backup.BackupBusy("Another process is backing up or checking this backup folder.") from None
+
+            try:
+                chosen = backup.find_backup(root, backup_id) if backup_id else None
+                listed = [item for item in backup.list_backups(root) if not item["incomplete"]]
+                results = []
+
+                for folder in ([chosen] if chosen else [root / item["backup_id"] for item in listed] if verify_all else []):
+                    started = self.clock()
+                    result = {**backup.verify_backup(folder), "kind": VERIFY, "at": backup.iso(started)}
+                    result["duration_ms"] = int((self.clock() - started).total_seconds() * 1000)
+                    results.append(result)
+
+                if drill:
+                    target = chosen or next((root / item["backup_id"] for item in listed if item["usable"]), None)
+                    if target is not None:
+                        protected = [Path(self.sources.raw_dir).parent, Path(self.sources.chroma_dir)]
+                        results.append(backup.restore_drill(target, self.settings.drill_root, protected=protected,
+                                                            now=self.clock()))
+            finally:
+                folder_lock.release()
+
+            for result in results:
+                record_verification(root, result, origin)
+                if self.metrics is not None:
+                    self.metrics.inc("logidoc_backup_verifications_total",
+                                     {"kind": result["kind"], "outcome": "ok" if result["ok"] else "failed"})
+
+            if self.on_verification:
+                self.on_verification(results)
+
+            return results
+
+        finally:
+            self.lock.release()
+
+    def verification_due(self, now=None):
+        """(verify, drill): whether each scheduled check is due."""
+
+        now = now or self.clock()
+        root = self.settings.root
+
+        def due(hours, kind):
+            if not hours:
+                return False
+            last = last_scheduled(root, kind)
+            return last is None or now - last >= timedelta(hours=hours)
+
+        return due(self.settings.verify_hours, VERIFY), due(self.settings.drill_hours, DRILL)
+
+    def verify_if_due(self, now=None):
+        """The scheduled verification and drill, when due and when there is a backup to check."""
+
+        if self.running or not backup.list_backups(self.settings.root):
+            return None
+
+        verify, drill = self.verification_due(now)
+
+        if not (verify or drill):
+            return None
+
+        try:
+            return self.verify(drill=drill, origin=backup.SCHEDULED, verify_all=verify)
         except backup.BackupBusy:
             return None
 
