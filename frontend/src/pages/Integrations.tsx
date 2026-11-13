@@ -1,6 +1,8 @@
 import { Cable, Plus } from "lucide-react"
 import { useEffect, useState, type FormEvent } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { IntegrationHealth } from "@/components/integrations/IntegrationHealth"
+import { Tabs } from "@/components/ui/tabs"
 import { PageHeader, Section } from "@/components/common/PageHeader"
 import { EmptyState, ErrorState, LoadingBlock, errorMessage } from "@/components/common/states"
 import { useToast } from "@/components/common/toast"
@@ -189,6 +191,8 @@ export function Integrations() {
   const navigate = useNavigate()
   const providers = list.data?.providers ?? []
   const anyAvailable = providers.some((provider) => provider.available)
+  const [params, setParams] = useSearchParams()
+  const tab = params.get("tab") === "health" ? "health" : "list"
 
   return (
     <>
@@ -202,65 +206,78 @@ export function Integrations() {
         }
       />
 
-      {list.isPending && <LoadingBlock rows={4} label="Loading the integrations" />}
-      {list.isError && <ErrorState error={list.error} onRetry={() => list.refetch()} title="The integrations could not be loaded" />}
+      <Tabs
+        label="Integration views"
+        value={tab}
+        onChange={(id) => setParams(id === "list" ? {} : { tab: id }, { replace: true })}
+        items={[{ id: "list", label: "Integrations" }, { id: "health", label: "Health" }]}
+      >
+        {tab === "health" && <IntegrationHealth />}
+        {tab === "list" && (
+          <>
+          {list.isPending && <LoadingBlock rows={4} label="Loading the integrations" />}
+          {list.isError && <ErrorState error={list.error} onRetry={() => list.refetch()} title="The integrations could not be loaded" />}
 
-      {list.data && list.data.integrations.length === 0 && (
-        <EmptyState icon={<Cable className="size-5" />} title="No integration configured">
-          {anyAvailable ? "Configure one to start synchronising." : "No system can be configured on this server yet: see why below."}
-        </EmptyState>
-      )}
+          {list.data && list.data.integrations.length === 0 && (
+            <EmptyState icon={<Cable className="size-5" />} title="No integration configured">
+              {anyAvailable ? "Configure one to start synchronising." : "No system can be configured on this server yet: see why below."}
+            </EmptyState>
+          )}
 
-      {list.data && list.data.integrations.length > 0 && (
-        <Table aria-label="Integrations">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Integration</TableHead>
-              <TableHead>Connection</TableHead>
-              <TableHead>Last sync</TableHead>
-              <TableHead>Last success</TableHead>
-              <TableHead>Last failure</TableHead>
-              <TableHead>Next sync</TableHead>
-              <TableHead className="text-right">Imported</TableHead>
-              <TableHead className="text-right">Updated</TableHead>
-              <TableHead className="text-right">Rejected</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.data.integrations.map((integration) => (
-              <TableRow key={integration.id} className="cursor-pointer" onClick={() => navigate(`/integrations/connections/${integration.id}`)}>
-                <TableCell>
-                  <Link to={`/integrations/connections/${integration.id}`} className="font-medium text-primary hover:underline" onClick={(event) => event.stopPropagation()}>
-                    {integration.name}
-                  </Link>
-                  <p className="text-xs text-muted-foreground">
-                    {providers.find((item) => item.key === integration.provider)?.label ?? integration.provider} · {every(integration.sync_interval_seconds)}
-                  </p>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    <ConnectionBadge status={integration.connection_status} />
-                    {!integration.enabled && <EnabledBadge enabled={false} />}
-                  </div>
-                </TableCell>
-                <TableCell>{integration.running ? <RunBadge status="running" /> : integration.last_run ? <RunBadge status={integration.last_run.status} /> : <span className="text-xs text-muted-foreground">Never</span>}</TableCell>
-                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{integration.last_success_at ? dateTime(integration.last_success_at) : "Never"}</TableCell>
-                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{integration.last_failure_at ? dateTime(integration.last_failure_at) : "None"}</TableCell>
-                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{integration.enabled ? dateTime(integration.next_sync_at) : "Disabled"}</TableCell>
-                <TableCell className="tabular text-right">{count(integration.totals.imported)}</TableCell>
-                <TableCell className="tabular text-right">{count(integration.totals.updated)}</TableCell>
-                <TableCell className={`tabular text-right ${integration.totals.rejected ? "text-warn" : ""}`}>{count(integration.totals.rejected)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+          {list.data && list.data.integrations.length > 0 && (
+            <Table aria-label="Integrations">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Integration</TableHead>
+                  <TableHead>Connection</TableHead>
+                  <TableHead>Last sync</TableHead>
+                  <TableHead>Last success</TableHead>
+                  <TableHead>Last failure</TableHead>
+                  <TableHead>Next sync</TableHead>
+                  <TableHead className="text-right">Imported</TableHead>
+                  <TableHead className="text-right">Updated</TableHead>
+                  <TableHead className="text-right">Rejected</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {list.data.integrations.map((integration) => (
+                  <TableRow key={integration.id} className="cursor-pointer" onClick={() => navigate(`/integrations/connections/${integration.id}`)}>
+                    <TableCell>
+                      <Link to={`/integrations/connections/${integration.id}`} className="font-medium text-primary hover:underline" onClick={(event) => event.stopPropagation()}>
+                        {integration.name}
+                      </Link>
+                      <p className="text-xs text-muted-foreground">
+                        {providers.find((item) => item.key === integration.provider)?.label ?? integration.provider} · {every(integration.sync_interval_seconds)}
+                      </p>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        <ConnectionBadge status={integration.connection_status} />
+                        {!integration.enabled && <EnabledBadge enabled={false} />}
+                      </div>
+                    </TableCell>
+                    <TableCell>{integration.running ? <RunBadge status="running" /> : integration.last_run ? <RunBadge status={integration.last_run.status} /> : <span className="text-xs text-muted-foreground">Never</span>}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{integration.last_success_at ? dateTime(integration.last_success_at) : "Never"}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{integration.last_failure_at ? dateTime(integration.last_failure_at) : "None"}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{integration.enabled ? dateTime(integration.next_sync_at) : "Disabled"}</TableCell>
+                    <TableCell className="tabular text-right">{count(integration.totals.imported)}</TableCell>
+                    <TableCell className="tabular text-right">{count(integration.totals.updated)}</TableCell>
+                    <TableCell className={`tabular text-right ${integration.totals.rejected ? "text-warn" : ""}`}>{count(integration.totals.rejected)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
 
-      {list.data && (
-        <Section title="Systems" description="What this server can connect to.">
-          <Providers providers={providers} />
-        </Section>
-      )}
+          {list.data && (
+            <Section title="Systems" description="What this server can connect to.">
+              <Providers providers={providers} />
+            </Section>
+          )}
+
+          </>
+        )}
+      </Tabs>
 
       <AddIntegration open={adding} onOpenChange={setAdding} providers={providers} />
     </>

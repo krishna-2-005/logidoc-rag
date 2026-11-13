@@ -40,6 +40,20 @@ export const REVIEW_COLOURS: Record<string, string> = {
 
 export const REVIEW_ORDER = ["open", "in_review", "disputed", "resolved", "dismissed", "waived"]
 
+/**
+ * Outcomes of deliveries and sync runs over time (stacked by day). Checked with the
+ * dataviz palette validator in this order (light surface): every check passes; the
+ * amber is below 3:1 against the surface, so each such chart carries a legend and a
+ * visible table of its numbers. The grey "neutral" is not used here: it reads as
+ * missing data, so an interrupted run has its own hue.
+ */
+export const OUTCOME = {
+  done: "#2a78d6",
+  partial: "#eda100",
+  failed: "#d03b3b",
+  interrupted: "#6250d6",
+} as const
+
 /** Categorical slots for series that are identities (carriers, line series), in a fixed order. */
 export const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"] as const
 

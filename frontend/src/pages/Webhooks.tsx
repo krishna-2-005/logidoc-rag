@@ -1,6 +1,8 @@
 import { Plus, Webhook } from "lucide-react"
 import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { DeliveryHistory, DeliveryMonitoring } from "@/components/integrations/WebhookMonitoring"
+import { Tabs } from "@/components/ui/tabs"
 import { SecretDialog } from "@/components/common/Dialogs"
 import { Facts } from "@/components/common/Facts"
 import { PageHeader, Section } from "@/components/common/PageHeader"
@@ -55,6 +57,8 @@ export function Webhooks() {
   const navigate = useNavigate()
   const toast = useToast()
   const enabled = settings.data?.delivery_enabled
+  const [params, setParams] = useSearchParams()
+  const tab = ["monitoring", "history"].includes(params.get("tab") ?? "") ? (params.get("tab") as string) : "endpoints"
 
   return (
     <>
@@ -86,60 +90,73 @@ export function Webhooks() {
       {settings.data?.private_destinations_allowed && <Alert tone="warn" className="mb-4">Development setting: loopback and private-network destinations are allowed. Production refuses this setting.</Alert>}
       {settings.isError && <ErrorState error={settings.error} onRetry={() => settings.refetch()} title="The webhook settings could not be loaded" />}
 
-      {endpoints.isPending && <LoadingBlock rows={4} label="Loading the endpoints" />}
-      {endpoints.isError && <ErrorState error={endpoints.error} onRetry={() => endpoints.refetch()} title="The endpoints could not be loaded" />}
+      <Tabs
+        label="Webhook views"
+        value={tab}
+        onChange={(id) => setParams(id === "endpoints" ? {} : { tab: id }, { replace: true })}
+        items={[{ id: "endpoints", label: "Endpoints" }, { id: "monitoring", label: "Monitoring" }, { id: "history", label: "Delivery history" }]}
+      >
+        {tab === "monitoring" && <DeliveryMonitoring />}
+        {tab === "history" && <DeliveryHistory />}
+        {tab === "endpoints" && (
+          <>
+          {endpoints.isPending && <LoadingBlock rows={4} label="Loading the endpoints" />}
+          {endpoints.isError && <ErrorState error={endpoints.error} onRetry={() => endpoints.refetch()} title="The endpoints could not be loaded" />}
 
-      {endpoints.data && endpoints.data.endpoints.length === 0 && (
-        <EmptyState icon={<Webhook className="size-5" />} title={archived ? "No endpoint" : "No webhook endpoint yet"}>
-          {enabled ? "Add an endpoint to send events to an ERP, a TMS or an accounts payable system." : "Set the signing key first (see above)."}
-        </EmptyState>
-      )}
+          {endpoints.data && endpoints.data.endpoints.length === 0 && (
+            <EmptyState icon={<Webhook className="size-5" />} title={archived ? "No endpoint" : "No webhook endpoint yet"}>
+              {enabled ? "Add an endpoint to send events to an ERP, a TMS or an accounts payable system." : "Set the signing key first (see above)."}
+            </EmptyState>
+          )}
 
-      {endpoints.data && endpoints.data.endpoints.length > 0 && (
-        <Table aria-label="Webhook endpoints">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Endpoint</TableHead>
-              <TableHead>Events</TableHead>
-              <TableHead>State</TableHead>
-              <TableHead>Success, last 7 days</TableHead>
-              <TableHead className="text-right">Failed</TableHead>
-              <TableHead className="text-right">Waiting</TableHead>
-              <TableHead>Last attempt</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {endpoints.data.endpoints.map((endpoint) => (
-              <TableRow key={endpoint.id} className="cursor-pointer" onClick={() => navigate(`/integrations/webhooks/${endpoint.id}`)}>
-                <TableCell className="max-w-80">
-                  <Link to={`/integrations/webhooks/${endpoint.id}`} className="font-medium text-primary hover:underline" onClick={(event) => event.stopPropagation()}>
-                    {endpoint.name}
-                  </Link>
-                  <p className="truncate font-mono text-xs text-muted-foreground">{endpoint.url}</p>
-                </TableCell>
-                <TableCell className="text-xs">{endpoint.event_types.length} type{endpoint.event_types.length === 1 ? "" : "s"}</TableCell>
-                <TableCell>
-                  <EnabledBadge enabled={endpoint.enabled} archived={endpoint.archived} />
-                </TableCell>
-                <TableCell className="tabular text-sm">{successRate(endpoint.stats)}</TableCell>
-                <TableCell className={`tabular text-right ${endpoint.stats.failed ? "font-medium text-bad" : ""}`}>{endpoint.stats.failed}</TableCell>
-                <TableCell className="tabular text-right">{endpoint.stats.waiting}</TableCell>
-                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{endpoint.stats.last_attempt_at ? dateTime(endpoint.stats.last_attempt_at) : "Never"}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+          {endpoints.data && endpoints.data.endpoints.length > 0 && (
+            <Table aria-label="Webhook endpoints">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Endpoint</TableHead>
+                  <TableHead>Events</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>Success, last 7 days</TableHead>
+                  <TableHead className="text-right">Failed</TableHead>
+                  <TableHead className="text-right">Waiting</TableHead>
+                  <TableHead>Last attempt</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {endpoints.data.endpoints.map((endpoint) => (
+                  <TableRow key={endpoint.id} className="cursor-pointer" onClick={() => navigate(`/integrations/webhooks/${endpoint.id}`)}>
+                    <TableCell className="max-w-80">
+                      <Link to={`/integrations/webhooks/${endpoint.id}`} className="font-medium text-primary hover:underline" onClick={(event) => event.stopPropagation()}>
+                        {endpoint.name}
+                      </Link>
+                      <p className="truncate font-mono text-xs text-muted-foreground">{endpoint.url}</p>
+                    </TableCell>
+                    <TableCell className="text-xs">{endpoint.event_types.length} type{endpoint.event_types.length === 1 ? "" : "s"}</TableCell>
+                    <TableCell>
+                      <EnabledBadge enabled={endpoint.enabled} archived={endpoint.archived} />
+                    </TableCell>
+                    <TableCell className="tabular text-sm">{successRate(endpoint.stats)}</TableCell>
+                    <TableCell className={`tabular text-right ${endpoint.stats.failed ? "font-medium text-bad" : ""}`}>{endpoint.stats.failed}</TableCell>
+                    <TableCell className="tabular text-right">{endpoint.stats.waiting}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{endpoint.stats.last_attempt_at ? dateTime(endpoint.stats.last_attempt_at) : "Never"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
 
-      <label className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-        <input type="checkbox" checked={archived} onChange={(event) => setArchived(event.target.checked)} /> Show archived endpoints
-      </label>
+          <label className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+            <input type="checkbox" checked={archived} onChange={(event) => setArchived(event.target.checked)} /> Show archived endpoints
+          </label>
 
-      {settings.data && (
-        <Section title="Verifying deliveries" description="What the receiving system checks before it trusts a delivery.">
-          <Signing settings={settings.data} />
-        </Section>
-      )}
+          {settings.data && (
+            <Section title="Verifying deliveries" description="What the receiving system checks before it trusts a delivery.">
+              <Signing settings={settings.data} />
+            </Section>
+          )}
+          </>
+        )}
+      </Tabs>
 
       <EndpointForm
         open={adding}
