@@ -110,6 +110,7 @@ GET /api/admin/metrics?format=prometheus    Prometheus text format (0.0.4)
 | `logidoc_backup_runs_total` | counter | outcome | each backup attempt |
 | `logidoc_backup_duration_seconds` | histogram | | each backup attempt |
 | `logidoc_backup_last_success_timestamp_seconds` | gauge | | a backup succeeds |
+| `logidoc_backup_verifications_total` | counter | kind (verify, restore_drill), outcome (ok, failed) | each backup verification or restore drill |
 | `logidoc_disk_free_bytes` | gauge | volume (data, index, backups) | each monitor check |
 | `logidoc_readiness` | gauge | status | each `/api/ready` |
 | `logidoc_alerts_total` | counter | rule, severity | an alert is sent |
@@ -146,6 +147,7 @@ from the metrics and reads the backup status. Then it applies these rules:
 | Alert | Severity | Fires when | Settings (default) |
 |---|---|---|---|
 | `backup_failed` | critical | any backup attempt fails (raised at once, not by the monitor); cleared by the next successful backup | |
+| `backup_verification_failed` | critical | a verification or restore drill of a backup fails (raised at once); cleared by the next check without a failure | `LOGIDOC_BACKUP_VERIFY_HOURS`, `LOGIDOC_BACKUP_DRILL_HOURS` |
 | `backup_stale` | warning | a schedule is on and the last successful backup is older than the limit, or there is none | `LOGIDOC_ALERT_BACKUP_MAX_AGE_HOURS` (26) |
 | `disk_low` | warning, critical | the lowest free space under the warning or critical limit | `LOGIDOC_ALERT_DISK_WARNING_MB` (2048), `LOGIDOC_ALERT_DISK_CRITICAL_MB` (512) |
 | `api_failures` | critical | this many 5xx responses in the window | `LOGIDOC_ALERT_5XX_COUNT` (5), `LOGIDOC_ALERT_WINDOW_SECONDS` (300) |

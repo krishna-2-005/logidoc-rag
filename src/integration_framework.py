@@ -60,7 +60,7 @@ import time
 from abc import ABC, abstractmethod
 from contextlib import closing
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import authz
@@ -77,6 +77,8 @@ PAGE_RETRIES = 3
 MAX_RETRY_AFTER = 60
 MIN_SYNC_INTERVAL = 60
 MAX_SYNC_INTERVAL = 7 * 86400
+# A sync's lease; every page renews it, so only a stopped (or stuck) run loses it
+SYNC_LEASE_SECONDS = 900
 
 
 # ============================================================
@@ -187,6 +189,20 @@ class IntegrationRefused(ValueError):
 
 class SyncBusy(RuntimeError):
     """A sync of this integration is running."""
+
+
+class SyncNotDue(RuntimeError):
+    """A scheduled claim of an integration that is disabled or not due (any more): it was synced meanwhile."""
+
+
+class LeaseLost(RuntimeError):
+    """The run's lease was recovered by another process: the run must stop writing."""
+
+
+def lease_token(run_id):
+    """Who holds an integration's lease: the sync run (each run is its own owner, in any process)."""
+
+    return f"sync-run:{run_id}"
 
 
 def normalize(error):
@@ -563,6 +579,11 @@ class ExternalRecordStore:
                                    "WHERE id = ?", (run_id, values["source_updated_at"], row["id"]))
                 return "unchanged", []
 
+            # Older than what is stored (a page fetched before a newer sync, or the partner resending an old
+            # copy): ignored, so a record never goes back in time. Equal times with other content are changes
+            if values["source_updated_at"] < row["source_updated_at"]:
+                return "stale", []
+
             overrides = self.overrides_of(connection, row["id"])
             kept = sorted(name for name, value in overrides.items() if values.get(name) != value)
             data = {**values, **overrides}
@@ -796,6 +817,7 @@ class IntegrationService:
                                                     and self.environ.get(integration["credential_env"]))
         integration["running"] = bool(integration["lease_until"] and parse_time(integration["lease_until"]) > self.clock())
         integration.pop("lease_until", None)
+        integration.pop("lease_owner", None)
 
         return integration
 
@@ -1016,7 +1038,17 @@ class IntegrationService:
     # --------------------------------------------------------
 
     def claim(self, integration_id, trigger, requested_by):
-        """The integration's lease and a new run row. Raises SyncBusy while another sync runs."""
+        """
+        The integration's lease and a new run row, in one transaction under the
+        write lock. Raises SyncBusy while another sync holds the lease, and, for
+        a scheduled claim, SyncNotDue when the integration is disabled or not due
+        any more (synced meanwhile by an administrator or another process).
+
+        A run still marked running here holds no valid lease (its process
+        stopped, or it outlived the lease): it is closed as interrupted in the
+        same transaction, so the history never keeps two running runs, even
+        when an administrator syncs before the scheduler's recovery.
+        """
 
         now = self.clock()
 
@@ -1027,11 +1059,27 @@ class IntegrationService:
             if lease is not None and lease > now:
                 raise SyncBusy("A sync of this integration is running.")
 
-            connection.execute("UPDATE integrations SET lease_until = ? WHERE id = ?", (later(now, 900), integration_id))
+            due = parse_time(row["next_sync_at"])
+
+            if trigger == "schedule" and (not row["enabled"] or (due is not None and due > now)):
+                raise SyncNotDue("This integration is not due for a sync.")
+
+            orphans = connection.execute(
+                "UPDATE sync_runs SET status = 'interrupted', finished_at = ?, error_category = 'interrupted', "
+                "error_message = 'The process stopped during the sync.' WHERE integration_id = ? AND status = 'running'",
+                (text_time(now), integration_id)).rowcount
             run_id = connection.execute(
                 "INSERT INTO sync_runs (integration_id, trigger, requested_by, started_at, status, cursor_before) "
                 "VALUES (?, ?, ?, ?, 'running', ?)",
                 (integration_id, trigger, requested_by, text_time(now), row["cursor"])).lastrowid
+            connection.execute("UPDATE integrations SET lease_until = ?, lease_owner = ? WHERE id = ?",
+                               (later(now, SYNC_LEASE_SECONDS), lease_token(run_id), integration_id))
+
+        if orphans:
+            log.warning("Sync of integration %s: %s run(s) left running were closed as interrupted.", integration_id, orphans,
+                        extra={"operation": "integration_sync", "outcome": "interrupted"})
+            if self.metrics is not None:
+                self.metrics.inc("logidoc_sync_runs_interrupted_total", amount=orphans)
 
         return run_id
 
@@ -1052,7 +1100,11 @@ class IntegrationService:
                 connection.execute("UPDATE sync_runs SET status = 'interrupted', finished_at = ?, error_category = 'interrupted', "
                                    "error_message = 'The process stopped during the sync.' WHERE integration_id = ? AND status = 'running'",
                                    (now, integration_id))
-                connection.execute("UPDATE integrations SET lease_until = NULL, next_sync_at = ? WHERE id = ?", (now, integration_id))
+                connection.execute("UPDATE integrations SET lease_until = NULL, lease_owner = NULL, next_sync_at = ? WHERE id = ?",
+                                   (now, integration_id))
+
+        if stale and self.metrics is not None:
+            self.metrics.inc("logidoc_sync_runs_interrupted_total", amount=len(stale))
 
         return len(stale)
 
@@ -1093,7 +1145,7 @@ class IntegrationService:
                 break
             try:
                 run_id = self.claim(integration_id, "schedule", None)
-            except SyncBusy:
+            except (SyncBusy, SyncNotDue):
                 continue
             results[integration_id] = self.execute(integration_id, run_id, should_stop)["status"]
 
@@ -1218,6 +1270,83 @@ class IntegrationService:
 
         return result
 
+    def dashboard(self, days=30, recent=5):
+        """
+        The integrations' health over the last `days` days, from the recorded
+        sync runs only: per integration its status, last success and failure,
+        next sync, records held, runs, records imported, updated and rejected,
+        retries, error categories and recent runs; the totals; per day the
+        runs by outcome and the records; and the error categories.
+        success_rate is succeeded / finished runs (partial counts as finished
+        but not succeeded; running and interrupted runs are left out); null
+        without any finished run.
+        """
+
+        now = self.clock()
+        first_day = (now - timedelta(days=days - 1)).date()
+        since = f"{first_day.isoformat()}T00:00:00"
+        outcomes = ("succeeded", "partial", "failed", "interrupted")
+        records = ("imported", "updated", "rejected")
+        daily = {(first_day + timedelta(days=offset)).isoformat(): {**{name: 0 for name in outcomes + records}}
+                 for offset in range(days)}
+        totals = {"runs": 0, **{name: 0 for name in outcomes + records}, "retries": 0, "success_rate": None}
+        errors, integrations = {}, []
+        store = self.store()
+        runs = []
+
+        if store is not None:
+            with store.read() as connection:
+                runs = [dict(row) for row in connection.execute(
+                    "SELECT * FROM sync_runs WHERE started_at >= ? ORDER BY id", (since,))]
+
+        by_integration = {}
+
+        for run in runs:
+            totals["runs"] += 1
+            day = daily.get(run["started_at"][:10])
+            mine = by_integration.setdefault(run["integration_id"], {"runs": 0, **{name: 0 for name in outcomes + records},
+                                                                     "retries": 0, "error_categories": {}})
+            mine["runs"] += 1
+            mine["retries"] += run["retries"]
+            totals["retries"] += run["retries"]
+            if run["status"] in outcomes:
+                totals[run["status"]] += 1
+                mine[run["status"]] += 1
+                if day is not None:
+                    day[run["status"]] += 1
+            for name in records:
+                totals[name] += run[name]
+                mine[name] += run[name]
+                if day is not None:
+                    day[name] += run[name]
+            if run["error_category"]:
+                errors[run["error_category"]] = errors.get(run["error_category"], 0) + 1
+                mine["error_categories"][run["error_category"]] = mine["error_categories"].get(run["error_category"], 0) + 1
+
+        finished = totals["succeeded"] + totals["partial"] + totals["failed"]
+        totals["success_rate"] = round(totals["succeeded"] / finished, 4) if finished else None
+
+        for integration in self.integrations():
+            mine = by_integration.get(integration["id"], {"runs": 0, **{name: 0 for name in outcomes + records}, "retries": 0,
+                                                          "error_categories": {}})
+            integrations.append({
+                **{name: integration[name] for name in ("id", "name", "provider", "enabled", "connection_status",
+                                                        "connection_error", "last_success_at", "last_failure_at",
+                                                        "next_sync_at", "last_error", "consecutive_failures", "running",
+                                                        "records")},
+                "window": mine,
+                "recent_runs": self.runs(integration["id"], 0, recent)["runs"],
+            })
+
+        return {
+            "window": {"start": first_day.isoformat(), "end": now.date().isoformat(), "days": days},
+            "totals": totals,
+            "daily": [{"day": day, **values} for day, values in daily.items()],
+            "errors": sorted(({"category": key, "runs": count} for key, count in errors.items()),
+                             key=lambda item: (-item["runs"], item["category"])),
+            "integrations": integrations,
+        }
+
     def overdue(self):
         """Enabled integrations whose sync is late by more than its interval (at least 5 minutes)."""
 
@@ -1240,8 +1369,9 @@ class SyncEngine:
         self.service = service
         self.integration = integration
         self.run_id = run_id
+        self.token = lease_token(run_id)
         self.should_stop = should_stop
-        self.counts = {name: 0 for name in ("fetched", "imported", "updated", "unchanged", "duplicates", "rejected",
+        self.counts = {name: 0 for name in ("fetched", "imported", "updated", "unchanged", "stale", "duplicates", "rejected",
                                              "conflicts", "pages", "retries")}
         self.rejections = []
         self.cursor = dict(integration["cursor"] or {})
@@ -1250,6 +1380,37 @@ class SyncEngine:
     def now(self):
 
         return text_time(self.service.clock())
+
+    def owns(self, connection):
+        """Whether this run still holds the integration's lease (inside a write transaction)."""
+
+        lease = connection.execute("SELECT lease_owner FROM integrations WHERE id = ?", (self.integration["id"],)).fetchone()
+        run = connection.execute("SELECT status FROM sync_runs WHERE id = ?", (self.run_id,)).fetchone()
+
+        return bool(lease and run and lease["lease_owner"] == self.token and run["status"] == "running")
+
+    def hold(self, connection):
+        """Renews the lease, or raises LeaseLost when another process has recovered it."""
+
+        if not self.owns(connection):
+            raise LeaseLost(f"Sync run {self.run_id} lost its lease.")
+
+        connection.execute("UPDATE integrations SET lease_until = ? WHERE id = ?",
+                           (later(self.service.clock(), SYNC_LEASE_SECONDS), self.integration["id"]))
+
+    def check_lease(self):
+
+        with self.service.store().write() as connection:
+            self.hold(connection)
+
+    def lease_lost(self):
+        """A late worker: nothing of this run is recorded (its run stays interrupted, the new run untouched)."""
+
+        log.warning("Sync %s of integration %s lost its lease to a recovery; it stopped without writing.", self.run_id,
+                    self.integration["id"], extra={"operation": "integration_sync", "outcome": "lease_lost"})
+
+        if self.service.metrics is not None:
+            self.service.metrics.inc("logidoc_sync_lease_lost_total", {"provider": self.integration["provider"]})
 
     def fetch(self, provider, entity, cursor, page_size):
         """One page, retried on a retryable failure (back-off; Retry-After honoured up to a minute)."""
@@ -1273,15 +1434,18 @@ class SyncEngine:
     def save_progress(self):
 
         with self.service.store().write() as connection:
+            # Only while this run holds the lease (renewed here): a late worker never moves the cursor
+            self.hold(connection)
             connection.execute("UPDATE integrations SET cursor = ? WHERE id = ?", (dumps(self.cursor), self.integration["id"]))
             for entity, external_id, reason in self.rejections:
                 connection.execute("INSERT INTO sync_rejections (run_id, entity, external_id, reason, at) VALUES (?, ?, ?, ?, ?)",
                                    (self.run_id, entity, external_id, reason, self.now()))
             connection.execute(
-                "UPDATE sync_runs SET cursor_after = ?, fetched = ?, imported = ?, updated = ?, unchanged = ?, duplicates = ?, "
-                "rejected = ?, conflicts = ?, pages = ?, retries = ? WHERE id = ?",
-                (dumps(self.cursor), *(self.counts[name] for name in ("fetched", "imported", "updated", "unchanged", "duplicates",
-                                                                      "rejected", "conflicts", "pages", "retries")), self.run_id))
+                "UPDATE sync_runs SET cursor_after = ?, fetched = ?, imported = ?, updated = ?, unchanged = ?, stale = ?, "
+                "duplicates = ?, rejected = ?, conflicts = ?, pages = ?, retries = ? WHERE id = ?",
+                (dumps(self.cursor), *(self.counts[name] for name in ("fetched", "imported", "updated", "unchanged", "stale",
+                                                                      "duplicates", "rejected", "conflicts", "pages",
+                                                                      "retries")), self.run_id))
 
         self.rejections = []
 
@@ -1319,11 +1483,15 @@ class SyncEngine:
                     continue
                 mapped[values["external_id"]] = values
 
+            # Still this run's sync? (a late worker stops before importing anything)
+            self.check_lease()
+
             for values in mapped.values():
                 seen[values["external_id"]] = content_hash(values)
                 change, kept = records.apply(self.integration["id"], self.integration["provider"], self.run_id, entity, values,
                                              self.now())
-                self.counts[{"created": "imported", "updated": "updated", "unchanged": "unchanged"}[change]] += 1
+                self.counts[{"created": "imported", "updated": "updated", "unchanged": "unchanged",
+                             "stale": "stale"}[change]] += 1
                 self.counts["conflicts"] += len(kept)
 
             if page.next_cursor is not None:
@@ -1375,6 +1543,9 @@ class SyncEngine:
                 self.sync_entity(provider, records, entity, page_size)
 
             self.send_audit_runs(provider)
+        except LeaseLost:
+            self.lease_lost()
+            return
         except IntegrationRefused as caught:
             error = ConfigurationError(str(caught))
         except Exception as caught:  # noqa: BLE001 - normalized and recorded
@@ -1403,34 +1574,55 @@ class SyncEngine:
                              "auth_failed" if isinstance(error, AuthenticationFailed) else "error")
 
         with self.service.store().write() as connection:
-            for entity, external_id, reason in self.rejections:
-                connection.execute("INSERT INTO sync_rejections (run_id, entity, external_id, reason, at) VALUES (?, ?, ?, ?, ?)",
-                                   (self.run_id, entity, external_id, reason, text_time(now)))
-            self.rejections = []
-            connection.execute(
-                "UPDATE sync_runs SET status = ?, finished_at = ?, cursor_after = ?, fetched = ?, imported = ?, updated = ?, "
-                "unchanged = ?, duplicates = ?, rejected = ?, conflicts = ?, pages = ?, retries = ?, error_category = ?, "
-                "error_message = ? WHERE id = ?",
-                (status, text_time(now), dumps(self.cursor),
-                 *(self.counts[name] for name in ("fetched", "imported", "updated", "unchanged", "duplicates", "rejected",
-                                                  "conflicts", "pages", "retries")),
-                 error.category if error else None, redact(str(error), limit=300) if error else None, self.run_id))
-            connection.execute(
-                "UPDATE integrations SET lease_until = NULL, cursor = ?, next_sync_at = ?, consecutive_failures = ?, "
-                "last_success_at = CASE WHEN ? THEN ? ELSE last_success_at END, "
-                "last_failure_at = CASE WHEN ? THEN ? ELSE last_failure_at END, last_error = ?, connection_status = ?, "
-                "connection_checked_at = ?, connection_error = ?, updated_at = ? WHERE id = ?",
-                (dumps(self.cursor), later(now, wait), failures, error is None, text_time(now), error is not None, text_time(now),
-                 f"{error.category}: {redact(str(error), limit=200)}" if error else None, connection_status, text_time(now),
-                 f"{error.category}: {redact(str(error), limit=200)}" if error else None, text_time(now), integration["id"]))
+            lost = not self.owns(connection)
+
+            if not lost:
+                self.record_outcome(connection, now, status, error, failures, wait, connection_status)
+
+        if lost:
+            self.lease_lost()
+            return
+
+        self.report(status)
+
+    def record_outcome(self, connection, now, status, error, failures, wait, connection_status):
+        """The run's outcome and the integration's state, in the finishing transaction (this run holds the lease)."""
+
+        integration = self.integration
+        message = f"{error.category}: {redact(str(error), limit=200)}" if error else None
+
+        for entity, external_id, reason in self.rejections:
+            connection.execute("INSERT INTO sync_rejections (run_id, entity, external_id, reason, at) VALUES (?, ?, ?, ?, ?)",
+                               (self.run_id, entity, external_id, reason, text_time(now)))
+        self.rejections = []
+        connection.execute(
+            "UPDATE sync_runs SET status = ?, finished_at = ?, cursor_after = ?, fetched = ?, imported = ?, updated = ?, "
+            "unchanged = ?, stale = ?, duplicates = ?, rejected = ?, conflicts = ?, pages = ?, retries = ?, "
+            "error_category = ?, error_message = ? WHERE id = ?",
+            (status, text_time(now), dumps(self.cursor),
+             *(self.counts[name] for name in ("fetched", "imported", "updated", "unchanged", "stale", "duplicates",
+                                              "rejected", "conflicts", "pages", "retries")),
+             error.category if error else None, redact(str(error), limit=300) if error else None, self.run_id))
+        connection.execute(
+            "UPDATE integrations SET lease_until = NULL, lease_owner = NULL, cursor = ?, next_sync_at = ?, "
+            "consecutive_failures = ?, last_success_at = CASE WHEN ? THEN ? ELSE last_success_at END, "
+            "last_failure_at = CASE WHEN ? THEN ? ELSE last_failure_at END, last_error = ?, connection_status = ?, "
+            "connection_checked_at = ?, connection_error = ?, updated_at = ? WHERE id = ?",
+            (dumps(self.cursor), later(now, wait), failures, error is None, text_time(now), error is not None, text_time(now),
+             message, connection_status, text_time(now), message, text_time(now), integration["id"]))
+
+    def report(self, status):
+        """Metrics and the log line of a recorded run."""
+
+        integration = self.integration
 
         if self.service.metrics is not None:
             self.service.metrics.inc("logidoc_sync_runs_total", {"provider": integration["provider"], "outcome": status})
-            for name in ("imported", "updated", "rejected", "duplicates", "conflicts"):
+            for name in ("imported", "updated", "stale", "rejected", "duplicates", "conflicts"):
                 if self.counts[name]:
                     self.service.metrics.inc("logidoc_sync_records_total", {"provider": integration["provider"], "change": name},
                                              self.counts[name])
 
-        log.info("Sync %s of integration %s: %s (%s fetched, %s imported, %s updated, %s rejected).", self.run_id,
+        log.info("Sync %s of integration %s: %s (%s fetched, %s imported, %s updated, %s stale, %s rejected).", self.run_id,
                  integration["id"], status, self.counts["fetched"], self.counts["imported"], self.counts["updated"],
-                 self.counts["rejected"], extra={"operation": "integration_sync", "outcome": status})
+                 self.counts["stale"], self.counts["rejected"], extra={"operation": "integration_sync", "outcome": status})

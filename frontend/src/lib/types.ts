@@ -1339,6 +1339,8 @@ export interface SyncRun {
   imported: number
   updated: number
   unchanged: number
+  /** Records ignored because a newer version was already stored */
+  stale?: number
   duplicates: number
   rejected: number
   conflicts: number
@@ -1431,4 +1433,72 @@ export interface RecordPage {
   total: number
   offset: number
   limit: number
+}
+
+// ---------------------------------------------------------------------------
+// Monitoring (recorded deliveries and sync runs only)
+// ---------------------------------------------------------------------------
+
+export interface MonitoringWindow {
+  start: string
+  end: string
+  days: number
+}
+
+export interface WebhookMonitoring {
+  window: MonitoringWindow
+  totals: {
+    deliveries: number
+    succeeded: number
+    failed: number
+    waiting: number
+    cancelled: number
+    attempts: number
+    retry_attempts: number
+    /** succeeded / (succeeded + failed); null when none finished */
+    success_rate: number | null
+  }
+  last_success_at: string | null
+  last_failure_at: string | null
+  endpoints: { endpoint_id: number; name: string; enabled: boolean; archived: boolean; deliveries: number; succeeded: number; failed: number; waiting: number; last_success_at: string | null; last_failure_at: string | null }[]
+  event_types: { event_type: string; deliveries: number; succeeded: number; failed: number; waiting: number }[]
+  errors: { category: string; attempts: number }[]
+  daily: { day: string; succeeded: number; failed: number; waiting: number; attempts: number; latency_p50_ms: number | null; latency_p95_ms: number | null }[]
+}
+
+export interface SyncCounts {
+  runs: number
+  succeeded: number
+  partial: number
+  failed: number
+  interrupted: number
+  imported: number
+  updated: number
+  rejected: number
+  retries: number
+}
+
+export interface IntegrationDashboard {
+  window: MonitoringWindow
+  /** success_rate: succeeded / finished runs (succeeded, partial, failed); null without any */
+  totals: SyncCounts & { success_rate: number | null }
+  daily: { day: string; succeeded: number; partial: number; failed: number; interrupted: number; imported: number; updated: number; rejected: number }[]
+  errors: { category: string; runs: number }[]
+  integrations: {
+    id: number
+    name: string
+    provider: string
+    enabled: boolean
+    connection_status: Integration["connection_status"]
+    connection_error: string | null
+    last_success_at: string | null
+    last_failure_at: string | null
+    next_sync_at: string | null
+    last_error: string | null
+    consecutive_failures: number
+    running: boolean
+    records: Record<string, number>
+    window: SyncCounts & { error_categories: Record<string, number> }
+    recent_runs: SyncRun[]
+  }[]
 }

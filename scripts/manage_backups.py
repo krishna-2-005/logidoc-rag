@@ -5,6 +5,7 @@ LogiDoc-RAG backups from the command line (docs/AUTOMATED_BACKUP_OPERATIONS.md).
     python scripts/manage_backups.py list
     python scripts/manage_backups.py status
     python scripts/manage_backups.py verify BACKUP_ID
+    python scripts/manage_backups.py drill BACKUP_ID        (restore into an isolated folder, check, remove)
     python scripts/manage_backups.py restore BACKUP_ID --target NEW_FOLDER [--skip-index-open]
     python scripts/manage_backups.py prune                  (shows what retention would remove)
     python scripts/manage_backups.py prune --apply          (removes it: scheduled backups only)
@@ -124,16 +125,28 @@ def status(arguments):
 
 def verify(arguments):
 
+    return check(arguments, drill=False)
+
+
+def drill(arguments):
+
+    return check(arguments, drill=True)
+
+
+def check(arguments, drill):
+    """Verify (and with drill, restore into an isolated folder and check); the result joins the history."""
+
+    runner = backup_automation.BackupRunner(sources(), settings())
+
     try:
-        folder = backup.find_backup(settings().root, arguments.backup_id)
-    except backup.RestoreRefused as error:
+        results = runner.verify(arguments.backup_id, drill=drill, origin=backup.MANUAL)
+    except (backup.RestoreRefused, backup.BackupBusy) as error:
         print(str(error), file=sys.stderr)
         return 1
 
-    report = backup.verify_backup(folder)
-    show(report)
+    show(results if drill else results[0])
 
-    return 0 if report["ok"] else 1
+    return 0 if all(result["ok"] for result in results) else 1
 
 
 def restore(arguments):
@@ -207,6 +220,10 @@ def main(argv=None):
     command = commands.add_parser("verify", help="check a backup's manifest, checksums and databases")
     command.add_argument("backup_id")
     command.set_defaults(run=verify)
+
+    command = commands.add_parser("drill", help="verify, restore into an isolated folder, check it, remove the copy")
+    command.add_argument("backup_id")
+    command.set_defaults(run=drill)
 
     command = commands.add_parser("restore", help="restore a backup into a new folder and validate it")
     command.add_argument("backup_id")

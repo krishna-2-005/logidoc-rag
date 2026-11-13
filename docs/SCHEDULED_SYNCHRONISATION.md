@@ -89,7 +89,9 @@ Exposed with the others at `GET /api/admin/metrics`, also in Prometheus format:
 | `logidoc_webhook_deliveries_total` | outcome | Delivery attempts |
 | `logidoc_webhook_delivery_seconds` | | Attempt duration |
 | `logidoc_sync_runs_total` | provider, outcome | Sync runs |
-| `logidoc_sync_records_total` | provider, change | Records imported, updated, rejected, duplicates, conflicts |
+| `logidoc_sync_records_total` | provider, change | Records imported, updated, stale, rejected, duplicates, conflicts |
+| `logidoc_sync_runs_interrupted_total` | | Sync runs closed as interrupted after a stop or an expired lease |
+| `logidoc_sync_lease_lost_total` | provider | Late sync workers that found their lease taken and stopped without writing |
 
 ### Alerts
 

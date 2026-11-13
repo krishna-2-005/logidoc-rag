@@ -791,6 +791,91 @@ def test_end_to_end_over_real_http_with_the_receivers_own_check(tmp_path):
         server.server_close()
 
 
+# ============================================================
+# MONITORING (recorded deliveries only)
+# ============================================================
+
+def three_deliveries(rig):
+    """Three carrier events: delivered at once, refused (400), and delivered after one 503; plus a test delivery."""
+
+    alice = rig.client("alice")
+    endpoint = register(alice, event_types=["carrier.created"])["endpoint"]
+    for name in ("First Inc", "Second Inc", "Third Inc"):
+        alice.post("/api/carrier-registry", json={"legal_name": name})
+    service = runtime(rig).webhooks
+    service.collect(only=["carrier_events"])
+    rig.receiver.answers = [200, 400, 503, 200, 200]
+    service.deliver_due(("pending",))
+    due_now(rig)
+    service.deliver_due(("retrying",))
+    alice.post(f"/api/integrations/webhooks/{endpoint['id']}/test")
+
+    return alice, endpoint
+
+
+def test_monitoring_counts_what_was_delivered_failed_and_retried(rig):
+
+    alice, endpoint = three_deliveries(rig)
+    view = alice.get("/api/integrations/monitoring/webhooks", params={"days": 7}).json()
+    totals = view["totals"]
+
+    assert (totals["deliveries"], totals["succeeded"], totals["failed"], totals["waiting"]) == (3, 2, 1, 0)   # the test is left out
+    assert (totals["attempts"], totals["retry_attempts"]) == (4, 1)
+    assert totals["success_rate"] == round(2 / 3, 4)
+    assert view["window"]["days"] == 7 and len(view["daily"]) == 7
+    today = view["daily"][-1]
+    assert (today["succeeded"], today["failed"], today["attempts"]) == (2, 1, 4)
+    assert today["latency_p50_ms"] is not None and today["latency_p95_ms"] >= today["latency_p50_ms"]
+    assert all(day["attempts"] == 0 and day["latency_p50_ms"] is None for day in view["daily"][:-1])
+    assert {item["category"]: item["attempts"] for item in view["errors"]} == {"http_4xx": 1, "http_5xx": 1}
+    assert view["event_types"] == [{"event_type": "carrier.created", "deliveries": 3, "succeeded": 2, "failed": 1, "waiting": 0}]
+    [health] = view["endpoints"]
+    assert (health["endpoint_id"], health["failed"], health["succeeded"]) == (endpoint["id"], 1, 2)
+    assert view["last_success_at"] and view["last_failure_at"]
+
+
+def test_monitoring_filters_and_an_empty_window_are_honest(rig):
+
+    alice, endpoint = three_deliveries(rig)
+
+    other = alice.get("/api/integrations/monitoring/webhooks", params={"event_type": "carrier.updated"}).json()
+    assert other["totals"]["deliveries"] == 0 and other["totals"]["success_rate"] is None and other["endpoints"] == []
+    assert alice.get("/api/integrations/monitoring/webhooks",
+                     params={"endpoint_id": endpoint["id"]}).json()["totals"]["deliveries"] == 3
+    assert alice.get("/api/integrations/monitoring/webhooks", params={"days": 0}).status_code == 422
+    assert rig.client("bob").get("/api/integrations/monitoring/webhooks").status_code == 403
+
+
+def test_the_delivery_history_filters_by_event_type_status_and_day(rig):
+
+    alice, _ = three_deliveries(rig)
+    page = lambda **params: alice.get("/api/integrations/deliveries", params=params).json()  # noqa: E731
+    today = runtime(rig).webhooks.clock().date()
+
+    assert page(event_type="carrier.created")["total"] == 3
+    assert page(event_type="webhook.test")["total"] == 1
+    assert page(status="failed")["total"] == 1
+    assert page(**{"from": today.isoformat(), "to": today.isoformat()})["total"] == 4
+    assert page(**{"from": (today + timedelta(days=1)).isoformat()})["total"] == 0
+    assert alice.get("/api/integrations/deliveries", params={"from": "2026-11-10", "to": "2026-11-01"}).status_code == 422
+    assert alice.get("/api/integrations/deliveries", params={"from": "yesterday"}).status_code == 422
+
+    # The last microsecond of the "to" day is still that day; the next day's midnight is not
+    with closing(sqlite3.connect(rig.locations.integration_path())) as connection, connection:
+        ids = [row[0] for row in connection.execute("SELECT id FROM webhook_deliveries ORDER BY id LIMIT 2")]
+        connection.execute("UPDATE webhook_deliveries SET created_at = ? WHERE id = ?", ("2026-10-01T23:59:59.999999+00:00", ids[0]))
+        connection.execute("UPDATE webhook_deliveries SET created_at = ? WHERE id = ?", ("2026-10-02T00:00:00+00:00", ids[1]))
+    assert [item["id"] for item in page(**{"from": "2026-10-01", "to": "2026-10-01"})["deliveries"]] == [ids[0]]
+
+
+def test_percentile_is_nearest_rank():
+
+    assert webhooks.percentile([], 50) is None
+    assert webhooks.percentile([10], 95) == 10
+    assert webhooks.percentile(list(range(1, 101)), 50) == 50 and webhooks.percentile(list(range(1, 101)), 95) == 95
+    assert webhooks.percentile([30, 10, 20], 50) == 20
+
+
 def test_payload_preview_masks_sensitive_values_recursively():
 
     preview = webhooks.masked({"data": {"contact_email": "a@b.example", "nested": [{"api_token": "t", "x": 1}],

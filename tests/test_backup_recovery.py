@@ -136,8 +136,10 @@ def test_a_backup_holds_every_store_verified_and_described(world):
     assert manifest["application"]["git_commit"] is None or len(manifest["application"]["git_commit"]) == 40
     assert manifest["totals"]["files"] == len(manifest["files"])
 
+    present = {name for name, item in databases.items() if item["present"]}
     assert backup.verify_backup(folder) == {"backup_id": manifest["backup_id"], "ok": True, "problems": [],
-                                            "files_checked": len(manifest["files"])}
+                                            "files_checked": len(manifest["files"]), "categories": [],
+                                            "databases": {name: "ok" if name in present else "absent" for name in databases}}
     listed = backup.list_backups(world.backups)
     assert [item["backup_id"] for item in listed] == [manifest["backup_id"]] and listed[0]["usable"]
 

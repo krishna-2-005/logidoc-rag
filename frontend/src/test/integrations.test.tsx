@@ -269,6 +269,152 @@ describe("TMS and ERP integrations", () => {
   })
 })
 
+const MONITORING = {
+  window: { start: "2026-11-07", end: "2026-11-13", days: 7 },
+  totals: { deliveries: 3, succeeded: 2, failed: 1, waiting: 0, cancelled: 0, attempts: 4, retry_attempts: 1, success_rate: 0.6667 },
+  last_success_at: "2026-11-13T10:00:00+00:00",
+  last_failure_at: "2026-11-13T09:00:00+00:00",
+  endpoints: [{ endpoint_id: 1, name: "ERP receiver", enabled: true, archived: false, deliveries: 3, succeeded: 2, failed: 1, waiting: 0, last_success_at: "2026-11-13T10:00:00+00:00", last_failure_at: "2026-11-13T09:00:00+00:00" }],
+  event_types: [{ event_type: "carrier.created", deliveries: 3, succeeded: 2, failed: 1, waiting: 0 }],
+  errors: [{ category: "http_4xx", attempts: 1 }, { category: "http_5xx", attempts: 1 }],
+  daily: ["2026-11-07", "2026-11-08", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13"].map((day, index) => ({
+    day, succeeded: index === 6 ? 2 : 0, failed: index === 6 ? 1 : 0, waiting: 0, attempts: index === 6 ? 4 : 0,
+    latency_p50_ms: index === 6 ? 120 : null, latency_p95_ms: index === 6 ? 480 : null,
+  })),
+}
+
+describe("Webhook monitoring", () => {
+  it("shows recorded outcomes with their denominators, failing endpoints and why attempts failed", async () => {
+    const asked: URL[] = []
+    mockApi({
+      "/api/integrations/webhooks/settings": SETTINGS,
+      "/api/integrations/webhooks": { endpoints: [ENDPOINT] },
+      "/api/integrations/monitoring/webhooks": (url: URL) => {
+        asked.push(url)
+        return { body: MONITORING }
+      },
+    })
+    renderPage(<Webhooks />, "/integrations/webhooks?tab=monitoring")
+
+    const figures = await screen.findByRole("region", { name: "Delivery figures" })
+    expect(within(figures).getByText("67%")).toBeInTheDocument()
+    expect(within(figures).getByText("2 delivered of 3 finished")).toBeInTheDocument()
+    expect(within(figures).getByText("Of 4 attempts in the period")).toBeInTheDocument()
+
+    const endpoints = screen.getByRole("table", { name: "Deliveries by endpoint" })
+    expect(within(endpoints).getByRole("link", { name: "ERP receiver" })).toHaveAttribute("href", "/integrations/webhooks/1")
+    expect(screen.getByRole("list", { name: "Failed attempts by error category" })).toHaveTextContent("http 4xx")
+    expect(screen.getAllByText("1 of 4", { selector: "span" })).toHaveLength(2) // one attempt in each category
+
+    // The numbers behind the charts are one click away
+    await userEvent.click(screen.getAllByText("Show the numbers")[1])
+    expect(screen.getByRole("table", { name: "Attempt latency per day" })).toHaveTextContent("480")
+
+    await userEvent.selectOptions(screen.getByLabelText("Period"), "30")
+    await userEvent.selectOptions(screen.getByLabelText("Event type"), "carrier.created")
+    await waitFor(() => expect(asked.some((url) => url.searchParams.get("days") === "30" && url.searchParams.get("event_type") === "carrier.created")).toBe(true))
+  })
+
+  it("says when nothing was delivered instead of drawing empty charts", async () => {
+    mockApi({
+      "/api/integrations/webhooks/settings": SETTINGS,
+      "/api/integrations/webhooks": { endpoints: [] },
+      "/api/integrations/monitoring/webhooks": { ...MONITORING, totals: { ...MONITORING.totals, deliveries: 0, succeeded: 0, failed: 0, attempts: 0, retry_attempts: 0, success_rate: null }, endpoints: [], event_types: [], errors: [], last_success_at: null, last_failure_at: null },
+    })
+    renderPage(<Webhooks />, "/integrations/webhooks?tab=monitoring")
+
+    expect(await screen.findByText("No delivery in this period")).toBeInTheDocument()
+    expect(screen.getByText("No delivery finished in the period")).toBeInTheDocument()
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument()
+  })
+
+  it("filters the delivery history by status, event type and day", async () => {
+    const asked: URL[] = []
+    mockApi({
+      "/api/integrations/webhooks/settings": SETTINGS,
+      "/api/integrations/webhooks": { endpoints: [ENDPOINT] },
+      "/api/integrations/deliveries": (url: URL) => {
+        asked.push(url)
+        return { body: { deliveries: [DELIVERY], total: 1, offset: 0, limit: 25 } }
+      },
+    })
+    renderPage(<Webhooks />, "/integrations/webhooks?tab=history")
+
+    const table = await screen.findByRole("table", { name: "Delivery history" })
+    expect(within(table).getByRole("link", { name: "#9" })).toHaveAttribute("href", "/integrations/deliveries/9")
+
+    await userEvent.selectOptions(screen.getByLabelText("Status"), "failed")
+    await userEvent.selectOptions(screen.getByLabelText("Event type"), "carrier.created")
+    await userEvent.type(screen.getByLabelText("Created from"), "2026-11-01")
+    await waitFor(() =>
+      expect(asked.some((url) => url.searchParams.get("status") === "failed" && url.searchParams.get("event_type") === "carrier.created" && url.searchParams.get("from") === "2026-11-01")).toBe(true),
+    )
+
+    await userEvent.type(screen.getByLabelText("Created to"), "2026-10-01")
+    expect(await screen.findByText("The start day is after the end day.")).toBeInTheDocument()
+  })
+})
+
+const DASHBOARD = {
+  window: { start: "2026-11-07", end: "2026-11-13", days: 7 },
+  totals: { runs: 2, succeeded: 0, partial: 1, failed: 1, interrupted: 0, imported: 42, updated: 0, rejected: 4, retries: 2, success_rate: 0 },
+  daily: ["2026-11-07", "2026-11-08", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13"].map((day, index) => ({
+    day, succeeded: 0, partial: index === 6 ? 1 : 0, failed: index === 6 ? 1 : 0, interrupted: 0, imported: index === 6 ? 42 : 0, updated: 0, rejected: index === 6 ? 4 : 0,
+  })),
+  errors: [{ category: "authentication_failed", runs: 1 }],
+  integrations: [
+    {
+      id: 1, name: "Sandbox TMS", provider: "sandbox_tms", enabled: true, connection_status: "connected", connection_error: null, last_success_at: "2026-11-13T09:00:05+00:00",
+      last_failure_at: null, next_sync_at: "2026-11-13T10:00:00+00:00", last_error: null, consecutive_failures: 0, running: false, records: { carriers: 5, shipments: 37 },
+      window: { runs: 1, succeeded: 0, partial: 1, failed: 0, interrupted: 0, imported: 42, updated: 0, rejected: 4, retries: 2, error_categories: {} }, recent_runs: [RUN],
+    },
+    {
+      id: 2, name: "Refused TMS", provider: "sandbox_tms", enabled: true, connection_status: "auth_failed", connection_error: "authentication_failed: refused", last_success_at: null,
+      last_failure_at: "2026-11-13T09:10:00+00:00", next_sync_at: "2026-11-13T09:11:00+00:00", last_error: "authentication_failed: refused", consecutive_failures: 1, running: false, records: {},
+      window: { runs: 1, succeeded: 0, partial: 0, failed: 1, interrupted: 0, imported: 0, updated: 0, rejected: 0, retries: 0, error_categories: { authentication_failed: 1 } }, recent_runs: [{ ...RUN, id: 4, status: "failed" }],
+    },
+  ],
+}
+
+describe("Integration health", () => {
+  it("shows recorded runs, records, retries, error categories and each integration", async () => {
+    mockApi({
+      "/api/integrations/connections": { integrations: [INTEGRATION], providers: [PROVIDER] },
+      "/api/integrations/monitoring/connections": DASHBOARD,
+    })
+    renderPage(<Integrations />, "/integrations?tab=health")
+
+    const figures = await screen.findByRole("region", { name: "Sync figures" })
+    expect(within(figures).getByText("0%")).toBeInTheDocument()
+    expect(within(figures).getByText("0 succeeded of 2 finished")).toBeInTheDocument()
+    expect(within(figures).getByText("42")).toBeInTheDocument()
+
+    expect(screen.getByRole("list", { name: "Sync runs by error category" })).toHaveTextContent("authentication failed")
+    expect(screen.getByText("1 of 2", { selector: "span" })).toBeInTheDocument()
+
+    const table = screen.getByRole("table", { name: "Integration health" })
+    const refused = within(table).getByRole("link", { name: "Refused TMS" }).closest("tr") as HTMLElement
+    expect(within(refused).getByText("Credential refused")).toBeInTheDocument()
+    expect(within(refused).getByText("authentication failed: 1")).toBeInTheDocument()
+    expect(within(refused).getByText("1 failed in a row")).toBeInTheDocument()
+
+    await userEvent.click(screen.getAllByText("Show the numbers")[0])
+    expect(screen.getByRole("table", { name: "Sync runs per day" })).toHaveTextContent("13 Nov")
+  })
+
+  it("shows an empty period honestly", async () => {
+    mockApi({
+      "/api/integrations/connections": { integrations: [], providers: [PROVIDER] },
+      "/api/integrations/monitoring/connections": { ...DASHBOARD, totals: { ...DASHBOARD.totals, runs: 0, partial: 0, failed: 0, imported: 0, rejected: 0, retries: 0, success_rate: null }, errors: [], integrations: [] },
+    })
+    renderPage(<Integrations />, "/integrations?tab=health")
+
+    expect(await screen.findByText("No sync run in this period")).toBeInTheDocument()
+    expect(screen.getByText("No run finished in the period")).toBeInTheDocument()
+    expect(screen.getByText("No integration configured")).toBeInTheDocument()
+  })
+})
+
 describe("Navigation", () => {
   const SHELL = {
     "/api/overview": { empty: true },

@@ -38,7 +38,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_info (version INTEGER NOT NULL);
@@ -252,8 +252,16 @@ TRIGGERS = "".join(
     for table in APPEND_ONLY
 )
 
-# Version n: the statements that bring version n-1 to n (none yet)
-MIGRATIONS = {}
+# Version n: the statements that bring version n-1 to n. A new store is created at version 1 and takes the
+# same steps, so every store has the same tables whatever version it started from.
+MIGRATIONS = {
+    # Which sync run holds an integration's lease (a late worker checks it before every write), and the
+    # records a run ignored because a newer version was already stored
+    2: (
+        "ALTER TABLE integrations ADD COLUMN lease_owner TEXT",
+        "ALTER TABLE sync_runs ADD COLUMN stale INTEGER NOT NULL DEFAULT 0",
+    ),
+}
 
 
 class StoreVersionError(RuntimeError):
@@ -301,8 +309,8 @@ class IntegrationStore:
             connection.executescript(SCHEMA + TRIGGERS)
             row = connection.execute("SELECT version FROM schema_info").fetchone()
             if row is None:
-                connection.execute("INSERT INTO schema_info (version) VALUES (?)", (SCHEMA_VERSION,))
-                version = SCHEMA_VERSION
+                connection.execute("INSERT INTO schema_info (version) VALUES (1)")
+                version = 1
             else:
                 version = row[0]
 

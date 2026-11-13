@@ -44,6 +44,7 @@ Nothing here returns a signing secret (other than once, on creation and
 rotation), a credential, a path or a host name.
 """
 
+from datetime import date
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -245,11 +246,37 @@ def endpoint_test(endpoint_id: int, principal=Manage, state: ApiState = Depends(
 @router.get("/deliveries", response_model=schemas.DeliveryPage, responses=schemas.ERRORS)
 def delivery_list(principal=Manage, state: ApiState = Depends(get_state), endpoint_id: int | None = Query(None, ge=1),
                   status: list[Literal["pending", "sending", "retrying", "succeeded", "failed", "cancelled"]] = Query(default=[]),
-                  offset: int = Query(0, ge=0, le=1000000), limit: int = Query(50, ge=1, le=200)):
+                  offset: int = Query(0, ge=0, le=1000000), limit: int = Query(50, ge=1, le=200),
+                  event_type: list[str] = Query(default=[], max_length=20),
+                  start: date | None = Query(None, alias="from"), end: date | None = Query(None, alias="to")):
+    """Deliveries, newest first; filters: endpoint, status, event type, and the day created (from, to: YYYY-MM-DD, UTC)."""
 
-    page = runtime(state).webhooks.deliveries(endpoint_id, tuple(status), offset, limit)
+    if start and end and start > end:
+        raise HTTPException(status_code=422, detail="from is after to.")
+
+    page = runtime(state).webhooks.deliveries(endpoint_id, tuple(status), offset, limit, tuple(event_type),
+                                              start.isoformat() if start else None, end.isoformat() if end else None)
 
     return {**page, "offset": offset, "limit": limit}
+
+
+# ------------------------------------------------------------
+# Monitoring (recorded deliveries and sync runs only)
+# ------------------------------------------------------------
+
+@router.get("/monitoring/webhooks", response_model=schemas.WebhookMonitoring, responses=schemas.ERRORS)
+def webhook_monitoring(principal=Manage, state: ApiState = Depends(get_state), days: int = Query(14, ge=1, le=90),
+                       endpoint_id: int | None = Query(None, ge=1), event_type: str | None = Query(None, max_length=60)):
+    """Delivery outcomes, attempts, retries, failing endpoints, error categories and daily latency over the window."""
+
+    return runtime(state).webhooks.monitoring(days, endpoint_id, event_type)
+
+
+@router.get("/monitoring/connections", response_model=schemas.IntegrationDashboard, responses=schemas.ERRORS)
+def integration_monitoring(principal=Manage, state: ApiState = Depends(get_state), days: int = Query(30, ge=1, le=90)):
+    """Each integration's health and the sync outcomes, records and error categories per day over the window."""
+
+    return runtime(state).integrations.dashboard(days)
 
 
 @router.get("/deliveries/{delivery_id}", response_model=schemas.WebhookDeliveryDetail, responses=schemas.ERRORS)

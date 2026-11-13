@@ -76,6 +76,13 @@ its checksum. An interrupted backup (power cut, Ctrl+C, a killed process)
 stays `<id>.partial` with status `in_progress` or `failed`. It is listed as
 incomplete and cannot be restored or activated.
 
+Later checks (`verify`, and the scheduled verification and restore drills in
+[AUTOMATED_BACKUP_OPERATIONS.md](AUTOMATED_BACKUP_OPERATIONS.md)) repeat all of
+this and also run `PRAGMA integrity_check` on every database copy and compare
+its schema version, table row counts and foreign-key problems with what the
+manifest recorded. Each problem is reported with a category (`manifest`,
+`incomplete`, `missing_file`, `checksum`, `integrity`, `contents`).
+
 ## ChromaDB
 
 ChromaDB runs embedded (`PersistentClient`). Its folder holds `chroma.sqlite3`

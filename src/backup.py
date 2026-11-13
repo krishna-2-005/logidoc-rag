@@ -896,33 +896,182 @@ def find_backup(backup_root, backup_id):
 
 def verify_backup(folder):
     """
-    {"backup_id", "ok", "problems", "files_checked"}: the manifest is
-    intact and complete, every file is present with its size and checksum,
-    and every database copy passes SQLite's integrity check.
+    {"backup_id", "ok", "problems", "files_checked", "categories",
+    "databases"}: the manifest is intact and complete, every file is present
+    with its size and checksum, every database copy passes SQLite's integrity
+    check, and holds what was recorded when the backup was made (schema
+    version, the row count of every table, no new foreign-key problems).
+
+    categories names what kinds of problem were found: manifest, incomplete,
+    missing_file, checksum, integrity, contents. databases: {store: "ok",
+    "failed" or "absent"}.
     """
 
     folder = Path(folder)
     manifest, problems = load_manifest(folder)
+    categories = set()
 
     if manifest is None:
-        return {"backup_id": folder.name, "ok": False, "problems": problems, "files_checked": 0}
+        return {"backup_id": folder.name.removesuffix(PARTIAL), "ok": False, "problems": problems, "files_checked": 0,
+                "categories": ["manifest"], "databases": {}}
+
+    if problems:
+        categories.add("manifest")
 
     if folder.name.endswith(PARTIAL) or manifest.get("status") != COMPLETE:
         problems.append(f"The backup is not complete (status {manifest.get('status')}).")
+        categories.add("incomplete")
 
     files = manifest.get("files") or []
-    problems += check_files(folder, files)
+
+    for problem in check_files(folder, files):
+        problems.append(problem)
+        categories.add("missing_file" if problem.startswith("missing ") else "checksum")
+
+    databases = {}
 
     for name, item in ((manifest.get("components") or {}).get("databases") or {}).get("items", {}).items():
-        if item.get("present") and (folder / item["file"]).is_file():
-            try:
-                integrity = database_facts(folder / item["file"])["integrity"]
-            except sqlite3.Error:
-                integrity = "unreadable"
-            if integrity != "ok":
-                problems.append(f"the {name} copy fails its integrity check ({integrity})")
 
-    return {"backup_id": manifest.get("backup_id"), "ok": not problems, "problems": problems, "files_checked": len(files)}
+        if not item.get("present"):
+            databases[name] = "absent"
+            continue
+
+        if not (folder / item["file"]).is_file():
+            databases[name] = "failed"
+            continue
+
+        try:
+            facts = database_facts(folder / item["file"])
+        except sqlite3.Error:
+            facts = {"integrity": "unreadable"}
+
+        found = []
+
+        if facts["integrity"] != "ok":
+            found.append(f"the {name} copy fails its integrity check ({facts['integrity']})")
+            categories.add("integrity")
+        else:
+            recorded = item.get("tables") or {}
+            changed = sorted(table for table in set(recorded) | set(facts["tables"])
+                             if recorded.get(table) != facts["tables"].get(table))
+            if facts["schema_version"] != item.get("schema_version"):
+                found.append(f"the {name} copy has schema version {facts['schema_version']}, recorded "
+                             f"{item.get('schema_version')}")
+            if changed:
+                found.append(f"the {name} copy holds other rows than recorded ({', '.join(changed[:5])})")
+            if (facts["foreign_key_problems"] or 0) > (item.get("foreign_key_problems") or 0):
+                found.append(f"the {name} copy has foreign-key problems it did not have when backed up")
+            if found:
+                categories.add("contents")
+
+        problems += found
+        databases[name] = "failed" if found else "ok"
+
+    return {"backup_id": manifest.get("backup_id"), "ok": not problems, "problems": problems, "files_checked": len(files),
+            "categories": sorted(categories), "databases": databases}
+
+
+DRILL_PREFIX = ".restore-drill-"
+
+
+def discard_drill(target, drill_root):
+    """
+    Removes a restore drill's copy: only a folder a drill made (directly in
+    drill_root, named like a drill, not a link). The copy holds business data,
+    so it is never left behind when it can be removed. Returns whether it is gone.
+    """
+
+    target, drill_root = Path(target), Path(drill_root)
+
+    if not target.exists():
+        return True
+
+    if (target.parent.resolve() != drill_root.resolve() or not target.name.startswith(DRILL_PREFIX)
+            or not target.is_dir() or is_link(target)):
+        return False
+
+    import gc
+
+    gc.collect()  # the index client of the drill may still hold its files (Windows)
+
+    try:
+        retrying(lambda: shutil.rmtree(target))
+    except OSError:
+        return False
+
+    return not target.exists()
+
+
+def restore_drill(folder, drill_root, *, protected=(), open_index=True, collection_name="logistics_documents",
+                  supported=None, now=None, disk_usage=shutil.disk_usage, keep=False):
+    """
+    Proves a backup can be restored: restore_backup into a new folder in
+    drill_root (isolated: never a live data, index or backup folder, which
+    restore_backup refuses), with every check of a real restore (checksums,
+    compatibility, each database's integrity, schema version, rows and
+    foreign keys, the documents, and the index opened with ChromaDB). The
+    restored copy is then removed (keep=True keeps it, for inspection).
+
+    Returns {"backup_id", "kind": "restore_drill", "at", "ok", "problems",
+    "categories", "steps", "duration_ms", "copy_removed"}. Nothing is raised
+    for a failed drill: the report says why (refused, insufficient_space,
+    restore, cleanup when the copy could not be removed, or the error's
+    category).
+    """
+
+    folder, drill_root = Path(folder), Path(drill_root)
+    started, clock = now or utc_now(), time.monotonic()
+    manifest, _ = load_manifest(folder)
+    backup_id = (manifest or {}).get("backup_id") or folder.name.removesuffix(PARTIAL)
+    result = {"backup_id": backup_id, "kind": "restore_drill", "at": iso(started), "ok": False, "problems": [],
+              "categories": [], "steps": {}, "duration_ms": 0, "copy_removed": True}
+
+    needed = int(((manifest or {}).get("totals") or {}).get("bytes") or 0)
+    drill_root.mkdir(parents=True, exist_ok=True)
+    free = disk_usage(drill_root).free
+
+    if needed and free < needed * 1.1 + 64 * 1048576:
+        result["problems"] = [f"Not enough free space for the drill: {needed // 1048576 + 1} MB needed, "
+                              f"{free // 1048576} MB free."]
+        result["categories"] = ["insufficient_space"]
+        result["duration_ms"] = int((time.monotonic() - clock) * 1000)
+        return result
+
+    target = drill_root / f"{DRILL_PREFIX}{backup_id}-{secrets.token_hex(3)}"
+
+    try:
+        report = restore_backup(folder, target, protected=protected, open_index=open_index,
+                                collection_name=collection_name, supported=supported, now=started)
+        result["ok"] = report["status"] == "restored"
+        result["problems"] = list(report["problems"])
+        result["categories"] = [] if result["ok"] else ["restore"]
+        steps = report["steps"]
+        result["steps"] = {
+            "checksums": steps.get("checksums"),
+            "databases": {name: ("ok" if step.get("ok") else "failed") for name, step in (steps.get("databases") or {}).items()},
+            "documents": (steps.get("documents") or {}).get("pdfs"),
+            # A sentence (no index), or the vectors recorded at backup time and opened from the restored copy
+            "vector_index": steps.get("vector_index"),
+        }
+    except RestoreRefused as error:
+        result["problems"] = [str(error)]
+        result["categories"] = ["refused"]
+    except Exception as error:  # noqa: BLE001 - a drill reports, it never raises into the schedule
+        result["problems"] = [safe_message(error)]
+        result["categories"] = [category_of(error)]
+    finally:
+        if not keep:
+            result["copy_removed"] = discard_drill(target, drill_root)
+
+    if not result["copy_removed"]:
+        # The backup may be fine, but the copy takes disk space: a failure, so the alert asks for its removal
+        result["ok"] = False
+        result["categories"] = result["categories"] or ["cleanup"]
+        result["problems"].append(f"The drill copy {target.name} could not be removed from the drill folder.")
+
+    result["duration_ms"] = int((time.monotonic() - clock) * 1000)
+
+    return result
 
 
 def compatibility(manifest, supported=None):

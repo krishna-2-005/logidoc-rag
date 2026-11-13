@@ -175,6 +175,24 @@
         "title": "AskBody",
         "type": "object"
       },
+      "AttemptErrors": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "attempts"
+        ],
+        "title": "AttemptErrors",
+        "type": "object"
+      },
       "AuditFigures": {
         "properties": {
           "arithmetic_checked": {
@@ -384,6 +402,123 @@
         "title": "BackupBody",
         "type": "object"
       },
+      "BackupCheck": {
+        "description": "One recorded check of a backup: verify (manifest, checksums, each database's\nintegrity and recorded contents) or restore_drill (restored into an\nisolated folder and checked like a real restore, then removed).\ncategories: what kinds of problem were found (empty when ok).",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "backup_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Id"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "databases": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Databases"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "files_checked": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files Checked"
+          },
+          "kind": {
+            "enum": [
+              "verify",
+              "restore_drill"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "origin": {
+            "enum": [
+              "manual",
+              "scheduled"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "origin",
+          "backup_id",
+          "ok",
+          "categories",
+          "problems"
+        ],
+        "title": "BackupCheck",
+        "type": "object"
+      },
+      "BackupChecks": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/BackupCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "checks"
+        ],
+        "title": "BackupChecks",
+        "type": "object"
+      },
       "BackupError": {
         "properties": {
           "category": {
@@ -456,6 +591,16 @@
             ],
             "title": "Label"
           },
+          "last_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "origin": {
             "enum": [
               "manual",
@@ -517,6 +662,16 @@
           },
           "status": {
             "$ref": "#/components/schemas/BackupStatus"
+          },
+          "verification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerificationSchedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2285,6 +2440,64 @@
         "title": "DeliveryAttempt",
         "type": "object"
       },
+      "DeliveryDay": {
+        "description": "latency: nearest-rank median and 95th percentile of the day's attempt durations; null without attempts.",
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "latency_p50_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency P50 Ms"
+          },
+          "latency_p95_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency P95 Ms"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "succeeded",
+          "failed",
+          "waiting",
+          "attempts",
+          "latency_p50_ms",
+          "latency_p95_ms"
+        ],
+        "title": "DeliveryDay",
+        "type": "object"
+      },
       "DeliveryFigures": {
         "properties": {
           "average_delay_days": {
@@ -2366,6 +2579,62 @@
           "limit"
         ],
         "title": "DeliveryPage",
+        "type": "object"
+      },
+      "DeliveryTotals": {
+        "description": "success_rate: succeeded / (succeeded + failed); null when none finished. retry_attempts: attempts after the first.",
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "integer"
+          },
+          "deliveries": {
+            "title": "Deliveries",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "retry_attempts": {
+            "title": "Retry Attempts",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "success_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success Rate"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deliveries",
+          "succeeded",
+          "failed",
+          "waiting",
+          "cancelled",
+          "attempts",
+          "retry_attempts",
+          "success_rate"
+        ],
+        "title": "DeliveryTotals",
         "type": "object"
       },
       "DocumentFigures": {
@@ -2669,6 +2938,78 @@
         "title": "EndpointChanges",
         "type": "object"
       },
+      "EndpointHealth": {
+        "properties": {
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "deliveries": {
+            "title": "Deliveries",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "endpoint_id": {
+            "title": "Endpoint Id",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endpoint_id",
+          "name",
+          "enabled",
+          "archived",
+          "deliveries",
+          "succeeded",
+          "failed",
+          "waiting",
+          "last_success_at",
+          "last_failure_at"
+        ],
+        "title": "EndpointHealth",
+        "type": "object"
+      },
       "EndpointStats": {
         "description": "Deliveries created in the last window_days days (tests excluded). success_rate: null when none completed.",
         "properties": {
@@ -2762,6 +3103,39 @@
           "detail"
         ],
         "title": "ErrorResponse",
+        "type": "object"
+      },
+      "EventTypeCount": {
+        "properties": {
+          "deliveries": {
+            "title": "Deliveries",
+            "type": "integer"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event_type",
+          "deliveries",
+          "succeeded",
+          "failed",
+          "waiting"
+        ],
+        "title": "EventTypeCount",
         "type": "object"
       },
       "EventTypeInfo": {
@@ -4770,6 +5144,46 @@
         "title": "IntegrationChanges",
         "type": "object"
       },
+      "IntegrationDashboard": {
+        "properties": {
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/SyncDay"
+            },
+            "title": "Daily",
+            "type": "array"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/SyncErrors"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "integrations": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationHealth"
+            },
+            "title": "Integrations",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SyncTotalsWindow"
+          },
+          "window": {
+            "$ref": "#/components/schemas/Window"
+          }
+        },
+        "required": [
+          "window",
+          "totals",
+          "daily",
+          "errors",
+          "integrations"
+        ],
+        "title": "IntegrationDashboard",
+        "type": "object"
+      },
       "IntegrationDetail": {
         "properties": {
           "changes": {
@@ -4969,6 +5383,135 @@
           "changes"
         ],
         "title": "IntegrationDetail",
+        "type": "object"
+      },
+      "IntegrationHealth": {
+        "properties": {
+          "connection_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Error"
+          },
+          "connection_status": {
+            "enum": [
+              "untested",
+              "connected",
+              "auth_failed",
+              "error"
+            ],
+            "title": "Connection Status",
+            "type": "string"
+          },
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_sync_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Sync At"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "recent_runs": {
+            "items": {
+              "$ref": "#/components/schemas/SyncRun"
+            },
+            "title": "Recent Runs",
+            "type": "array"
+          },
+          "records": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Records",
+            "type": "object"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "window": {
+            "$ref": "#/components/schemas/SyncWindow"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "enabled",
+          "connection_status",
+          "connection_error",
+          "last_success_at",
+          "last_failure_at",
+          "next_sync_at",
+          "last_error",
+          "consecutive_failures",
+          "running",
+          "records",
+          "window",
+          "recent_runs"
+        ],
+        "title": "IntegrationHealth",
         "type": "object"
       },
       "IntegrationList": {
@@ -7759,6 +8302,72 @@
         "title": "StateChange",
         "type": "object"
       },
+      "SyncDay": {
+        "properties": {
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "interrupted": {
+            "title": "Interrupted",
+            "type": "integer"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "integer"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "succeeded",
+          "partial",
+          "failed",
+          "interrupted",
+          "imported",
+          "updated",
+          "rejected"
+        ],
+        "title": "SyncDay",
+        "type": "object"
+      },
+      "SyncErrors": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "category",
+          "runs"
+        ],
+        "title": "SyncErrors",
+        "type": "object"
+      },
       "SyncRejection": {
         "properties": {
           "at": {
@@ -7894,6 +8503,11 @@
           },
           "retries": {
             "title": "Retries",
+            "type": "integer"
+          },
+          "stale": {
+            "default": 0,
+            "title": "Stale",
             "type": "integer"
           },
           "started_at": {
@@ -8048,6 +8662,11 @@
             "title": "Retries",
             "type": "integer"
           },
+          "stale": {
+            "default": 0,
+            "title": "Stale",
+            "type": "integer"
+          },
           "started_at": {
             "title": "Started At",
             "type": "string"
@@ -8172,6 +8791,133 @@
           "runs"
         ],
         "title": "SyncTotals",
+        "type": "object"
+      },
+      "SyncTotalsWindow": {
+        "description": "success_rate: succeeded / finished runs (succeeded, partial, failed); null without any.",
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "interrupted": {
+            "title": "Interrupted",
+            "type": "integer"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "integer"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "retries": {
+            "title": "Retries",
+            "type": "integer"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "success_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success Rate"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "succeeded",
+          "partial",
+          "failed",
+          "interrupted",
+          "imported",
+          "updated",
+          "rejected",
+          "retries",
+          "success_rate"
+        ],
+        "title": "SyncTotalsWindow",
+        "type": "object"
+      },
+      "SyncWindow": {
+        "properties": {
+          "error_categories": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Error Categories",
+            "type": "object"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "interrupted": {
+            "title": "Interrupted",
+            "type": "integer"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "integer"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "retries": {
+            "title": "Retries",
+            "type": "integer"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "succeeded",
+          "partial",
+          "failed",
+          "interrupted",
+          "imported",
+          "updated",
+          "rejected",
+          "retries",
+          "error_categories"
+        ],
+        "title": "SyncWindow",
         "type": "object"
       },
       "TimelineEntry": {
@@ -8304,6 +9050,58 @@
           "current"
         ],
         "title": "ValueChange",
+        "type": "object"
+      },
+      "VerificationSchedule": {
+        "description": "Hours between scheduled checks (0: off), and the last scheduled ones.",
+        "properties": {
+          "drill_hours": {
+            "title": "Drill Hours",
+            "type": "integer"
+          },
+          "last_drill": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_verification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verify_hours": {
+            "title": "Verify Hours",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "verify_hours",
+          "drill_hours",
+          "last_verification",
+          "last_drill"
+        ],
+        "title": "VerificationSchedule",
+        "type": "object"
+      },
+      "VerifyBody": {
+        "properties": {
+          "restore_drill": {
+            "default": false,
+            "title": "Restore Drill",
+            "type": "boolean"
+          }
+        },
+        "title": "VerifyBody",
         "type": "object"
       },
       "WebhookConfiguration": {
@@ -8983,6 +9781,78 @@
         "title": "WebhookEndpointList",
         "type": "object"
       },
+      "WebhookMonitoring": {
+        "properties": {
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryDay"
+            },
+            "title": "Daily",
+            "type": "array"
+          },
+          "endpoints": {
+            "items": {
+              "$ref": "#/components/schemas/EndpointHealth"
+            },
+            "title": "Endpoints",
+            "type": "array"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptErrors"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "event_types": {
+            "items": {
+              "$ref": "#/components/schemas/EventTypeCount"
+            },
+            "title": "Event Types",
+            "type": "array"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/DeliveryTotals"
+          },
+          "window": {
+            "$ref": "#/components/schemas/Window"
+          }
+        },
+        "required": [
+          "window",
+          "totals",
+          "last_success_at",
+          "last_failure_at",
+          "endpoints",
+          "event_types",
+          "errors",
+          "daily"
+        ],
+        "title": "WebhookMonitoring",
+        "type": "object"
+      },
       "WebhookSecretIssued": {
         "description": "The signing secret, shown this once: store it in the receiver now.",
         "properties": {
@@ -9004,6 +9874,29 @@
           "note"
         ],
         "title": "WebhookSecretIssued",
+        "type": "object"
+      },
+      "Window": {
+        "properties": {
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "days"
+        ],
+        "title": "Window",
         "type": "object"
       }
     }
@@ -9210,6 +10103,175 @@
           }
         },
         "summary": "Start Backup",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/admin/backups/checks": {
+      "get": {
+        "description": "Recorded verifications and restore drills, newest first (append-only history beside the backups).",
+        "operationId": "backup_checks_api_admin_backups_checks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupChecks"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Backup Checks",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/admin/backups/{backup_id}/verify": {
+      "post": {
+        "description": "Checks one backup again now (manifest, checksums, integrity, recorded\ncontents); with restore_drill, also restores it into an isolated folder and\nchecks it like a real restore. The result is added to the history.",
+        "operationId": "verify_backup_api_admin_backups__backup_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backup_id",
+            "required": true,
+            "schema": {
+              "title": "Backup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A backup or check is running"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Verify Backup",
         "tags": [
           "operations"
         ]
@@ -13275,6 +14337,7 @@
     },
     "/api/integrations/deliveries": {
       "get": {
+        "description": "Deliveries, newest first; filters: endpoint, status, event type, and the day created (from, to: YYYY-MM-DD, UTC).",
         "operationId": "delivery_list_api_integrations_deliveries_get",
         "parameters": [
           {
@@ -13337,6 +14400,54 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Event Type",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
             }
           }
         ],
@@ -14042,6 +15153,192 @@
           }
         },
         "summary": "Job Runs",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/monitoring/connections": {
+      "get": {
+        "description": "Each integration's health and the sync outcomes, records and error categories per day over the window.",
+        "operationId": "integration_monitoring_api_integrations_monitoring_connections_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationDashboard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Integration Monitoring",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/integrations/monitoring/webhooks": {
+      "get": {
+        "description": "Delivery outcomes, attempts, retries, failing endpoints, error categories and daily latency over the window.",
+        "operationId": "webhook_monitoring_api_integrations_monitoring_webhooks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 14,
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endpoint_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Endpoint Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 60,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookMonitoring"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Webhook Monitoring",
         "tags": [
           "integrations"
         ]

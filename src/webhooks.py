@@ -85,6 +85,7 @@ import ssl
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 
 import authz
@@ -893,7 +894,11 @@ class WebhookService:
     # Deliveries (reading)
     # --------------------------------------------------------
 
-    def deliveries(self, endpoint_id=None, statuses=(), offset=0, limit=50):
+    def deliveries(self, endpoint_id=None, statuses=(), offset=0, limit=50, event_types=(), start=None, end=None):
+        """
+        A page of deliveries, newest first. start / end: dates (YYYY-MM-DD, UTC)
+        the delivery was created on or after / on or before.
+        """
 
         store = self.store()
 
@@ -910,16 +915,134 @@ class WebhookService:
             where.append(f"d.status IN ({', '.join('?' for _ in statuses)})")
             params += list(statuses)
 
+        if event_types:
+            where.append(f"e.event_type IN ({', '.join('?' for _ in event_types)})")
+            params += list(event_types)
+
+        if start:
+            where.append("d.created_at >= ?")
+            params.append(f"{start}T00:00:00")
+
+        if end:
+            # Before the next day's midnight: the whole last day, whatever the timestamps' precision
+            where.append("d.created_at < ?")
+            params.append(f"{date.fromisoformat(str(end)) + timedelta(days=1)}T00:00:00")
+
         condition = f" WHERE {' AND '.join(where)}" if where else ""
+        joined = ("FROM webhook_deliveries d JOIN webhook_events e ON e.id = d.event_id "
+                  "JOIN webhook_endpoints w ON w.id = d.endpoint_id")
 
         with store.read() as connection:
-            total = connection.execute(f"SELECT COUNT(*) FROM webhook_deliveries d{condition}", params).fetchone()[0]
+            total = connection.execute(f"SELECT COUNT(*) {joined}{condition}", params).fetchone()[0]
             rows = connection.execute(
-                "SELECT d.*, e.event_type, e.occurred_at, w.name AS endpoint_name FROM webhook_deliveries d "
-                "JOIN webhook_events e ON e.id = d.event_id JOIN webhook_endpoints w ON w.id = d.endpoint_id"
-                f"{condition} ORDER BY d.id DESC LIMIT ? OFFSET ?", (*params, int(limit), int(offset))).fetchall()
+                f"SELECT d.*, e.event_type, e.occurred_at, w.name AS endpoint_name {joined}{condition} "
+                "ORDER BY d.id DESC LIMIT ? OFFSET ?", (*params, int(limit), int(offset))).fetchall()
 
         return {"deliveries": [self.delivery_view(row) for row in rows], "total": total}
+
+    def monitoring(self, days=14, endpoint_id=None, event_type=None):
+        """
+        Delivery figures over the last `days` days, from the stored records only
+        (test deliveries left out): outcome counts, attempts and retries, the
+        endpoints with failures first, the event types, the error categories of
+        the attempts, and per day the outcomes and the attempt latency (median
+        and 95th percentile of the attempts' measured duration).
+        success_rate is succeeded / (succeeded + failed): deliveries still
+        waiting are not counted, and it is null when none finished.
+        """
+
+        now = self.clock()
+        first_day = (now - timedelta(days=days - 1)).date()
+        since = f"{first_day.isoformat()}T00:00:00"
+        result = {"window": {"start": first_day.isoformat(), "end": now.date().isoformat(), "days": days},
+                  "totals": {"deliveries": 0, "succeeded": 0, "failed": 0, "waiting": 0, "cancelled": 0, "attempts": 0,
+                             "retry_attempts": 0, "success_rate": None},
+                  "last_success_at": None, "last_failure_at": None, "endpoints": [], "event_types": [], "errors": [],
+                  "daily": []}
+        store = self.store()
+        daily = {(first_day + timedelta(days=offset)).isoformat(): {"succeeded": 0, "failed": 0, "waiting": 0, "durations": []}
+                 for offset in range(days)}
+
+        if store is not None:
+            where, params = ["d.test = 0", "d.created_at >= ?"], [since]
+            if endpoint_id is not None:
+                where.append("d.endpoint_id = ?")
+                params.append(endpoint_id)
+            if event_type:
+                where.append("e.event_type = ?")
+                params.append(event_type)
+            condition = " AND ".join(where)
+            joined = "FROM webhook_deliveries d JOIN webhook_events e ON e.id = d.event_id"
+
+            with store.read() as connection:
+                deliveries = connection.execute(f"SELECT d.*, e.event_type {joined} WHERE {condition}", params).fetchall()
+                attempts = connection.execute(
+                    f"SELECT a.started_at, a.duration_ms, a.outcome, a.error, a.attempt FROM delivery_attempts a "
+                    f"JOIN webhook_deliveries d ON d.id = a.delivery_id JOIN webhook_events e ON e.id = d.event_id "
+                    f"WHERE {condition} AND a.started_at >= ?", (*params, since)).fetchall()
+                endpoints = {row["id"]: row for row in connection.execute("SELECT * FROM webhook_endpoints")}
+
+            self.fill_monitoring(result, daily, deliveries, attempts, endpoints)
+
+        result["daily"] = [{"day": day, "succeeded": item["succeeded"], "failed": item["failed"], "waiting": item["waiting"],
+                            "attempts": len(item["durations"]), "latency_p50_ms": percentile(item["durations"], 50),
+                            "latency_p95_ms": percentile(item["durations"], 95)} for day, item in daily.items()]
+
+        return result
+
+    @staticmethod
+    def fill_monitoring(result, daily, deliveries, attempts, endpoints):
+
+        totals = result["totals"]
+        by_endpoint, by_type, errors = {}, {}, {}
+        waiting_states = ("pending", "retrying", "sending")
+
+        for row in deliveries:
+            state = "waiting" if row["status"] in waiting_states else row["status"]
+            totals["deliveries"] += 1
+            totals[state] = totals.get(state, 0) + 1
+            day = daily.get(row["created_at"][:10])
+            if day is not None and state in ("succeeded", "failed", "waiting"):
+                day[state] += 1
+            for group, key in ((by_endpoint, row["endpoint_id"]), (by_type, row["event_type"])):
+                entry = group.setdefault(key, {"deliveries": 0, "succeeded": 0, "failed": 0, "waiting": 0,
+                                               "last_success_at": None, "last_failure_at": None})
+                entry["deliveries"] += 1
+                if state in ("succeeded", "failed", "waiting"):
+                    entry[state] += 1
+                if state == "succeeded":
+                    entry["last_success_at"] = max(filter(None, [entry["last_success_at"], row["completed_at"]]), default=None)
+                if state == "failed":
+                    entry["last_failure_at"] = max(filter(None, [entry["last_failure_at"], row["completed_at"]]), default=None)
+
+        for row in attempts:
+            totals["attempts"] += 1
+            if row["attempt"] and row["attempt"] > 1:
+                totals["retry_attempts"] += 1
+            if row["error"]:
+                errors[row["error"]] = errors.get(row["error"], 0) + 1
+            day = daily.get(row["started_at"][:10])
+            if day is not None and row["duration_ms"] is not None:
+                day["durations"].append(row["duration_ms"])
+
+        finished = totals["succeeded"] + totals["failed"]
+        totals["success_rate"] = round(totals["succeeded"] / finished, 4) if finished else None
+        result["last_success_at"] = max((entry["last_success_at"] for entry in by_endpoint.values() if entry["last_success_at"]),
+                                        default=None)
+        result["last_failure_at"] = max((entry["last_failure_at"] for entry in by_endpoint.values() if entry["last_failure_at"]),
+                                        default=None)
+
+        result["endpoints"] = sorted(
+            ({"endpoint_id": key, "name": endpoints[key]["name"] if key in endpoints else f"Endpoint {key}",
+              "enabled": bool(endpoints[key]["enabled"]) if key in endpoints else False,
+              "archived": bool(endpoints[key]["archived_at"]) if key in endpoints else True, **entry}
+             for key, entry in by_endpoint.items()),
+            key=lambda item: (-item["failed"], -item["waiting"], item["name"].casefold()))
+        result["event_types"] = sorted(({"event_type": key, **{name: entry[name] for name in
+                                                               ("deliveries", "succeeded", "failed", "waiting")}}
+                                        for key, entry in by_type.items()), key=lambda item: -item["deliveries"])
+        result["errors"] = sorted(({"category": key, "attempts": count} for key, count in errors.items()),
+                                  key=lambda item: (-item["attempts"], item["category"]))
 
     @staticmethod
     def delivery_view(row):
@@ -1315,6 +1438,17 @@ class WebhookService:
                                "consecutive_failures": failing, "failed_deliveries": failed})
 
         return result
+
+
+def percentile(values, rank):
+    """The nearest-rank percentile of values, or None without any."""
+
+    if not values:
+        return None
+
+    ordered = sorted(values)
+
+    return ordered[max(0, min(len(ordered) - 1, -(-rank * len(ordered) // 100) - 1))]
 
 
 def display_url(url):

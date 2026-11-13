@@ -5,6 +5,7 @@ import type {
   DeliveryPage,
   ImportedRecordDetail,
   Integration,
+  IntegrationDashboard,
   IntegrationDetail,
   IntegrationList,
   JobRunPage,
@@ -17,6 +18,7 @@ import type {
   WebhookDeliveryDetail,
   WebhookEndpoint,
   WebhookEndpointDetail,
+  WebhookMonitoring,
   WebhookSecretIssued,
 } from "@/lib/types"
 
@@ -36,7 +38,37 @@ export const useEndpoints = (includeArchived: boolean) =>
 export const useEndpoint = (id: number | null) =>
   useQuery({ queryKey: [KEY, "endpoint", id], queryFn: () => get<WebhookEndpointDetail>(`/api/integrations/webhooks/${id}`), enabled: id !== null, refetchInterval: LIVE })
 
-export const useDeliveries = (filters: { endpoint_id?: number; status?: string[]; offset?: number; limit?: number }) =>
+export interface DeliveryFilters {
+  endpoint_id?: number
+  status?: string[]
+  event_type?: string[]
+  /** Created on or after this day (YYYY-MM-DD, UTC) */
+  from?: string
+  /** Created on or before this day */
+  to?: string
+  offset?: number
+  limit?: number
+}
+
+/** GET /api/integrations/monitoring/webhooks: recorded deliveries over the last `days` days */
+export const useWebhookMonitoring = (days: number, endpointId?: number, eventType?: string) =>
+  useQuery({
+    queryKey: [KEY, "webhook-monitoring", days, endpointId ?? null, eventType ?? null],
+    queryFn: () => get<WebhookMonitoring>("/api/integrations/monitoring/webhooks", { days, endpoint_id: endpointId, event_type: eventType }),
+    placeholderData: (previous) => previous,
+    refetchInterval: LIVE,
+  })
+
+/** GET /api/integrations/monitoring/connections: recorded sync runs over the last `days` days */
+export const useIntegrationDashboard = (days: number) =>
+  useQuery({
+    queryKey: [KEY, "integration-dashboard", days],
+    queryFn: () => get<IntegrationDashboard>("/api/integrations/monitoring/connections", { days }),
+    placeholderData: (previous) => previous,
+    refetchInterval: LIVE,
+  })
+
+export const useDeliveries = (filters: DeliveryFilters) =>
   useQuery({ queryKey: [KEY, "deliveries", filters], queryFn: () => get<DeliveryPage>("/api/integrations/deliveries", { ...filters }), placeholderData: (previous) => previous, refetchInterval: LIVE })
 
 export const useDelivery = (id: number | null) =>
