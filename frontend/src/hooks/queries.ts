@@ -22,6 +22,9 @@ import type {
   PendingList,
   PipelineTrace,
   Readiness,
+  ReAuditPreview,
+  ReAuditQueue,
+  ReAuditRecorded,
   RecomputeResult,
   ReviewRow,
   RunInputs,
@@ -31,6 +34,9 @@ import type {
   ShipmentList,
   Staleness,
   TimelineEntry,
+  TmsConflictQueue,
+  TmsResolutionResult,
+  TmsShipmentView,
   Trends,
   UploadSummary,
   UserAccount,
@@ -309,3 +315,66 @@ export const useDecideCorrection = () =>
 
 /** Records the recalculated run for the shipment (or every stale shipment). Safe to repeat. */
 export const useRecompute = () => useInvalidating((shipmentId?: string) => post<RecomputeResult>("/api/extractions/recompute", { shipment_id: shipmentId }))
+
+export interface LineItemProposeInput {
+  extractionId: number
+  index: number
+  amount: string
+  reason: string
+  basedOn: number | null
+}
+
+/** A proposed correction of one invoice charge's amount: no effect until a different administrator approves it. */
+export const useProposeLineItem = () =>
+  useInvalidating(({ extractionId, index, amount, reason, basedOn }: LineItemProposeInput) =>
+    post<Correction>(`/api/extractions/${extractionId}/line-items/${index}/corrections`, { amount, reason, based_on: basedOn }),
+  )
+
+// ---------------------------------------------------------------------------
+// Controlled re-audit and TMS comparison
+// ---------------------------------------------------------------------------
+
+/** What recording a re-audit of the shipment would change against its latest recorded run (reads only). */
+export const useReAuditPreview = (shipmentId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: [AUDIT, "re-audit", shipmentId],
+    queryFn: () => get<ReAuditPreview>(`/api/shipments/${encodeURIComponent(shipmentId)}/re-audit`),
+    enabled,
+  })
+
+/** Records exactly the previewed state (its token); the server refuses it when the audit changed since. */
+export const useReAudit = () =>
+  useInvalidating(({ shipmentId, token, reason }: { shipmentId: string; token: string; reason: string }) =>
+    post<ReAuditRecorded>(`/api/shipments/${encodeURIComponent(shipmentId)}/re-audit`, { token, reason }),
+  )
+
+export const useReAudits = (enabled: boolean) =>
+  useQuery({ queryKey: [AUDIT, "re-audits"], queryFn: () => get<ReAuditQueue>("/api/re-audits"), enabled })
+
+export const useShipmentTms = (shipmentId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: [AUDIT, "tms", shipmentId],
+    queryFn: () => get<TmsShipmentView>(`/api/shipments/${encodeURIComponent(shipmentId)}/tms`),
+    enabled,
+  })
+
+export interface TmsResolveInput {
+  shipmentId: string
+  field: string
+  choice: "document" | "tms"
+  reason: string
+  recordId: number
+  tmsValue: string | number | null
+  documentValue: string | number | null
+}
+
+/** Decides one open comparison on the values it was shown (the server refuses it when they changed since). */
+export const useResolveTms = () =>
+  useInvalidating(({ shipmentId, field, choice, reason, recordId, tmsValue, documentValue }: TmsResolveInput) =>
+    post<TmsResolutionResult>(`/api/shipments/${encodeURIComponent(shipmentId)}/tms/resolutions`, {
+      field, choice, reason, record_id: recordId, tms_value: tmsValue, document_value: documentValue,
+    }),
+  )
+
+export const useTmsConflicts = (enabled: boolean) =>
+  useQuery({ queryKey: [AUDIT, "tms-conflicts"], queryFn: () => get<TmsConflictQueue>("/api/tms/conflicts"), enabled })

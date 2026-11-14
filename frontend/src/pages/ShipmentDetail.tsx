@@ -5,6 +5,8 @@ import { DeliveryCard, InvoiceCard, QuantityCard } from "@/components/common/Aud
 import { Explanations } from "@/components/common/Explanations"
 import { FreightAuditPanel } from "@/components/common/FreightAuditPanel"
 import { ExtractionsSection } from "@/components/extraction/ExtractionPanel"
+import { ReAuditPanel } from "@/components/shipment/ReAuditPanel"
+import { TmsPanel } from "@/components/shipment/TmsPanel"
 import { PageHeader, Section } from "@/components/common/PageHeader"
 import { StatusBadge } from "@/components/common/StatusBadge"
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/common/states"
@@ -128,6 +130,8 @@ export function ShipmentDetailPage() {
 
       <FreightAuditPanel audit={shipment.data.freight_audit} />
 
+      <TmsPanel shipmentId={shipment.data.shipment_id} />
+
       <Section
         title="Findings and explanations"
         description="Written from the audited values and their source documents; no language model is involved."
@@ -166,6 +170,8 @@ export function ShipmentDetailPage() {
       </Section>
 
       <ExtractionsSection shipmentId={shipment.data.shipment_id} shipmentKey={shipment.data.shipment_key} documents={documents} />
+
+      <ReAuditPanel shipmentId={shipment.data.shipment_id} />
 
       <Section title="Audit history" description="Earlier recorded audits of this shipment, with what changed since the one before.">
         {history.length === 0 ? (

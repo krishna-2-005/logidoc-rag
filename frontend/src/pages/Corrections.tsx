@@ -5,7 +5,7 @@ import { Link } from "react-router-dom"
 import { PageHeader } from "@/components/common/PageHeader"
 import { EmptyState, ErrorState, LoadingBlock, errorMessage } from "@/components/common/states"
 import { MIN_REASON } from "@/components/extraction/CorrectionDialog"
-import { CorrectionBadge, consumerOf, valueOrState } from "@/components/extraction/fields"
+import { CorrectionBadge, consumerOf, correctionFieldLabel, lineIndexOf, valueOrState } from "@/components/extraction/fields"
 import { CorrectionStoreWarning, RecomputeStatus } from "@/components/extraction/RecomputeStatus"
 import { StoreStateNotice, useStoreWriteBlock } from "@/components/extraction/storeState"
 import { Alert } from "@/components/ui/alert"
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label, Textarea } from "@/components/ui/input"
-import { can, useDecideCorrection, useExtractions, usePendingCorrections, useRecompute, useSession } from "@/hooks/queries"
+import { can, useDecideCorrection, useExtractions, usePendingCorrections, useReAudits, useRecompute, useSession, useTmsConflicts } from "@/hooks/queries"
 import { ApiError } from "@/lib/api"
 import { dateTime, label } from "@/lib/format"
 import type { Correction, DecisionResult } from "@/lib/types"
@@ -27,6 +27,8 @@ interface Outcome {
   text: string
   /** the shipment to record the run for again, when recording failed */
   retry: string | null
+  /** the shipment whose controlled re-audit records the approval */
+  reAudit?: string | null
 }
 
 let counter = 0
@@ -34,7 +36,7 @@ let counter = 0
 /** What the server confirmed, in words: nothing is claimed beyond it. */
 export function outcomeOf(result: DecisionResult): Outcome {
   const base = { key: ++counter, retry: null as string | null }
-  const name = `${label(result.field_name)} of ${result.filename}`
+  const name = `${correctionFieldLabel(result.field_name, label)} of ${result.filename}`
 
   if (result.decision === "rejected") return { ...base, tone: "info", text: `Correction #${result.correction_id} (${name}) was rejected. It had no effect on any audit.` }
 
@@ -59,6 +61,13 @@ export function outcomeOf(result: DecisionResult): Outcome {
       return { ...base, tone: "info", text: `${approved} The document is not attributed to a shipment, so no run was recorded.` }
     case "not_authorized":
       return { ...base, tone: "info", text: `${approved} You cannot record audit runs: an administrator who can must record the recalculated run.` }
+    case "re_audit_required":
+      return {
+        ...base,
+        tone: "info",
+        reAudit: (recompute.shipments ?? [])[0] ?? result.shipment_key,
+        text: `${approved} The audit already reads it. Its effect is recorded in the audit history by a re-audit of the shipment, which an administrator previews and confirms.`,
+      }
     default:
       return { ...base, tone: "info", text: approved }
   }
@@ -103,6 +112,11 @@ function OutcomeAlert({ outcome, onDismiss }: { outcome: Outcome; onDismiss: () 
           <p className="mt-2 font-medium" role={retried.tone === "bad" ? "alert" : "status"}>
             {retried.text}
           </p>
+        )}
+        {outcome.reAudit && (
+          <Link className="mt-2 inline-block font-medium underline" to={`/shipments/${encodeURIComponent(outcome.reAudit)}`}>
+            Review the re-audit of {outcome.reAudit}
+          </Link>
         )}
       </div>
       <button type="button" aria-label="Dismiss this message" className="text-xs underline" onClick={onDismiss}>
@@ -153,7 +167,7 @@ function DecisionDialog({ item, mode, shipmentLabel, onClose, onDone }: { item: 
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent aria-describedby="decision-description">
         <DialogHeader>
-          <DialogTitle>{approving ? "Approve" : "Reject"} correction: {label(item.field_name)}</DialogTitle>
+          <DialogTitle>{approving ? "Approve" : "Reject"} correction: {correctionFieldLabel(item.field_name, label)}</DialogTitle>
           <DialogDescription id="decision-description">
             {shipmentLabel} · {item.filename}
           </DialogDescription>
@@ -165,7 +179,9 @@ function DecisionDialog({ item, mode, shipmentLabel, onClose, onDone }: { item: 
 
         <p className="text-xs text-muted-foreground">
           {approving
-            ? consumer
+            ? lineIndexOf(item.field_name) !== null
+              ? "Approving makes this the amount the audit reads for this charge. The audit history changes only when an administrator previews and confirms the re-audit of the shipment. The amount read from the invoice is kept."
+              : consumer
               ? `Approving makes this the value ${consumer} reads for this shipment, and records a recalculated audit run. The original extracted value is kept.`
               : "No audit calculation reads this field: approving is recorded but changes no result. The original extracted value is kept."
             : "Rejecting keeps the original value. The proposal stays in the history and has no effect on any audit."}
@@ -226,7 +242,7 @@ function QueueItem({ item, shipmentLabel, own, onDecide }: { item: Correction; s
             ) : (
               shipmentLabel
             )}{" "}
-            · {label(item.field_name)}
+            · {correctionFieldLabel(item.field_name, label)}
           </h3>
           <p className="break-all text-xs text-muted-foreground">
             {item.filename} · {label(item.document_type)} · extraction #{item.extraction_id}
@@ -282,6 +298,87 @@ function QueueItem({ item, shipmentLabel, own, onDecide }: { item: Correction; s
   )
 }
 
+/** Shipments whose approved charge corrections or chosen TMS values wait for a controlled re-audit */
+function WaitingReAudits() {
+  const session = useSession()
+  const queue = useReAudits(can(session.data, "history.view"))
+  const items = queue.data?.re_audits ?? []
+
+  if (items.length === 0) return null
+
+  return (
+    <section aria-label="Re-audits waiting" className="mt-8 space-y-3">
+      <h2 className="text-[17px] font-semibold tracking-tight">Re-audits waiting ({items.length})</h2>
+      <p className="text-[13px] text-muted-foreground">The audit already reads these values; the audit history records them once an administrator previews and confirms the re-audit.</p>
+      <Card className="divide-y">
+        {items.map((item) => (
+          <div key={item.shipment_key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+            <span>
+              <Link className="font-medium underline-offset-2 hover:underline" to={`/shipments/${encodeURIComponent(item.shipment_id)}`}>
+                {item.shipment_id}
+              </Link>{" "}
+              <span className="text-muted-foreground">
+                {[
+                  item.line_item_correction_ids.length > 0 ? `${item.line_item_correction_ids.length} charge correction(s)` : null,
+                  item.tms_resolution_ids.length > 0 ? `${item.tms_resolution_ids.length} TMS decision(s)` : null,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}{" "}
+                since run #{item.recorded_run_id}
+              </span>
+            </span>
+            <Link className="text-xs font-medium underline" to={`/shipments/${encodeURIComponent(item.shipment_id)}`}>
+              Review the re-audit
+            </Link>
+          </div>
+        ))}
+      </Card>
+    </section>
+  )
+}
+
+const DIFFERENCE_LOOK: Record<string, { tone: "bad" | "warn"; text: string }> = {
+  conflict: { tone: "bad", text: "Differs" },
+  document_missing: { tone: "warn", text: "Only in the TMS" },
+  ambiguous: { tone: "warn", text: "Several records" },
+}
+
+/** Open differences between a TMS record and the documents, waiting for an administrator's decision */
+function TmsDifferences() {
+  const session = useSession()
+  const conflicts = useTmsConflicts(can(session.data, "exceptions.view"))
+  const items = conflicts.data?.conflicts ?? []
+
+  if (items.length === 0) return null
+
+  return (
+    <section aria-label="TMS differences" className="mt-8 space-y-3">
+      <h2 className="text-[17px] font-semibold tracking-tight">TMS differences to decide ({items.length})</h2>
+      <p className="text-[13px] text-muted-foreground">A difference changes no result until it is decided on the shipment.</p>
+      <Card className="divide-y">
+        {items.map((item, index) => {
+          const look = DIFFERENCE_LOOK[item.state] ?? DIFFERENCE_LOOK.conflict
+
+          return (
+            <div key={`${item.shipment_key}-${item.field ?? index}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+              <span>
+                <Link className="font-medium underline-offset-2 hover:underline" to={`/shipments/${encodeURIComponent(item.shipment_id)}`}>
+                  {item.shipment_id}
+                </Link>{" "}
+                · {item.label}
+                <span className="block text-xs text-muted-foreground">
+                  {item.state === "ambiguous" ? `Several TMS records: ${item.external_id}` : `${item.integration_name ?? "TMS"} record ${item.external_id}`}
+                </span>
+              </span>
+              <Badge tone={look.tone}>{look.text}</Badge>
+            </div>
+          )
+        })}
+      </Card>
+    </section>
+  )
+}
+
 export function Corrections() {
   const session = useSession()
   const canApprove = can(session.data, "extraction.approve")
@@ -334,6 +431,9 @@ export function Corrections() {
           <QueueItem key={item.id} item={item} shipmentLabel={shipmentOf(item)} own={item.actor === username} onDecide={(mode) => setActive({ item, mode })} />
         ))}
       </section>
+
+      <WaitingReAudits />
+      <TmsDifferences />
 
       {active && (
         <DecisionDialog

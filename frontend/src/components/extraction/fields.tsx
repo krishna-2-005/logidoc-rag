@@ -123,7 +123,26 @@ const CONSUMERS: Record<string, string> = {
   ),
 }
 
-export const consumerOf = (documentType: string, field: string): string | null => CONSUMERS[`${documentType}.${field}`] ?? null
+/** A correction of an invoice charge names the line by its position: "line_item:0" is the first line read. */
+export const LINE_ITEM_PREFIX = "line_item:"
+
+export const lineIndexOf = (field: string): number | null => {
+  if (!field.startsWith(LINE_ITEM_PREFIX)) return null
+  const index = Number(field.slice(LINE_ITEM_PREFIX.length))
+  return Number.isInteger(index) && index >= 0 ? index : null
+}
+
+const LINE_ITEM_CONSUMER = "the freight audit and, for a charge it reads by label, the invoice audit (recorded by a controlled re-audit)"
+
+export const consumerOf = (documentType: string, field: string): string | null =>
+  documentType === "INVOICE" && lineIndexOf(field) !== null ? LINE_ITEM_CONSUMER : (CONSUMERS[`${documentType}.${field}`] ?? null)
+
+/** What a corrected field is called: a charge line by its position, any other field by its own words. */
+export function correctionFieldLabel(field: string, words: (name: string) => string): string {
+  const index = lineIndexOf(field)
+
+  return index === null ? words(field) : `Charge line ${index + 1}`
+}
 
 const number = (value: number, digits?: number) =>
   value.toLocaleString("en-US", digits === undefined ? { maximumFractionDigits: 6 } : { minimumFractionDigits: digits, maximumFractionDigits: digits })
@@ -142,6 +161,9 @@ export function valueText(field: string, value: unknown): string {
       const lines = Array.isArray(item.address_lines) ? item.address_lines.filter((line): line is string => typeof line === "string") : []
       return lines.length ? `${item.name} — ${lines.join(", ")}` : item.name
     }
+
+    // An invoice charge (a line-item correction): its description and amount, never a weight
+    if (typeof item.description === "string" && typeof item.amount === "number") return `${item.description}: ${number(item.amount, 2)}`
 
     if (typeof item.amount === "number") return `${number(item.amount)} ${typeof item.unit === "string" ? item.unit : "(no unit written)"}`
   }
