@@ -4762,10 +4762,16 @@
         "type": "object"
       },
       "InputLineItem": {
+        "description": "corrected: an approved line-item correction supplied the amount (absent in audits recorded before).",
         "properties": {
           "amount": {
             "title": "Amount",
             "type": "number"
+          },
+          "corrected": {
+            "default": false,
+            "title": "Corrected",
+            "type": "boolean"
           },
           "description": {
             "title": "Description",
@@ -5769,6 +5775,117 @@
         "title": "JobStarted",
         "type": "object"
       },
+      "LineItemCorrectionBody": {
+        "properties": {
+          "amount": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Amount",
+            "type": "string"
+          },
+          "based_on": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Based On"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "reason",
+          "based_on"
+        ],
+        "title": "LineItemCorrectionBody",
+        "type": "object"
+      },
+      "LineItemProposal": {
+        "description": "A proposed correction of one invoice charge's amount: no effect until a different administrator approves it.",
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "authenticated": {
+            "title": "Authenticated",
+            "type": "boolean"
+          },
+          "based_on": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Based On"
+          },
+          "corrected": {
+            "title": "Corrected"
+          },
+          "extraction_id": {
+            "title": "Extraction Id",
+            "type": "integer"
+          },
+          "field_name": {
+            "title": "Field Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "legacy": {
+            "title": "Legacy",
+            "type": "boolean"
+          },
+          "previous": {
+            "title": "Previous"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "status": {
+            "const": "pending",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "extraction_id",
+          "field_name",
+          "previous",
+          "corrected",
+          "reason",
+          "actor",
+          "authenticated",
+          "at",
+          "based_on",
+          "status",
+          "legacy"
+        ],
+        "title": "LineItemProposal",
+        "type": "object"
+      },
       "LinkBody": {
         "properties": {
           "carrier_id": {
@@ -6435,6 +6552,534 @@
           "high"
         ],
         "title": "RateFigure",
+        "type": "object"
+      },
+      "ReAuditBody": {
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "reason"
+        ],
+        "title": "ReAuditBody",
+        "type": "object"
+      },
+      "ReAuditCorrections": {
+        "description": "applied: every approved correction the audit reads now; added: those the latest recorded run lacks.",
+        "properties": {
+          "added": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "applied": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Applied",
+            "type": "array"
+          },
+          "line_items": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Line Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "applied",
+          "added",
+          "line_items"
+        ],
+        "title": "ReAuditCorrections",
+        "type": "object"
+      },
+      "ReAuditFinding": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "difference": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difference"
+          },
+          "finding_key": {
+            "title": "Finding Key",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "finding_key",
+          "category",
+          "severity",
+          "summary",
+          "difference"
+        ],
+        "title": "ReAuditFinding",
+        "type": "object"
+      },
+      "ReAuditFindings": {
+        "properties": {
+          "changed": {
+            "items": {
+              "$ref": "#/components/schemas/ReAuditFinding"
+            },
+            "title": "Changed",
+            "type": "array"
+          },
+          "new": {
+            "items": {
+              "$ref": "#/components/schemas/ReAuditFinding"
+            },
+            "title": "New",
+            "type": "array"
+          },
+          "resolved": {
+            "items": {
+              "$ref": "#/components/schemas/ReAuditFinding"
+            },
+            "title": "Resolved",
+            "type": "array"
+          },
+          "unverified": {
+            "items": {
+              "$ref": "#/components/schemas/ReAuditFinding"
+            },
+            "title": "Unverified",
+            "type": "array"
+          }
+        },
+        "required": [
+          "new",
+          "resolved",
+          "changed",
+          "unverified"
+        ],
+        "title": "ReAuditFindings",
+        "type": "object"
+      },
+      "ReAuditPreview": {
+        "description": "What a re-audit of one shipment would record against its latest recorded run.\nrecorded null: nothing was recorded for the shipment yet. token: send it back\nto record exactly this state.",
+        "properties": {
+          "corrections": {
+            "$ref": "#/components/schemas/ReAuditCorrections"
+          },
+          "current": {
+            "$ref": "#/components/schemas/ReAuditState"
+          },
+          "findings": {
+            "$ref": "#/components/schemas/ReAuditFindings"
+          },
+          "needed": {
+            "title": "Needed",
+            "type": "boolean"
+          },
+          "open_tms_conflicts": {
+            "title": "Open Tms Conflicts",
+            "type": "integer"
+          },
+          "recorded": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReAuditRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipment_id": {
+            "title": "Shipment Id",
+            "type": "string"
+          },
+          "shipment_key": {
+            "title": "Shipment Key",
+            "type": "string"
+          },
+          "state_changes": {
+            "items": {
+              "$ref": "#/components/schemas/ReAuditStateChange"
+            },
+            "title": "State Changes",
+            "type": "array"
+          },
+          "status_change": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Change"
+          },
+          "tms_resolutions": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tms Resolutions",
+            "type": "array"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "value_changes": {
+            "items": {
+              "$ref": "#/components/schemas/ReAuditValueChange"
+            },
+            "title": "Value Changes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shipment_id",
+          "shipment_key",
+          "needed",
+          "token",
+          "recorded",
+          "current",
+          "status_change",
+          "value_changes",
+          "state_changes",
+          "findings",
+          "corrections",
+          "tms_resolutions",
+          "open_tms_conflicts"
+        ],
+        "title": "ReAuditPreview",
+        "type": "object"
+      },
+      "ReAuditQueue": {
+        "properties": {
+          "re_audits": {
+            "items": {
+              "$ref": "#/components/schemas/ReAuditQueueItem"
+            },
+            "title": "Re Audits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "re_audits"
+        ],
+        "title": "ReAuditQueue",
+        "type": "object"
+      },
+      "ReAuditQueueItem": {
+        "properties": {
+          "line_item_correction_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Line Item Correction Ids",
+            "type": "array"
+          },
+          "recorded_run_id": {
+            "title": "Recorded Run Id",
+            "type": "integer"
+          },
+          "shipment_id": {
+            "title": "Shipment Id",
+            "type": "string"
+          },
+          "shipment_key": {
+            "title": "Shipment Key",
+            "type": "string"
+          },
+          "tms_resolution_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tms Resolution Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shipment_id",
+          "shipment_key",
+          "recorded_run_id",
+          "line_item_correction_ids",
+          "tms_resolution_ids"
+        ],
+        "title": "ReAuditQueueItem",
+        "type": "object"
+      },
+      "ReAuditRecorded": {
+        "properties": {
+          "corrections_added": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Corrections Added",
+            "type": "array"
+          },
+          "previous_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Run Id"
+          },
+          "recorded": {
+            "title": "Recorded",
+            "type": "boolean"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "shipment_id": {
+            "title": "Shipment Id",
+            "type": "string"
+          },
+          "shipment_key": {
+            "title": "Shipment Key",
+            "type": "string"
+          },
+          "snapshot_written": {
+            "title": "Snapshot Written",
+            "type": "boolean"
+          },
+          "tms_resolutions": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tms Resolutions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recorded",
+          "run_id",
+          "shipment_id",
+          "shipment_key",
+          "previous_run_id",
+          "snapshot_written",
+          "corrections_added",
+          "tms_resolutions"
+        ],
+        "title": "ReAuditRecorded",
+        "type": "object"
+      },
+      "ReAuditRun": {
+        "properties": {
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "financial_impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FreightImpact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "freight_outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "MATCHED",
+                  "MATCHED_WITH_TOLERANCE",
+                  "DISCREPANCY",
+                  "INSUFFICIENT_EVIDENCE",
+                  "DUPLICATE",
+                  "PENDING_REVIEW"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freight Outcome"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "recorded_at",
+          "label",
+          "final_status",
+          "freight_outcome",
+          "financial_impact"
+        ],
+        "title": "ReAuditRun",
+        "type": "object"
+      },
+      "ReAuditState": {
+        "properties": {
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "financial_impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FreightImpact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "freight_outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "MATCHED",
+                  "MATCHED_WITH_TOLERANCE",
+                  "DISCREPANCY",
+                  "INSUFFICIENT_EVIDENCE",
+                  "DUPLICATE",
+                  "PENDING_REVIEW"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freight Outcome"
+          }
+        },
+        "required": [
+          "final_status",
+          "freight_outcome",
+          "financial_impact"
+        ],
+        "title": "ReAuditState",
+        "type": "object"
+      },
+      "ReAuditStateChange": {
+        "properties": {
+          "audit": {
+            "title": "Audit",
+            "type": "string"
+          },
+          "current": {
+            "title": "Current",
+            "type": "string"
+          },
+          "previous": {
+            "title": "Previous",
+            "type": "string"
+          }
+        },
+        "required": [
+          "audit",
+          "previous",
+          "current"
+        ],
+        "title": "ReAuditStateChange",
+        "type": "object"
+      },
+      "ReAuditValueChange": {
+        "properties": {
+          "current": {
+            "title": "Current"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "previous": {
+            "title": "Previous"
+          }
+        },
+        "required": [
+          "field",
+          "label",
+          "previous",
+          "current"
+        ],
+        "title": "ReAuditValueChange",
         "type": "object"
       },
       "RecomputeBody": {
@@ -8934,6 +9579,714 @@
           "changes"
         ],
         "title": "TimelineEntry",
+        "type": "object"
+      },
+      "TmsComparison": {
+        "description": "One compared field. open: nobody has decided yet; choices: what a decision may keep.",
+        "properties": {
+          "choices": {
+            "items": {
+              "enum": [
+                "document",
+                "tms"
+              ],
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "consumed": {
+            "title": "Consumed",
+            "type": "boolean"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TmsCurrency"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "document_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Source"
+          },
+          "document_state": {
+            "title": "Document State",
+            "type": "string"
+          },
+          "document_text": {
+            "title": "Document Text"
+          },
+          "document_value": {
+            "title": "Document Value"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "open": {
+            "title": "Open",
+            "type": "boolean"
+          },
+          "protected_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protected By"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TmsResolutionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "agrees",
+              "not_compared",
+              "conflict",
+              "document_missing",
+              "resolved_document",
+              "resolved_tms",
+              "protected"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "tms_corrected_by_hand": {
+            "title": "Tms Corrected By Hand",
+            "type": "boolean"
+          },
+          "tms_field": {
+            "title": "Tms Field",
+            "type": "string"
+          },
+          "tms_text": {
+            "title": "Tms Text"
+          },
+          "tms_value": {
+            "title": "Tms Value"
+          }
+        },
+        "required": [
+          "field",
+          "label",
+          "consumed",
+          "tms_field",
+          "tms_value",
+          "document_value",
+          "tms_text",
+          "document_text",
+          "document_state",
+          "document_source",
+          "state",
+          "open",
+          "tms_corrected_by_hand",
+          "choices",
+          "resolution",
+          "currency",
+          "protected_by"
+        ],
+        "title": "TmsComparison",
+        "type": "object"
+      },
+      "TmsConflict": {
+        "properties": {
+          "document_value": {
+            "title": "Document Value"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "integration_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integration Name"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "shipment_id": {
+            "title": "Shipment Id",
+            "type": "string"
+          },
+          "shipment_key": {
+            "title": "Shipment Key",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "tms_value": {
+            "title": "Tms Value"
+          }
+        },
+        "required": [
+          "shipment_id",
+          "shipment_key",
+          "field",
+          "label",
+          "state",
+          "tms_value",
+          "document_value",
+          "integration_name",
+          "external_id"
+        ],
+        "title": "TmsConflict",
+        "type": "object"
+      },
+      "TmsConflictQueue": {
+        "properties": {
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/TmsConflict"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "unavailable": {
+            "items": {
+              "$ref": "#/components/schemas/TmsUnavailable"
+            },
+            "title": "Unavailable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "conflicts",
+          "unavailable"
+        ],
+        "title": "TmsConflictQueue",
+        "type": "object"
+      },
+      "TmsCurrency": {
+        "properties": {
+          "documents": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Documents"
+          },
+          "tms": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tms"
+          }
+        },
+        "required": [
+          "tms",
+          "documents"
+        ],
+        "title": "TmsCurrency",
+        "type": "object"
+      },
+      "TmsMatch": {
+        "description": "The TMS shipment record matched by its reference, with where it came from.",
+        "properties": {
+          "corrected_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Corrected Fields",
+            "type": "array"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "first_run_id": {
+            "title": "First Run Id",
+            "type": "integer"
+          },
+          "imported_at": {
+            "title": "Imported At",
+            "type": "string"
+          },
+          "integration_id": {
+            "title": "Integration Id",
+            "type": "integer"
+          },
+          "integration_name": {
+            "title": "Integration Name",
+            "type": "string"
+          },
+          "last_run_id": {
+            "title": "Last Run Id",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "integer"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "source_updated_at": {
+            "title": "Source Updated At",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "integration_id",
+          "integration_name",
+          "provider",
+          "record_id",
+          "external_id",
+          "reference",
+          "status",
+          "source_updated_at",
+          "imported_at",
+          "first_run_id",
+          "last_run_id",
+          "corrected_fields",
+          "data"
+        ],
+        "title": "TmsMatch",
+        "type": "object"
+      },
+      "TmsResolutionBody": {
+        "properties": {
+          "choice": {
+            "pattern": "^(document|tms)$",
+            "title": "Choice",
+            "type": "string"
+          },
+          "document_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Value"
+          },
+          "field": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Field",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "record_id": {
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "title": "Record Id",
+            "type": "integer"
+          },
+          "tms_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tms Value"
+          }
+        },
+        "required": [
+          "field",
+          "choice",
+          "reason",
+          "record_id"
+        ],
+        "title": "TmsResolutionBody",
+        "type": "object"
+      },
+      "TmsResolutionRecord": {
+        "description": "A stored decision (append-only), whether or not it still applies.",
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "choice": {
+            "enum": [
+              "document",
+              "tms"
+            ],
+            "title": "Choice",
+            "type": "string"
+          },
+          "document_value": {
+            "title": "Document Value"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "integration_id": {
+            "title": "Integration Id",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "integer"
+          },
+          "shipment_key": {
+            "title": "Shipment Key",
+            "type": "string"
+          },
+          "source_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Updated At"
+          },
+          "tms_value": {
+            "title": "Tms Value"
+          }
+        },
+        "required": [
+          "id",
+          "shipment_key",
+          "field",
+          "choice",
+          "integration_id",
+          "record_id",
+          "external_id",
+          "source_updated_at",
+          "tms_value",
+          "document_value",
+          "reason",
+          "actor",
+          "at"
+        ],
+        "title": "TmsResolutionRecord",
+        "type": "object"
+      },
+      "TmsResolutionResult": {
+        "description": "re_audit required: the audit now reads another value; a controlled re-audit records it.",
+        "properties": {
+          "re_audit": {
+            "enum": [
+              "required",
+              "not_needed"
+            ],
+            "title": "Re Audit",
+            "type": "string"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/TmsResolutionRecord"
+          },
+          "shipment_id": {
+            "title": "Shipment Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resolution",
+          "shipment_id",
+          "re_audit"
+        ],
+        "title": "TmsResolutionResult",
+        "type": "object"
+      },
+      "TmsResolutionView": {
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "choice": {
+            "enum": [
+              "document",
+              "tms"
+            ],
+            "title": "Choice",
+            "type": "string"
+          },
+          "document_value": {
+            "title": "Document Value"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "integer"
+          },
+          "source_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Updated At"
+          },
+          "tms_value": {
+            "title": "Tms Value"
+          }
+        },
+        "required": [
+          "id",
+          "choice",
+          "reason",
+          "actor",
+          "at",
+          "record_id",
+          "external_id",
+          "source_updated_at",
+          "tms_value",
+          "document_value"
+        ],
+        "title": "TmsResolutionView",
+        "type": "object"
+      },
+      "TmsShipmentView": {
+        "description": "configured: an integration store exists. match null and ambiguous false: no TMS record names this shipment.",
+        "properties": {
+          "ambiguous": {
+            "title": "Ambiguous",
+            "type": "boolean"
+          },
+          "applied_resolution_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Applied Resolution Ids",
+            "type": "array"
+          },
+          "comparisons": {
+            "items": {
+              "$ref": "#/components/schemas/TmsComparison"
+            },
+            "title": "Comparisons",
+            "type": "array"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/TmsResolutionRecord"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TmsMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/TmsMatch"
+            },
+            "title": "Matches",
+            "type": "array"
+          },
+          "open_conflicts": {
+            "title": "Open Conflicts",
+            "type": "integer"
+          },
+          "shipment_id": {
+            "title": "Shipment Id",
+            "type": "string"
+          },
+          "shipment_key": {
+            "title": "Shipment Key",
+            "type": "string"
+          },
+          "unavailable": {
+            "items": {
+              "$ref": "#/components/schemas/TmsUnavailable"
+            },
+            "title": "Unavailable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shipment_id",
+          "shipment_key",
+          "configured",
+          "match",
+          "matches",
+          "ambiguous",
+          "comparisons",
+          "open_conflicts",
+          "applied_resolution_ids",
+          "history",
+          "unavailable"
+        ],
+        "title": "TmsShipmentView",
+        "type": "object"
+      },
+      "TmsUnavailable": {
+        "properties": {
+          "integration_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integration Id"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "integration_id",
+          "reason"
+        ],
+        "title": "TmsUnavailable",
         "type": "object"
       },
       "Tolerance": {
@@ -12891,6 +14244,109 @@
         "summary": "Propose Correction"
       }
     },
+    "/api/extractions/{extraction_id}/line-items/{index}/corrections": {
+      "post": {
+        "description": "Records a proposed correction of one invoice charge's amount (the line item at\nthis position, 0 = the first). It has no effect until a different\nadministrator approves it; its effect is then recorded by a controlled\nre-audit of the shipment.",
+        "operationId": "propose_line_item_api_extractions__extraction_id__line_items__index__corrections_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "extraction_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Extraction Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "maximum": 999,
+              "minimum": 0,
+              "title": "Index",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LineItemCorrectionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineItemProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such extraction"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The line changed since it was shown"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Propose Line Item"
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "health_api_health_get",
@@ -16035,6 +17491,65 @@
         "summary": "Overview"
       }
     },
+    "/api/re-audits": {
+      "get": {
+        "description": "The shipments waiting for a controlled re-audit (a line-item correction or a chosen TMS value not recorded yet).",
+        "operationId": "re_audits_api_re_audits_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReAuditQueue"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Re Audits"
+      }
+    },
     "/api/ready": {
       "get": {
         "operationId": "ready_api_ready_get",
@@ -16579,6 +18094,383 @@
           }
         },
         "summary": "Shipment Freight Audit"
+      }
+    },
+    "/api/shipments/{shipment_id}/re-audit": {
+      "get": {
+        "description": "What a re-audit of this shipment would record, against its latest recorded run.",
+        "operationId": "re_audit_preview_api_shipments__shipment_id__re_audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shipment_id",
+            "required": true,
+            "schema": {
+              "title": "Shipment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReAuditPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such shipment"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Re Audit Preview"
+      },
+      "post": {
+        "description": "Records the previewed re-audit of this one shipment (its token), with the\nreason. 409 when nothing changed or the audit changed since the preview.",
+        "operationId": "re_audit_api_shipments__shipment_id__re_audit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shipment_id",
+            "required": true,
+            "schema": {
+              "title": "Shipment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReAuditBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReAuditRecorded"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such shipment"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The state changed since it was shown, or nothing to do"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Re Audit"
+      }
+    },
+    "/api/shipments/{shipment_id}/tms": {
+      "get": {
+        "description": "The TMS record that names this shipment, how each field compares, and every decision made on them.",
+        "operationId": "shipment_tms_api_shipments__shipment_id__tms_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shipment_id",
+            "required": true,
+            "schema": {
+              "title": "Shipment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TmsShipmentView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such shipment"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Shipment Tms"
+      }
+    },
+    "/api/shipments/{shipment_id}/tms/resolutions": {
+      "post": {
+        "description": "Decides one open comparison: keep the documents' value, or (for a field a\ncalculation reads) use the TMS value. A reason is required. 409 when the\nvalues changed since they were shown, an approved correction protects the\nfield, or the TMS value was corrected by hand in LogiDoc.",
+        "operationId": "resolve_tms_api_shipments__shipment_id__tms_resolutions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shipment_id",
+            "required": true,
+            "schema": {
+              "title": "Shipment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TmsResolutionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TmsResolutionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such shipment"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The state changed since it was shown, or nothing to do"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Resolve Tms"
+      }
+    },
+    "/api/tms/conflicts": {
+      "get": {
+        "description": "Every open TMS comparison of every shipment.",
+        "operationId": "tms_conflicts_api_tms_conflicts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TmsConflictQueue"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          }
+        },
+        "summary": "Tms Conflicts"
       }
     },
     "/api/trends": {

@@ -212,6 +212,23 @@ class ApiState:
         # Tests replace the webhook transport, the DNS resolver and the sync's sleep (never the server)
         self.integration_options = {}
 
+        # The audit compares each shipment with the TMS records that name it (src/tms_audit.py)
+        if getattr(self.service, "tms_source", None) is None:
+            import tms_audit
+
+            self.service.tms_source = tms_audit.TmsSource(self.tms_service)
+
+    def tms_service(self):
+        """
+        The integration service, once an integration store exists; None before
+        (the audit then reads no TMS record, and nothing is created or started).
+        """
+
+        if not Path(self.locations.integration_path()).is_file():
+            return None
+
+        return self.integrations.integrations
+
     @property
     def mode(self):
 

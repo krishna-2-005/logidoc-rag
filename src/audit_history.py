@@ -59,13 +59,14 @@ Comparing two snapshots of a shipment (compare):
 
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 VERIFIED = "verified"
 UNAVAILABLE = "unavailable"
@@ -205,7 +206,7 @@ MIGRATION_V2 = (
 # Fields added after version 1. While they are empty they are left out of
 # the digest, so history recorded before they existed does not look
 # changed the first time it is audited again.
-OPTIONAL_DIGEST_FIELDS = ("carrier", "currency", "applied_corrections", "freight_digest")
+OPTIONAL_DIGEST_FIELDS = ("carrier", "currency", "applied_corrections", "freight_digest", "applied_tms")
 
 # Version 3: what every run consumed, and which run superseded which. Only new
 # tables and one new column: no row is rewritten, so the append-only triggers
@@ -292,6 +293,28 @@ MIGRATION_V5 = (
     "CREATE INDEX IF NOT EXISTS run_input_sets_by_shipment ON run_input_sets (shipment_key, run_id)",
     "CREATE INDEX IF NOT EXISTS run_shipments_by_shipment ON run_shipments (shipment_key, run_id)",
 )
+
+
+# Version 6: where a TMS shipment record stands beside each recorded input (tms_audit: the record, its
+# provenance, how it compares, and the resolution a value came from). One new column: no row is rewritten,
+# and inputs recorded before have none ("not recorded", never reconstructed).
+MIGRATION_V6 = (
+    "ALTER TABLE run_inputs ADD COLUMN tms TEXT",
+)
+
+
+ADD_COLUMN = re.compile(r"^\s*ALTER TABLE (\w+) ADD COLUMN (\w+)", re.IGNORECASE)
+
+
+def column_exists(connection, statement):
+    """Whether an ALTER TABLE ... ADD COLUMN statement's column is already there (a step is then not repeated)."""
+
+    match = ADD_COLUMN.match(statement)
+
+    if match is None:
+        return False
+
+    return match.group(2) in {row[1] for row in connection.execute(f"PRAGMA table_info({match.group(1)})")}
 
 
 def freight_digest(audit):
@@ -421,6 +444,8 @@ def snapshot_record(shipment, exceptions):
         # Only when an approved correction was consumed: left out of the digest otherwise,
         # so history recorded without corrections does not look changed
         "applied_corrections": (shipment.get("inputs") or {}).get("applied_correction_ids") or None,
+        # Likewise for the TMS resolutions whose TMS value the audit read (tms_audit)
+        "applied_tms": (shipment.get("inputs") or {}).get("applied_tms_resolution_ids") or None,
         "freight_digest": freight_digest(shipment.get("freight_audit")),
         "discrepancy_count": len(result.get("discrepancies") or []) if success else 0,
         "review_count": len(result.get("review_items") or []) if success else 0,
@@ -630,7 +655,7 @@ class HistoryStore:
         """
 
         # Looked up when called, so the steps can be replaced in a test
-        steps = {2: MIGRATION_V2, 3: MIGRATION_V3, 4: MIGRATION_V4, 5: MIGRATION_V5}
+        steps = {2: MIGRATION_V2, 3: MIGRATION_V3, 4: MIGRATION_V4, 5: MIGRATION_V5, 6: MIGRATION_V6}
         connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
 
         try:
@@ -644,7 +669,8 @@ class HistoryStore:
                     if connection.execute("SELECT version FROM schema_info").fetchone()[0] == target - 1:
 
                         for statement in steps[target]:
-                            connection.execute(statement)
+                            if not column_exists(connection, statement):
+                                connection.execute(statement)
 
                         connection.execute("UPDATE schema_info SET version = ?", (target,))
 
@@ -662,7 +688,7 @@ class HistoryStore:
     # Writing
     # --------------------------------------------------------
 
-    def record_run(self, snapshot, exceptions, label=None, at=None, shipment_keys=None, only_stale=None):
+    def record_run(self, snapshot, exceptions, label=None, at=None, shipment_keys=None, only_stale=None, expect_latest=None):
         """
         Records an audit run for every shipment of snapshot (an
         audit_analytics.build_snapshot() result) with its exceptions
@@ -675,7 +701,10 @@ class HistoryStore:
         from staleness()) keeps only the shipments whose latest recorded run still
         lacks those corrections, decided inside the write transaction, so two
         callers racing to record the same recalculation record it once (the
-        second gets run_id None). Returns
+        second gets run_id None). expect_latest ({shipment_key: run id or None})
+        records only while each shipment's latest recorded run is still the one
+        expected, decided inside the write transaction (a controlled re-audit
+        records what its author previewed, or nothing: "conflict" True). Returns
         {"run_id", "shipments_checked", "snapshots_written",
         "written": [shipment ids], "unchanged": [shipment ids]}.
         """
@@ -707,6 +736,15 @@ class HistoryStore:
 
                 # The write lock first: what is read below cannot change before it is written
                 connection.execute("BEGIN IMMEDIATE")
+
+                for key, expected in (expect_latest or {}).items():
+                    latest = connection.execute(
+                        "SELECT run_id FROM run_shipments WHERE shipment_key = ? ORDER BY run_id DESC LIMIT 1", (key,)
+                    ).fetchone()
+
+                    if (latest["run_id"] if latest else None) != expected:
+                        return {"run_id": None, "shipments_checked": 0, "snapshots_written": 0, "written": [], "unchanged": [],
+                                "conflict": True}
 
                 if only_stale is not None:
                     records = [r for r in records if self.is_stale(connection, r["shipment_key"], only_stale.get(r["shipment_key"]) or [])]
@@ -811,12 +849,13 @@ class HistoryStore:
             connection.execute(
                 "INSERT INTO run_inputs (run_id, shipment_key, shipment_id, field_name, value, source, resolved, state, "
                 "correction_id, extraction_id, extractor_version, document, page, validation, warnings, consumed_by, "
-                "structured, calculation_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "structured, calculation_version, created_at, tms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_id, key, record["shipment_id"], field["field"], json.dumps(field["value"]), field["source"],
                  1 if field["resolved"] else 0, field["state"], field["correction_id"], field["extraction_id"],
                  field["extractor_version"], field["document"], field["page"], field["validation"],
                  json.dumps(field["warnings"]), json.dumps(field["consumed_by"]),
-                 json.dumps(field["structured"]) if field["structured"] is not None else None, version, at),
+                 json.dumps(field["structured"]) if field["structured"] is not None else None, version, at,
+                 json.dumps(field["tms"], sort_keys=True, default=str) if field.get("tms") is not None else None),
             )
 
         if previous_run is None:
@@ -934,6 +973,39 @@ class HistoryStore:
                 result.append(snapshot)
 
             return result
+
+    def latest_recorded(self, shipment_key):
+        """
+        The shipment's latest recorded run, with the snapshot it points at (its
+        values, states, findings and freight audit) and the inputs it consumed:
+        {"run_id", "recorded_at", "label", "snapshot", "applied_correction_ids"}.
+        None when nothing was recorded for the shipment.
+        """
+
+        with closing(self.connect()) as connection:
+
+            row = connection.execute(
+                "SELECT run_shipments.run_id, run_shipments.snapshot_id, audit_runs.created_at, audit_runs.label "
+                "FROM run_shipments JOIN audit_runs ON audit_runs.id = run_shipments.run_id "
+                "WHERE run_shipments.shipment_key = ? ORDER BY run_shipments.run_id DESC LIMIT 1",
+                (shipment_key,),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            snapshot = dict(connection.execute("SELECT * FROM shipment_snapshots WHERE id = ?", (row["snapshot_id"],)).fetchone())
+            snapshot["audit_states"] = json.loads(snapshot["audit_states"])
+            snapshot["findings"] = [dict(item) for item in connection.execute(
+                "SELECT * FROM snapshot_findings WHERE snapshot_id = ? ORDER BY finding_key", (row["snapshot_id"],))]
+            freight = connection.execute("SELECT payload FROM freight_audit_records WHERE snapshot_id = ?",
+                                         (row["snapshot_id"],)).fetchone()
+            snapshot["freight_audit"] = json.loads(freight["payload"]) if freight else None
+            applied = connection.execute("SELECT applied FROM run_input_sets WHERE run_id = ? AND shipment_key = ?",
+                                         (row["run_id"], shipment_key)).fetchone()
+
+        return {"run_id": row["run_id"], "recorded_at": row["created_at"], "label": row["label"], "snapshot": snapshot,
+                "applied_correction_ids": json.loads(applied["applied"]) if applied else None}
 
     def observations(self):
         """
@@ -1103,8 +1175,8 @@ class HistoryStore:
                 item = dict(row)
                 item["resolved"] = bool(item["resolved"])
 
-                for name in ("value", "warnings", "consumed_by", "structured"):
-                    item[name] = json.loads(item[name]) if item[name] is not None else None
+                for name in ("value", "warnings", "consumed_by", "structured", "tms"):
+                    item[name] = json.loads(item[name]) if item.get(name) is not None else None
 
                 result.append(item)
 
