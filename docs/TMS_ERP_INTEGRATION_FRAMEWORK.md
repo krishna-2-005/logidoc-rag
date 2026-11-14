@@ -26,7 +26,9 @@ Screen: Integrations, then TMS / ERP (administrators).
 | Imported records | `ExternalRecordStore` | Records with provenance, every version, manual corrections |
 
 Nothing imported is written into LogiDoc's documents, audits, reviews or carrier registry. Imported records are
-reference data in their own store. The freight audit engine contains no vendor logic.
+reference data in their own store. The freight audit engine contains no vendor logic. A shipment record is
+compared with the audited shipment its reference names, and a TMS value reaches a calculation only when an
+administrator chooses it: see [TMS_SHIPMENT_AUDIT.md](TMS_SHIPMENT_AUDIT.md).
 
 ## 2. How a sync runs
 
@@ -205,8 +207,9 @@ Do not claim a vendor is integrated until each step below is done against the ve
 ## 8. Limitations
 
 - Only the sandbox provider exists. No real TMS or ERP was connected or tested.
-- Imported records are reference data. They are not yet matched to the shipments LogiDoc reads from documents,
-  and they do not feed the freight audit. Doing so is a design decision for a later sprint.
+- Imported shipment records are matched to audited shipments by their reference only (no fuzzy matching, no
+  manual link), and only expected pieces and the actual delivery date can be chosen into a calculation
+  ([TMS_SHIPMENT_AUDIT.md](TMS_SHIPMENT_AUDIT.md)). Carriers are not matched to the carrier registry.
 - One sync at a time per integration, all integrations one after another in the scheduler's thread.
 - The sandbox's failure counters are shared by every sandbox integration (they live in the sandbox's own
   database).

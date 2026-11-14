@@ -111,6 +111,7 @@ GET /api/admin/metrics?format=prometheus    Prometheus text format (0.0.4)
 | `logidoc_backup_duration_seconds` | histogram | | each backup attempt |
 | `logidoc_backup_last_success_timestamp_seconds` | gauge | | a backup succeeds |
 | `logidoc_backup_verifications_total` | counter | kind (verify, restore_drill), outcome (ok, failed) | each backup verification or restore drill |
+| `logidoc_re_audits_total` | counter | outcome (recorded) | an administrator confirms a controlled re-audit of a shipment |
 | `logidoc_disk_free_bytes` | gauge | volume (data, index, backups) | each monitor check |
 | `logidoc_readiness` | gauge | status | each `/api/ready` |
 | `logidoc_alerts_total` | counter | rule, severity | an alert is sent |

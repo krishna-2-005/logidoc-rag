@@ -109,9 +109,9 @@ is lost between them.
 ## 7. Not done
 
 The reviewer interface (shipment Extractions section, the administrators' approval queue, the
-Recorded runs inspector) is described in the README. No consumption of corrections for line-item charges,
-carrier, route or completeness. No withdrawal of a pending proposal. Approvals do
-not expire. The same database-file limits as before apply (not tamper-proof).
+Recorded runs inspector) is described in the README. No consumption of corrections for carrier, route or
+completeness (an invoice charge's amount is consumed since line-item corrections, section 9). No withdrawal of a
+pending proposal. Approvals do not expire. The same database-file limits as before apply (not tamper-proof).
 
 ## 8. What was built (and where it differs from the plan)
 
@@ -150,3 +150,61 @@ Decisions worth knowing:
 - The decision (extraction DB) and the recorded run (history DB) are two
   transactions. Nothing couples them; staleness is derived, so a failure between
   them loses nothing.
+
+## 9. Line-item corrections
+
+A reviewer can correct the **amount** of one charge of an invoice (`src/line_item_corrections.py`).
+
+- **Stored as a correction.** It is an ordinary correction of the extraction store: the same tables, hash
+  chain, proposal and decision rules, and no schema change. Its field name is the line's position
+  (`line_item:0` is the first line read). Its value is `{"description", "amount", "of"}`, where `of` is the line
+  as the extractor read it.
+- **The amount only.** The description, which decides how the freight audit classifies the charge, is not
+  corrected. A credit is a negative amount. An amount equal to the current one is refused.
+- **Pinned to its line.** It applies only while the line at that position of the same file content still reads
+  as `of` says. Another extractor version that reads the lines differently makes it "not applicable"; it is never
+  moved onto another line.
+- **Two people.** As for any correction: proposing needs `extraction.correct`, deciding needs
+  `extraction.approve`, a signed-in account and someone other than the proposer, and a rejection needs a reason.
+- **Who reads an approved one.**
+  - The freight audit: the line's amount in charge classification, the contract comparison and the line total.
+    The line's source says `corrected`.
+  - The reconciliation's invoice audit, when the line's description is a label it reads (Base Freight, Fuel
+    Surcharge, Detention Charge, Other Accessorial Charges). The invoice's printed amount for that label is then
+    superseded, not unknown.
+  - Both record it in their inputs: the four charges are recorded audit inputs since calculation version 3.
+- **This module does not change the extractor version.** It is kept apart from the extraction code, whose
+  source is fingerprinted into the extractor version. Correcting a charge does not change how a document is
+  read, so stored extractions are not made outdated.
+
+API: `POST /api/extractions/{id}/line-items/{index}/corrections` with `{"amount", "reason", "based_on"}` returns
+`LineItemProposal`. `GET /api/extractions/{id}` lists `line_items`, each with what was read, proposed and
+approved, and whether the approval applies. Decisions use the existing
+`POST /api/extractions/corrections/{id}/decision`.
+
+## 10. Controlled re-audit
+
+Approving a line-item correction never records a run by itself (`recompute.status` is `re_audit_required`).
+Choosing a TMS value works the same way ([TMS_SHIPMENT_AUDIT.md](TMS_SHIPMENT_AUDIT.md)). Both change money
+figures or audited quantities, so recording them is an explicit, previewed decision:
+
+1. **Preview** (`GET /api/shipments/{id}/re-audit`, `history.view`). Compared with the shipment's latest
+   recorded run, it shows:
+   - the final status, the freight audit outcome and its financial impact;
+   - every changed value and audit state, and the new, resolved, changed and no longer verified findings;
+   - the corrections and TMS decisions it would record.
+
+   `needed` says whether anything differs. A `token` names exactly this state.
+2. **Confirm** (`POST /api/shipments/{id}/re-audit` with `{"token", "reason"}`, `history.record`). It records a
+   run for this one shipment, labelled `Re-audit by <user>: <reason>`. It refuses (409) and writes nothing when:
+   - the audit changed since the preview (another approval, a sync, a document);
+   - another run was recorded for the shipment meanwhile, checked inside the write transaction, so two
+     administrators confirming the same preview record it once;
+   - nothing differs.
+
+The new run supersedes the earlier one for the corrections it adds; earlier runs keep their snapshots and
+inputs. The plain recompute (`POST /api/extractions/recompute`) records the other stale shipments and leaves
+these to the re-audit (`re_audit_required` in its answer, only when there are some). Staleness marks them
+`controlled`. `GET /api/re-audits` lists the shipments waiting: a line-item correction or a chosen TMS value,
+and a latest recorded run that differs. The screens show them on Correction approvals and in the shipment's
+**Re-audit** section.
