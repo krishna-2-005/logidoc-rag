@@ -32,6 +32,7 @@ method takes a path from a caller.
 """
 
 import hashlib
+import json
 import logging
 import threading
 from dataclasses import dataclass
@@ -46,6 +47,7 @@ import financial_exposure as exposure
 import ingestion_service
 import metrics
 import reconciliation
+import tms_audit
 from audit_analytics import build_exceptions, build_snapshot, source_fingerprint, with_reviews
 from chunker import read_chunks
 from ingestion_manager import get_destination_collection
@@ -60,6 +62,52 @@ log = logging.getLogger(__name__)
 
 # Cache token while the extraction store is damaged or from a newer version
 UNAVAILABLE_TOKEN = (-1, -1, -1)
+
+
+class ReAuditRefused(ValueError):
+    """A re-audit was not recorded: nothing changed, or the state changed since its preview (HTTP 409)."""
+
+
+class ReAuditInvalid(ValueError):
+    """A re-audit request is not valid (HTTP 422)."""
+
+
+def controlled_ids(item):
+    """
+    (line-item correction ids, TMS resolution ids) the audit of one shipment
+    reads now: what only a controlled re-audit records.
+    """
+
+    import line_item_corrections
+
+    inputs = item.get("inputs") or {}
+    line_items = {
+        entry["correction_id"] for entry in (item.get("freight_audit") or {}).get("corrections_applied") or []
+        if line_item_corrections.index_of(entry.get("field")) is not None
+    }
+    line_items |= {
+        entry["correction_id"] for entry in inputs.get("fields") or []
+        if entry["field"] in audit_inputs.LINE_ITEM_FIELDS and entry["source"] == audit_inputs.APPROVED and entry.get("correction_id")
+    }
+
+    return line_items, set(inputs.get("applied_tms_resolution_ids") or [])
+
+
+def with_controlled(result, controlled):
+    """The recompute answer, naming the shipments left to a controlled re-audit only when there are some."""
+
+    return {**result, "re_audit_required": controlled} if controlled else result
+
+
+def tms_readings(chunks):
+    """{consumed TMS field: (state, value as tms_audit compares it)} as the shipment's documents read now."""
+
+    from shipment_calculations import FIELDS
+
+    readings = audit_inputs.document_readings(chunks, tms_audit.CONSUMED)
+
+    return {name: (state, tms_audit.normalized(FIELDS[name][2], value) if state == "extracted" else None)
+            for name, (state, value) in readings.items()}
 
 
 def freight_skipped(reason):
@@ -227,6 +275,8 @@ class AuditService:
         self.cache = {}
         # Freight audit extractions by (file, content hash, extractor version): survives invalidate()
         self.extractions = {}
+        # The TMS integrations' shipment records (tms_audit.TmsSource), set by the API state; None: no TMS
+        self.tms_source = None
 
     # --------------------------------------------------------
     # Stores
@@ -266,6 +316,11 @@ class AuditService:
             return store.audit_token() if store is not None else (0, 0, 0)
         except (StoreUnavailable, sqlite3.DatabaseError):
             return UNAVAILABLE_TOKEN
+
+    def tms_token(self):
+        """Changes whenever a TMS shipment record or a TMS resolution does (part of the audit cache key)."""
+
+        return self.tms_source.token() if self.tms_source is not None else ()
 
     def offered_problems(self):
         """
@@ -352,6 +407,14 @@ class AuditService:
                         approved[key] = None
                 return approved[key]
 
+            by_key = {}
+
+            for chunk in chunks:
+                by_key.setdefault(identifier_key((chunk.get("metadata") or {}).get("shipment_id")), []).append(chunk)
+
+            # The TMS shipment records and the decisions made on them, read once for the whole audit
+            tms = self.tms_source.load() if self.tms_source is not None else None
+
             def reconcile(shipment_id, chunks=None, **kwargs):
 
                 # Only approved corrections of this shipment's own documents; with
@@ -367,6 +430,15 @@ class AuditService:
                     else:
                         overrides, plan = audit_inputs.build_overrides(corrections, shipment_id, hashes)
 
+                # A TMS value a person chose, never over an approved correction (tms_audit)
+                if tms is not None and tms.match_of(key) is not None:
+                    chosen = tms_audit.plan_overrides(tms, key, tms_readings(by_key.get(key, [])))
+
+                    for name, resolution in chosen.items():
+                        if name not in overrides and name not in plan:
+                            overrides[name] = audit_inputs.tms_override(name, resolution, shipment_id)
+                            plan.setdefault("tms", {})[name] = resolution
+
                 plans[key] = plan
 
                 if overrides:
@@ -375,11 +447,6 @@ class AuditService:
                 return self.reconcile(shipment_id, chunks=chunks, **kwargs)
 
             snapshot = build_snapshot(chunks, reconcile, unreadable_files=problems)
-
-            by_key = {}
-
-            for chunk in chunks:
-                by_key.setdefault(identifier_key((chunk.get("metadata") or {}).get("shipment_id")), []).append(chunk)
 
             for item in snapshot["shipments"]:
                 key = item["shipment_key"]
@@ -408,10 +475,19 @@ class AuditService:
                         set(item["inputs"].get("applied_correction_ids") or []) | set(used)
                     )
 
+            # How each shipment's TMS record compares with what the audit read (after the freight audit: its
+            # inputs hold the documents' carrier, route, pickup date and agreed rate)
+            if tms is not None:
+                for item in snapshot["shipments"]:
+                    tms_audit.compare(item, tms)
+
+                snapshot["tms_unavailable"] = tms.unavailable
+
             return snapshot
 
         # The extractor version is part of the key: a changed version recomputes the cross-check without a restart
-        return self.cached("snapshot", compute, extra=(self.corrections_token(), document_extraction.EXTRACTOR_VERSION))
+        return self.cached("snapshot", compute,
+                           extra=(self.corrections_token(), document_extraction.EXTRACTOR_VERSION, self.tms_token()))
 
     def scan(self):
         """
@@ -499,7 +575,10 @@ class AuditService:
     def staleness(self):
         """
         The shipments whose latest recorded audit run did not consume the
-        approved corrections the audit reads now (history.staleness).
+        approved corrections the audit reads now (history.staleness). Each says
+        whether recording it needs a controlled re-audit ("controlled": a
+        missing correction is a line-item correction, which changes money
+        amounts: re_audit_preview, then re_audit).
         """
 
         applied = self.current_applied()
@@ -507,7 +586,15 @@ class AuditService:
         if not applied or not self.locations.history_db.is_file():
             return []
 
-        return self.history_store().staleness(applied)
+        stale = self.history_store().staleness(applied)
+        items = {item["shipment_key"]: item for item in self.snapshot()["shipments"]}
+
+        for entry in stale:
+            line_items, _ = controlled_ids(items.get(entry["shipment_key"]) or {})
+            entry["controlled_correction_ids"] = sorted(set(entry["missing_correction_ids"]) & line_items)
+            entry["controlled"] = bool(entry["controlled_correction_ids"])
+
+        return stale
 
     def outdated_cross_checks(self):
         """
@@ -545,11 +632,13 @@ class AuditService:
 
         authz.require(principal, authz.HISTORY_RECORD)
 
-        stale = self.staleness()
-        keys = [item["shipment_key"] for item in stale if shipment_keys is None or item["shipment_key"] in set(shipment_keys)]
+        stale = [item for item in self.staleness() if shipment_keys is None or item["shipment_key"] in set(shipment_keys)]
+        # A line-item correction changes money amounts: it is recorded by a controlled re-audit, never here
+        controlled = [item["shipment_key"] for item in stale if item.get("controlled")]
+        keys = [item["shipment_key"] for item in stale if not item.get("controlled")]
 
         if not keys:
-            return {"recorded": False, "run_id": None, "shipments": []}
+            return with_controlled({"recorded": False, "run_id": None, "shipments": []}, controlled)
 
         snapshot = self.snapshot()
         wanted = {item["shipment_key"]: item["missing_correction_ids"] for item in stale if item["shipment_key"] in keys}
@@ -561,9 +650,9 @@ class AuditService:
 
         # Another caller recorded the same recalculation between the check above and the write
         if outcome["run_id"] is None:
-            return {"recorded": False, "run_id": None, "shipments": []}
+            return with_controlled({"recorded": False, "run_id": None, "shipments": []}, controlled)
 
-        return {"recorded": True, "run_id": outcome["run_id"], "shipments": keys}
+        return with_controlled({"recorded": True, "run_id": outcome["run_id"], "shipments": keys}, controlled)
 
     def decide_correction(self, principal, correction_id, decision, note=None):
         """
@@ -588,14 +677,20 @@ class AuditService:
             return {**outcome, "recompute": {"status": "not_needed"}}
 
         import freight_audit
+        import line_item_corrections
 
         consumed = (outcome["document_type"], outcome["field_name"])
 
-        if consumed not in audit_inputs.TARGETS and consumed not in freight_audit.CONSUMED_FIELDS:
+        if consumed not in audit_inputs.TARGETS and not freight_audit.consumes(*consumed):
             return {**outcome, "recompute": {"status": "no_calculation_consumes_this_field"}}
 
         if outcome["shipment_key"] is None:
             return {**outcome, "recompute": {"status": "no_shipment"}}
+
+        # A charge's amount changes money figures: its effect is recorded by a controlled re-audit (previewed and
+        # confirmed by an administrator), never by the approval itself
+        if line_item_corrections.is_line_item(*consumed):
+            return {**outcome, "recompute": {"status": "re_audit_required", "shipments": [outcome["shipment_key"]]}}
 
         if not principal.can(authz.HISTORY_RECORD):
             return {**outcome, "recompute": {"status": "not_authorized"}}
@@ -609,6 +704,171 @@ class AuditService:
 
             return {**outcome, "recompute": {"status": "failed", "message": "The approval is recorded; the run was not. Record it again."}}
 
+        if outcome["shipment_key"] in recorded.get("re_audit_required", []):
+            return {**outcome, "recompute": {"status": "re_audit_required", "shipments": [outcome["shipment_key"]]}}
+
         status = "recorded" if recorded["recorded"] else "no_recorded_history"
 
         return {**outcome, "recompute": {"status": status, "run_id": recorded["run_id"], "shipments": recorded["shipments"]}}
+
+    # --------------------------------------------------------
+    # Controlled re-audit
+    # --------------------------------------------------------
+
+    def preview_of(self, snapshot, item):
+        """The re-audit preview of one shipment of this snapshot (see re_audit_preview)."""
+
+        from audit_history import compare, snapshot_record
+
+        key = item["shipment_key"]
+        exceptions = [entry for entry in build_exceptions(snapshot) if entry["shipment_key"] == key]
+        current = snapshot_record(item, exceptions)
+        recorded = self.history_store().latest_recorded(key) if self.locations.history_db.is_file() else None
+        previous = recorded["snapshot"] if recorded else None
+        changes = compare(previous, current)
+        inputs = item.get("inputs") or {}
+        applied = sorted(inputs.get("applied_correction_ids") or [])
+        tms_applied = sorted(inputs.get("applied_tms_resolution_ids") or [])
+        line_items, _ = controlled_ids(item)
+        before_ids = set((recorded or {}).get("applied_correction_ids") or [])
+        added = sorted(set(applied) - before_ids)
+        needed = recorded is None or previous["digest"] != current["digest"] or bool(added)
+        freight_now = item.get("freight_audit") or {}
+        freight_then = (previous or {}).get("freight_audit") or {}
+
+        token = hashlib.sha256(json.dumps(
+            [key, current["digest"], applied, tms_applied, recorded["run_id"] if recorded else None], default=str
+        ).encode("utf-8")).hexdigest()
+
+        def finding(entry):
+            return {"finding_key": entry["finding_key"], "category": entry["category"], "severity": entry["severity"],
+                    "summary": entry["summary"], "difference": entry["difference"]}
+
+        return {
+            "shipment_id": item["shipment_id"], "shipment_key": key, "needed": needed, "token": token,
+            "recorded": None if recorded is None else {
+                "run_id": recorded["run_id"], "recorded_at": recorded["recorded_at"], "label": recorded["label"],
+                "final_status": previous["final_status"], "freight_outcome": freight_then.get("outcome"),
+                "financial_impact": freight_then.get("financial_impact"),
+            },
+            "current": {"final_status": current["final_status"], "freight_outcome": freight_now.get("outcome"),
+                        "financial_impact": freight_now.get("financial_impact")},
+            "status_change": list(changes["status_change"]) if changes["status_change"] else None,
+            "value_changes": changes["value_changes"],
+            "state_changes": changes["state_changes"],
+            "findings": {name: [finding(entry) for entry in changes[name]] for name in ("new", "resolved", "changed", "unverified")},
+            "corrections": {"applied": applied, "added": added, "line_items": sorted(set(added) & line_items)},
+            "tms_resolutions": tms_applied,
+            "open_tms_conflicts": ((item.get("tms") or {}).get("open_conflicts") or 0),
+        }
+
+    def re_audit_preview(self, shipment_id):
+        """
+        What recording a re-audit of one shipment would change against its
+        latest recorded run: final status, values, audit states, findings, the
+        freight audit outcome and financial impact, and the approved corrections
+        and TMS resolutions it would record. "needed": something differs.
+        "token" names exactly this state: re_audit records it only while it is
+        still the state the author saw. LookupError for an unknown shipment.
+        """
+
+        snapshot = self.snapshot()
+        wanted = identifier_key(shipment_id)
+        item = next((entry for entry in snapshot["shipments"] if entry["shipment_key"] == wanted), None)
+
+        if item is None:
+            raise LookupError("No such shipment.")
+
+        return self.preview_of(snapshot, item)
+
+    def re_audit(self, principal, shipment_id, token, reason):
+        """
+        The controlled re-audit: records a run for this one shipment, exactly as
+        previewed (the token), with the reason and who in its label. Needs
+        history.record. The new run supersedes the earlier ones it adds
+        corrections to; they keep their snapshots and inputs. ReAuditRefused when
+        nothing changed, when the state changed since the preview, or when
+        another run was recorded for the shipment meanwhile: nothing is written.
+        """
+
+        authz.require(principal, authz.HISTORY_RECORD)
+
+        reason = " ".join((reason or "").split())
+
+        if len(reason) < 10:
+            raise ReAuditInvalid("Write why the shipment is re-audited (at least 10 characters).")
+
+        if len(reason) > 500:
+            raise ReAuditInvalid("The reason is longer than 500 characters.")
+
+        snapshot = self.snapshot()
+        wanted = identifier_key(shipment_id)
+        item = next((entry for entry in snapshot["shipments"] if entry["shipment_key"] == wanted), None)
+
+        if item is None:
+            raise LookupError("No such shipment.")
+
+        preview = self.preview_of(snapshot, item)
+
+        if preview["token"] != token:
+            raise ReAuditRefused("The audit of this shipment changed since the preview. Review the new preview and confirm again.")
+
+        if not preview["needed"]:
+            raise ReAuditRefused("Nothing to re-audit: the latest recorded run already holds this result.")
+
+        key = item["shipment_key"]
+        expected = preview["recorded"]["run_id"] if preview["recorded"] else None
+        outcome = self.history_store().record_run(
+            snapshot, build_exceptions(snapshot), label=f"Re-audit by {principal.username}: {reason}", shipment_keys=[key],
+            expect_latest={key: expected},
+        )
+
+        if outcome["run_id"] is None:
+            raise ReAuditRefused("Another audit run was recorded for this shipment meanwhile. Review the new preview.")
+
+        metrics.REGISTRY.inc("logidoc_re_audits_total", {"outcome": "recorded"})
+        log.info("Re-audit run %s recorded for %s by %s", outcome["run_id"], key, principal.username,
+                 extra={"operation": "re_audit", "outcome": "recorded"})
+
+        return {"recorded": True, "run_id": outcome["run_id"], "shipment_id": item["shipment_id"], "shipment_key": key,
+                "previous_run_id": expected, "snapshot_written": bool(outcome["snapshots_written"]),
+                "corrections_added": preview["corrections"]["added"], "tms_resolutions": preview["tms_resolutions"]}
+
+    def re_audits(self):
+        """
+        The shipments a controlled re-audit is waiting for: an approved
+        line-item correction or a chosen TMS value the audit reads now, and a
+        latest recorded run whose result differs. A shipment never recorded is
+        not listed (its first recorded run will include them).
+        """
+
+        if not self.locations.history_db.is_file():
+            return []
+
+        snapshot = self.snapshot()
+        history = self.history_store()
+        exceptions = build_exceptions(snapshot)
+        result = []
+
+        from audit_history import snapshot_record
+
+        for item in snapshot["shipments"]:
+            line_items, tms_ids = controlled_ids(item)
+
+            if not line_items and not tms_ids:
+                continue
+
+            recorded = history.latest_recorded(item["shipment_key"])
+
+            if recorded is None:
+                continue
+
+            current = snapshot_record(item, [entry for entry in exceptions if entry["shipment_key"] == item["shipment_key"]])
+            missing = sorted(line_items - set(recorded["applied_correction_ids"] or []))
+
+            if missing or recorded["snapshot"]["digest"] != current["digest"]:
+                result.append({"shipment_id": item["shipment_id"], "shipment_key": item["shipment_key"],
+                               "recorded_run_id": recorded["run_id"], "line_item_correction_ids": missing,
+                               "tms_resolution_ids": sorted(tms_ids)})
+
+        return result

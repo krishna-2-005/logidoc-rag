@@ -6,6 +6,7 @@ import { EmptyState, ErrorState, LoadingBlock, errorMessage } from "@/components
 import { useToast } from "@/components/common/toast"
 import { CorrectionDialog } from "@/components/extraction/CorrectionDialog"
 import { CorrectionBadge, FieldStateBadge, STATE_LOOK, ValidationBadge, consumerOf, pageText, valueText } from "@/components/extraction/fields"
+import { LineItemsTable } from "@/components/extraction/LineItems"
 import { CorrectionStoreWarning, RecomputeStatus } from "@/components/extraction/RecomputeStatus"
 import { StoreStateNotice, useStoreWriteBlock } from "@/components/extraction/storeState"
 import { Alert } from "@/components/ui/alert"
@@ -269,7 +270,14 @@ function ExtractionBody({ detail, canPropose, onPropose }: { detail: ExtractionD
         </TableBody>
       </Table>
 
-      {(payload.line_items.length > 0 || payload.unclassified_amounts.length > 0) && (
+      {detail.line_items && <LineItemsTable detail={detail} canPropose={canPropose} />}
+      {detail.line_items && payload.unclassified_amounts.length > 0 && (
+        <p className="text-xs text-warn">
+          {payload.unclassified_amounts.length} amount(s) could not be classified as charges: {payload.unclassified_amounts.map((item) => `${item.label} (${pageText(item.page)})`).join(", ")}. The invoice total is not checked against the charges.
+        </p>
+      )}
+
+      {!detail.line_items && (payload.line_items.length > 0 || payload.unclassified_amounts.length > 0) && (
         <details className="rounded-md border bg-card p-3 text-sm">
           <summary className="cursor-pointer font-medium">Charges read from this invoice ({payload.line_items.length})</summary>
           <ul className="mt-2 space-y-1">

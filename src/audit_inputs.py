@@ -14,11 +14,14 @@ Which values an audit actually consumed, and where each came from. Two jobs:
 
 Source-selection policy (see docs/CORRECTION_AWARE_AUDIT.md)
 
-    1. an approved correction that applies is the value
-    2. otherwise the legacy reader's value, exactly as before; structured
+    1. an approved correction that applies is the value (a line-item
+       correction stands for the charge its line's description names)
+    2. otherwise a TMS resolution that chose the TMS value and still applies
+       (tms_audit; never over an approved correction)
+    3. otherwise the legacy reader's value, exactly as before; structured
        extraction without a correction is shown beside it as a cross-check
        ("structured", with "agrees") and is never preferred or mixed in
-    3. missing, conflicting and unparseable values stay unresolved (value None)
+    4. missing, conflicting and unparseable values stay unresolved (value None)
 
 A correction applies only while its document is unchanged (the file's SHA-256 is
 still the extraction's) and belongs to the shipment audited. Among approvals for
@@ -33,10 +36,12 @@ import hashlib
 from datetime import date
 
 import document_extraction
+import line_item_corrections
 from shipment_calculations import FIELDS, FieldValue, Records, read_document_field
 
 
-CALCULATION_VERSION = "2"
+# 3: the invoice's charges are recorded inputs (line-item corrections), and a TMS resolution can be a source
+CALCULATION_VERSION = "3"
 
 # (document type, extraction field) -> the audit field a calculation reads
 TARGETS = {
@@ -47,10 +52,14 @@ TARGETS = {
     ("INVOICE", "invoice_total"): "invoice_total",
 }
 
-AUDIT_FIELDS = tuple(TARGETS.values())
+# The invoice's charges, read by label; a line-item correction of the line with that label stands for it
+LINE_ITEM_FIELDS = line_item_corrections.FIELDS
 
-# The extraction field behind an audit field, and the calculations that consume it
+AUDIT_FIELDS = tuple(TARGETS.values()) + LINE_ITEM_FIELDS
+
+# The extraction field behind an audit field (None: a charge, found among the invoice's line items)
 SOURCE_FIELD = {audit: (doc_type, field) for (doc_type, field), audit in TARGETS.items()}
+SOURCE_FIELD.update({name: ("INVOICE", None) for name in LINE_ITEM_FIELDS})
 
 CONSUMERS = {
     "expected_pieces": ("quantity",),
@@ -58,10 +67,29 @@ CONSUMERS = {
     "expected_date": ("delivery",),
     "actual_date": ("delivery",),
     "invoice_total": ("invoice", "financial_exposure"),
+    **{name: ("invoice", "financial_exposure") for name in LINE_ITEM_FIELDS},
 }
 
 LEGACY = "legacy_reader"
 APPROVED = "approved_correction"
+TMS = "tms_resolution"
+
+
+def target_of(correction):
+    """The audit field an approved correction stands for, or None when no calculation reads it."""
+
+    return TARGETS.get((correction["document_type"], correction["field_name"])) or line_item_corrections.target_of(correction)
+
+
+def stored_value(correction):
+    """The value a correction gives its audit field (a line-item correction gives its amount)."""
+
+    value = correction["value"]
+
+    if line_item_corrections.index_of(correction["field_name"]) is not None:
+        return (value or {}).get("amount")
+
+    return value
 
 
 def file_hashes(folder):
@@ -110,7 +138,7 @@ def json_value(value):
 
 def override_value(audit_field, correction, shipment_id):
     kind = FIELDS[audit_field][2]
-    value = typed(kind, correction["value"])
+    value = typed(kind, stored_value(correction))
     raw = shown(kind, value)
     doc_type = correction["document_type"]
 
@@ -122,6 +150,36 @@ def override_value(audit_field, correction, shipment_id):
 
     return FieldValue(value=value, text=f"{raw} (approved correction {correction['correction_id']})", raw=raw,
                       record=record, start=0)
+
+
+def tms_override(audit_field, resolution, shipment_id):
+    """The value a TMS resolution that chose the TMS value gives its audit field (tms_audit)."""
+
+    kind = FIELDS[audit_field][2]
+    value = typed(kind, resolution["tms_value"])
+    raw = shown(kind, value)
+    source = f"TMS record {resolution['external_id']}"
+    record = {"document": "", "normalized": "", "raw": "", "type": "tms",
+              "metadata": {"source": source, "document_type": "TMS", "shipment_id": shipment_id, "value_origin": TMS,
+                           "correction_id": None, "tms_resolution_id": resolution["id"]}}
+
+    return FieldValue(value=value, text=f"{raw} ({source}, TMS resolution {resolution['id']})", raw=raw, record=record, start=0)
+
+
+def charge_cross_check(audit_field, row):
+    """(state, amount) of the charge a line-item audit field names among an invoice extraction's line items."""
+
+    label = dict(line_item_corrections.TARGETS_BY_FIELD)[audit_field]
+    amounts = [item.get("amount") for item in row["payload"].get("line_items") or []
+               if line_item_corrections.words(item.get("description")).casefold() == label]
+
+    if not amounts:
+        return document_extraction.MISSING, None
+
+    if len({round(float(amount), 2) for amount in amounts}) > 1:
+        return document_extraction.CONFLICTING, None
+
+    return document_extraction.EXTRACTED, round(float(amounts[0]), 2)
 
 
 def conflict_value(audit_field, corrections, shipment_id):
@@ -147,7 +205,7 @@ def build_overrides(corrections, shipment_id, hashes):
     ignored, candidates = [], {}
 
     for correction in corrections:
-        audit_field = TARGETS.get((correction["document_type"], correction["field_name"]))
+        audit_field = target_of(correction)
 
         if audit_field is None:
             continue
@@ -169,7 +227,7 @@ def build_overrides(corrections, shipment_id, hashes):
         superseded = [c["correction_id"] for c in items if latest[c["sha256"]] is not c]
         winners = list(latest.values())
 
-        if len({repr(c["value"]) for c in winners}) > 1:
+        if len({repr(stored_value(c)) for c in winners}) > 1:
             overrides[audit_field] = conflict_value(audit_field, winners, shipment_id)
             plan[audit_field] = {"winner": None, "superseded": superseded, "conflict": sorted(c["correction_id"] for c in winners)}
         else:
@@ -217,6 +275,24 @@ def mark_corrections_unavailable(inputs):
             entry["validation"] = "warning"
 
 
+def records_of(chunks):
+    """A shipment's chunks as the calculations read them (no override)."""
+
+    return Records(
+        {"document": c["text"], "metadata": c["metadata"], "type": str(c["metadata"].get("document_type") or "").lower(),
+         "normalized": " ".join(str(c["text"]).split()), "raw": c["text"]}
+        for c in chunks
+    )
+
+
+def document_readings(chunks, names):
+    """{audit field: (state, typed value)} as the documents read now, without any correction."""
+
+    records = records_of(chunks)
+
+    return {name: reading_state(read_document_field(name, records)) for name in names}
+
+
 def build_inputs(shipment_key, shipment_id, chunks, plan, extractions=None):
     """
     The inputs of one shipment's audit: every audit field with where its value
@@ -225,13 +301,9 @@ def build_inputs(shipment_key, shipment_id, chunks, plan, extractions=None):
     with payload} of the documents as they are now, for the cross-check.
     """
 
-    records = Records(
-        {"document": c["text"], "metadata": c["metadata"], "type": str(c["metadata"].get("document_type") or "").lower(),
-         "normalized": " ".join(str(c["text"]).split()), "raw": c["text"]}
-        for c in chunks
-    )
+    records = records_of(chunks)
     plan = plan or {}
-    fields, applied = [], []
+    fields, applied, applied_tms = [], [], []
 
     for audit_field in AUDIT_FIELDS:
         kind = FIELDS[audit_field][2]
@@ -247,7 +319,7 @@ def build_inputs(shipment_key, shipment_id, chunks, plan, extractions=None):
             "validation": "valid" if state == "extracted" else "invalid", "warnings": [],
             "correction_id": None, "extraction_id": None, "extractor_version": None,
             "document_reading": {"state": state, "value": json_value(document_value)},
-            "structured": None, "superseded_correction_ids": [],
+            "structured": None, "superseded_correction_ids": [], "tms": None,
         }
 
         row = (extractions or {}).get(source_name) if source_name else None
@@ -256,8 +328,11 @@ def build_inputs(shipment_key, shipment_id, chunks, plan, extractions=None):
             row = next((r for r in extractions.values() if r["document_type"] == doc_type), None)
 
         if row is not None:
-            item = row["payload"]["fields"].get(extraction_field) or {}
-            structured_state, structured_value = item.get("state"), item.get("value")
+            if extraction_field is None:
+                structured_state, structured_value = charge_cross_check(audit_field, row)
+            else:
+                item = row["payload"]["fields"].get(extraction_field) or {}
+                structured_state, structured_value = item.get("state"), item.get("value")
             agrees = None
 
             if structured_state == "EXTRACTED" and state == "extracted":
@@ -279,10 +354,11 @@ def build_inputs(shipment_key, shipment_id, chunks, plan, extractions=None):
                     entry["validation"] = "warning"
 
         choice = plan.get(audit_field)
+        resolution = (plan.get("tms") or {}).get(audit_field)
 
         if choice is not None and choice["winner"] is not None:
             winner = choice["winner"]
-            entry.update(source=APPROVED, resolved=True, state="extracted", value=json_value(typed(kind, winner["value"])),
+            entry.update(source=APPROVED, resolved=True, state="extracted", value=json_value(typed(kind, stored_value(winner))),
                          document=winner["filename"], page=None, validation="approved", correction_id=winner["correction_id"],
                          extraction_id=winner["extraction_id"], extractor_version=winner["extractor_version"],
                          superseded_correction_ids=choice["superseded"])
@@ -291,8 +367,14 @@ def build_inputs(shipment_key, shipment_id, chunks, plan, extractions=None):
             entry.update(source=APPROVED, resolved=False, state="conflicting", value=None, validation="invalid",
                          warnings=entry["warnings"] + ["approved_corrections_disagree"], superseded_correction_ids=choice["superseded"])
             applied.extend(choice["conflict"])
+        elif resolution is not None:
+            # A person chose the TMS value over the document's (tms_audit); the document reading stays recorded beside it
+            entry.update(source=TMS, resolved=True, state="extracted", value=json_value(typed(kind, resolution["tms_value"])),
+                         document=f"TMS record {resolution['external_id']}", page=None, validation="tms_resolution")
+            applied_tms.append(resolution["id"])
 
         fields.append(entry)
 
     return {"calculation_version": CALCULATION_VERSION, "shipment_key": shipment_key, "shipment_id": shipment_id,
-            "fields": fields, "applied_correction_ids": sorted(set(applied)), "ignored": list(plan.get("ignored", []))}
+            "fields": fields, "applied_correction_ids": sorted(set(applied)), "applied_tms_resolution_ids": sorted(set(applied_tms)),
+            "ignored": list(plan.get("ignored", []))}

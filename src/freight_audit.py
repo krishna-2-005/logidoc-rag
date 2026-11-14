@@ -63,6 +63,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
 import document_extraction as de
+import line_item_corrections
 from document_extraction import BOL, CONFLICTING, EXTRACTED, INVOICE, POD, RATE, comparable, line_total, money
 from shipment_identity import identifier_collisions
 
@@ -348,10 +349,56 @@ CONSUMED_FIELDS = frozenset({
 })
 
 
+def consumes(document_type, field_name):
+    """Whether an approved correction of this field changes the freight audit (a charge of the invoice does)."""
+
+    return (document_type, field_name) in CONSUMED_FIELDS or line_item_corrections.is_line_item(document_type, field_name)
+
+
 def plain(value):
     """A field value as JSON can hold it."""
 
     return json.loads(json.dumps(value, default=str))
+
+
+def correct_line(document, correction, applied, ignored, reference):
+    """
+    Puts an approved line-item correction in place on a copied invoice: only on
+    the line it was made on, while that line still reads as it did then.
+    """
+
+    index = line_item_corrections.index_of(correction["field_name"])
+    value = correction["value"] or {}
+    lines = document.line_items
+
+    if index >= len(lines) or not line_item_corrections.same_line(lines[index], value.get("of")):
+        ignored.append({**reference, "reason": f"The invoice's line {index + 1} no longer reads as it did when it was "
+                                               "corrected (another extractor version?); check the line again."})
+        return
+
+    original = lines[index]
+    lines[index] = de.LineItem(
+        description=original.description, amount=float(value["amount"]), quantity=original.quantity, rate=original.rate,
+        page=original.page, raw_text=original.raw_text, source_file=original.source_file or document.filename,
+        warnings=[f"approved correction #{correction['correction_id']} by {correction.get('approved_by')}"],
+    )
+    applied.append({
+        "correction_id": correction["correction_id"],
+        "file": document.filename,
+        "document_type": document.document_type,
+        "field": correction["field_name"],
+        "original_state": EXTRACTED,
+        "original_value": {"description": original.description, "amount": plain(original.amount)},
+        "corrected_value": {"description": original.description, "amount": plain(value["amount"])},
+        "proposed_by": correction.get("proposed_by"),
+        "approved_by": correction.get("approved_by"),
+        "decided_at": correction.get("decided_at"),
+    })
+
+
+def corrected_line(item):
+
+    return any(str(warning).startswith("approved correction #") for warning in item.warnings or [])
 
 
 def apply_corrections(extractions, corrections):
@@ -375,6 +422,8 @@ def apply_corrections(extractions, corrections):
             ignored.append({**reference, "reason": "The document is no longer part of this shipment."})
         elif target.sha256 != correction["sha256"]:
             ignored.append({**reference, "reason": "It was made on another version of the file; check the field again."})
+        elif line_item_corrections.is_line_item(target.document_type, correction["field_name"]):
+            latest[(correction["filename"], correction["field_name"])] = correction
         elif correction["field_name"] not in de.SCHEMAS.get(target.document_type, {}):
             ignored.append({**reference, "reason": f"{correction['field_name']} is not a field of a {target.document_type}."})
         else:
@@ -389,6 +438,12 @@ def apply_corrections(extractions, corrections):
             copies[filename] = copy.deepcopy(by_file[filename])
 
         document = copies[filename]
+
+        if line_item_corrections.index_of(name) is not None:
+            correct_line(document, correction, applied, ignored,
+                         {"correction_id": correction["correction_id"], "file": filename, "field": name})
+            continue
+
         original = document.fields.get(name)
 
         document.fields[name] = de.ExtractedField(
@@ -430,7 +485,8 @@ def inputs_of(extractions):
                        "corrected": item.basis == CORRECTED}
                 for name, item in sorted(e.fields.items())
             },
-            "line_items": [{"description": item.description, "amount": item.amount, "page": item.page}
+            "line_items": [{"description": item.description, "amount": item.amount, "page": item.page,
+                            "corrected": corrected_line(item)}
                            for item in e.line_items],
         }
         for e in sorted(extractions, key=lambda e: e.filename)
@@ -546,8 +602,11 @@ def charge_lines(invoice, rate, invoices, rates, texts, policy, currency, mixed_
 
         if found:
             total = sum((money(item.amount) for item in found), Decimal("0"))
-            return total, {"file": invoice.filename, "page": found[0].page, "document_type": INVOICE,
-                           "lines": [item.description for item in found]}
+            found_source = {"file": invoice.filename, "page": found[0].page, "document_type": INVOICE,
+                            "lines": [item.description for item in found]}
+            if any(corrected_line(item) for item in found):
+                found_source["corrected"] = True
+            return total, found_source
 
         return (Decimal("0"), None) if readable else (None, None)
 
@@ -656,6 +715,9 @@ def charge_lines(invoice, rate, invoices, rates, texts, policy, currency, mixed_
     for item in grouped[ACCESSORIAL]:
         billed = money(item.amount)
         billed_src = {"file": invoice.filename, "page": item.page, "document_type": INVOICE}
+
+        if corrected_line(item):
+            billed_src["corrected"] = True
 
         if billed == 0:
             lines.append(line(item.description, ACCESSORIAL, MATCHED, "Nothing billed.", billed=billed, currency=currency,

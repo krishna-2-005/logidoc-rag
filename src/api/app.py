@@ -47,8 +47,8 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 import config
 import metrics
 import readiness
-from api import (routes_assistant, routes_audit, routes_auth, routes_carriers, routes_extraction, routes_ingestion,
-                 routes_integrations, routes_operations, routes_workflow)
+from api import (routes_assistant, routes_audit, routes_audit_review, routes_auth, routes_carriers, routes_extraction,
+                 routes_ingestion, routes_integrations, routes_operations, routes_workflow)
 from api.core import ApiSettings, ApiState, csrf_guard
 from api.middleware import BodyLimit, HttpsPolicy, TrustedHosts
 from observability import RequestContext, set_error_category
@@ -200,7 +200,7 @@ def create_app(state=None, settings=None):
 
     for router in (routes_auth.router, routes_audit.router, routes_workflow.router, routes_ingestion.router,
                    routes_assistant.router, routes_extraction.router, routes_extraction.history_router,
-                   routes_carriers.router, routes_operations.router, routes_integrations.router):
+                   routes_carriers.router, routes_operations.router, routes_integrations.router, routes_audit_review.router):
         app.include_router(router, dependencies=[Depends(csrf_guard)])
 
     @app.get("/api/health")

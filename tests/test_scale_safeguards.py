@@ -152,7 +152,7 @@ def test_a_version_4_history_gets_its_indexes_and_keeps_every_row(tmp_path):
     assert {"run_input_sets_by_shipment", "run_shipments_by_shipment"} <= indexes(path)
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("SELECT version FROM schema_info").fetchone()[0] == audit_history.SCHEMA_VERSION == 5
+        assert connection.execute("SELECT version FROM schema_info").fetchone()[0] == audit_history.SCHEMA_VERSION == 6
         assert {table: connection.execute(f"SELECT * FROM {table}").fetchall() for table in before} == before
 
         plan = " ".join(row[3] for row in connection.execute(

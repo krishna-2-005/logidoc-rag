@@ -353,9 +353,12 @@ class InputField(Contract):
 
 
 class InputLineItem(Contract):
+    """corrected: an approved line-item correction supplied the amount (absent in audits recorded before)."""
+
     description: str
     amount: float
     page: int | None
+    corrected: bool = False
 
 
 class FreightInput(Contract):
@@ -1433,3 +1436,242 @@ class IntegrationDashboard(Contract):
     daily: list[SyncDay]
     errors: list[SyncErrors]
     integrations: list[IntegrationHealth]
+
+
+# ============================================================
+# LINE-ITEM CORRECTIONS, CONTROLLED RE-AUDITS, TMS COMPARISONS
+# ============================================================
+
+class LineItemProposal(Contract):
+    """A proposed correction of one invoice charge's amount: no effect until a different administrator approves it."""
+
+    id: int
+    extraction_id: int
+    field_name: str
+    previous: Any
+    corrected: Any
+    reason: str
+    actor: str
+    authenticated: bool
+    at: str
+    based_on: int | None
+    status: Literal["pending"]
+    legacy: bool
+
+
+class ReAuditRun(Contract):
+    run_id: int
+    recorded_at: str
+    label: str | None
+    final_status: str | None
+    freight_outcome: FreightOutcome | None
+    financial_impact: FreightImpact | None
+
+
+class ReAuditState(Contract):
+    final_status: str | None
+    freight_outcome: FreightOutcome | None
+    financial_impact: FreightImpact | None
+
+
+class ReAuditValueChange(Contract):
+    field: str
+    label: str
+    previous: Any
+    current: Any
+
+
+class ReAuditStateChange(Contract):
+    audit: str
+    previous: str
+    current: str
+
+
+class ReAuditFinding(Contract):
+    finding_key: str
+    category: str
+    severity: str
+    summary: str
+    difference: float | None
+
+
+class ReAuditFindings(Contract):
+    new: list[ReAuditFinding]
+    resolved: list[ReAuditFinding]
+    changed: list[ReAuditFinding]
+    unverified: list[ReAuditFinding]
+
+
+class ReAuditCorrections(Contract):
+    """applied: every approved correction the audit reads now; added: those the latest recorded run lacks."""
+
+    applied: list[int]
+    added: list[int]
+    line_items: list[int]
+
+
+class ReAuditPreview(Contract):
+    """
+    What a re-audit of one shipment would record against its latest recorded run.
+    recorded null: nothing was recorded for the shipment yet. token: send it back
+    to record exactly this state.
+    """
+
+    shipment_id: str
+    shipment_key: str
+    needed: bool
+    token: str
+    recorded: ReAuditRun | None
+    current: ReAuditState
+    status_change: list[str | None] | None
+    value_changes: list[ReAuditValueChange]
+    state_changes: list[ReAuditStateChange]
+    findings: ReAuditFindings
+    corrections: ReAuditCorrections
+    tms_resolutions: list[int]
+    open_tms_conflicts: int
+
+
+class ReAuditRecorded(Contract):
+    recorded: bool
+    run_id: int
+    shipment_id: str
+    shipment_key: str
+    previous_run_id: int | None
+    snapshot_written: bool
+    corrections_added: list[int]
+    tms_resolutions: list[int]
+
+
+class ReAuditQueueItem(Contract):
+    shipment_id: str
+    shipment_key: str
+    recorded_run_id: int
+    line_item_correction_ids: list[int]
+    tms_resolution_ids: list[int]
+
+
+class ReAuditQueue(Contract):
+    re_audits: list[ReAuditQueueItem]
+
+
+class TmsMatch(Contract):
+    """The TMS shipment record matched by its reference, with where it came from."""
+
+    integration_id: int
+    integration_name: str
+    provider: str
+    record_id: int
+    external_id: str
+    reference: str | None
+    status: str | None
+    source_updated_at: str
+    imported_at: str
+    first_run_id: int
+    last_run_id: int
+    corrected_fields: list[str]
+    data: dict[str, Any]
+
+
+class TmsResolutionView(Contract):
+    id: int
+    choice: Literal["document", "tms"]
+    reason: str
+    actor: str
+    at: str
+    record_id: int
+    external_id: str
+    source_updated_at: str | None
+    tms_value: Any
+    document_value: Any
+
+
+class TmsCurrency(Contract):
+    tms: str | None
+    documents: str | None
+
+
+class TmsComparison(Contract):
+    """One compared field. open: nobody has decided yet; choices: what a decision may keep."""
+
+    field: str
+    label: str
+    consumed: bool
+    tms_field: str
+    tms_value: Any
+    document_value: Any
+    tms_text: Any
+    document_text: Any
+    document_state: str
+    document_source: str | None
+    state: Literal["agrees", "not_compared", "conflict", "document_missing", "resolved_document", "resolved_tms", "protected"]
+    open: bool
+    tms_corrected_by_hand: bool
+    choices: list[Literal["document", "tms"]]
+    resolution: TmsResolutionView | None
+    currency: TmsCurrency | None
+    protected_by: int | None
+
+
+class TmsResolutionRecord(Contract):
+    """A stored decision (append-only), whether or not it still applies."""
+
+    id: int
+    shipment_key: str
+    field: str
+    choice: Literal["document", "tms"]
+    integration_id: int
+    record_id: int
+    external_id: str
+    source_updated_at: str | None
+    tms_value: Any
+    document_value: Any
+    reason: str
+    actor: str
+    at: str
+
+
+class TmsUnavailable(Contract):
+    integration_id: int | None
+    reason: str
+
+
+class TmsShipmentView(Contract):
+    """configured: an integration store exists. match null and ambiguous false: no TMS record names this shipment."""
+
+    shipment_id: str
+    shipment_key: str
+    configured: bool
+    match: TmsMatch | None
+    matches: list[TmsMatch]
+    ambiguous: bool
+    comparisons: list[TmsComparison]
+    open_conflicts: int
+    applied_resolution_ids: list[int]
+    history: list[TmsResolutionRecord]
+    unavailable: list[TmsUnavailable]
+
+
+class TmsResolutionResult(Contract):
+    """re_audit required: the audit now reads another value; a controlled re-audit records it."""
+
+    resolution: TmsResolutionRecord
+    shipment_id: str
+    re_audit: Literal["required", "not_needed"]
+
+
+class TmsConflict(Contract):
+    shipment_id: str
+    shipment_key: str
+    field: str | None
+    label: str
+    state: str
+    tms_value: Any
+    document_value: Any
+    integration_name: str | None
+    external_id: str | None
+
+
+class TmsConflictQueue(Contract):
+    conflicts: list[TmsConflict]
+    unavailable: list[TmsUnavailable]

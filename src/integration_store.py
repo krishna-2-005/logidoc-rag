@@ -38,7 +38,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_info (version INTEGER NOT NULL);
@@ -260,6 +260,31 @@ MIGRATIONS = {
     2: (
         "ALTER TABLE integrations ADD COLUMN lease_owner TEXT",
         "ALTER TABLE sync_runs ADD COLUMN stale INTEGER NOT NULL DEFAULT 0",
+    ),
+    # A person's choice between a TMS shipment record's value and the documents' value for one audited field
+    # of one shipment (src/tms_audit.py). Append-only: a later choice is a new row, and a choice only applies
+    # while both values are still the ones it was made on
+    3: (
+        """CREATE TABLE IF NOT EXISTS tms_resolutions (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            shipment_key      TEXT NOT NULL,
+            field             TEXT NOT NULL,
+            choice            TEXT NOT NULL CHECK (choice IN ('document', 'tms')),
+            integration_id    INTEGER NOT NULL,
+            record_id         INTEGER NOT NULL,
+            external_id       TEXT NOT NULL,
+            source_updated_at TEXT,
+            tms_value         TEXT,
+            document_value    TEXT,
+            reason            TEXT NOT NULL,
+            actor             TEXT NOT NULL,
+            at                TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS tms_resolutions_by_shipment ON tms_resolutions (shipment_key, field, id)",
+        "CREATE TRIGGER IF NOT EXISTS tms_resolutions_no_update BEFORE UPDATE ON tms_resolutions "
+        "BEGIN SELECT RAISE(ABORT, 'integration history is append-only'); END",
+        "CREATE TRIGGER IF NOT EXISTS tms_resolutions_no_delete BEFORE DELETE ON tms_resolutions "
+        "BEGIN SELECT RAISE(ABORT, 'integration history is append-only'); END",
     ),
 }
 

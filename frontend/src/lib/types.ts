@@ -348,6 +348,8 @@ export interface FreightSource {
   page: number | null
   document_type: string
   lines?: string[]
+  /** an approved correction supplied the value */
+  corrected?: boolean
 }
 
 /** One charge-level comparison: contract (rate confirmation) against the invoice */
@@ -695,6 +697,24 @@ export interface ExtractionDetail {
   aliases?: ExtractionAlias[]
   /** false while the store awaits its schema upgrade (no alias table yet) */
   aliases_available?: boolean
+  /** an invoice's charges with what was read, proposed and approved for each (absent from older servers) */
+  line_items?: LineItemView[]
+}
+
+/** One charge of an invoice extraction (GET /api/extractions/{id} line_items) */
+export interface LineItemView {
+  index: number
+  field_name: string
+  extracted: { description: string; amount: number; page: number | null }
+  proposed: Correction | null
+  approved: Correction | null
+  /** the approval is pinned to this line as read here */
+  applies: boolean
+  latest_correction_id: number | null
+  /** what the freight audit reads */
+  amount: number
+  source: "extracted" | "approved_correction"
+  correction_id: number | null
 }
 
 export interface PendingList {
@@ -716,7 +736,7 @@ export interface DecisionResult {
   shipment_key: string | null
   corrected: unknown
   recompute: {
-    status: "not_needed" | "recorded" | "failed" | "no_recorded_history" | "no_calculation_consumes_this_field" | "no_shipment" | "not_authorized"
+    status: "not_needed" | "recorded" | "failed" | "no_recorded_history" | "no_calculation_consumes_this_field" | "no_shipment" | "not_authorized" | "re_audit_required"
     run_id?: number | null
     shipments?: string[]
     message?: string
@@ -728,6 +748,9 @@ export interface StaleShipment {
   recorded_run_id: number
   missing_correction_ids: number[]
   stale_run_ids: number[]
+  /** a missing correction is a line-item correction: recorded only by a controlled re-audit */
+  controlled?: boolean
+  controlled_correction_ids?: number[]
 }
 
 export interface StoreMigration {
@@ -761,6 +784,8 @@ export interface RecomputeResult {
   recorded: boolean
   run_id: number | null
   shipments: string[]
+  /** shipments left to a controlled re-audit (present only when there are some) */
+  re_audit_required?: string[]
 }
 
 export interface IntegrityReport {
@@ -780,7 +805,7 @@ export interface RunInput {
   field_name: string
   /** typed value; null when unresolved */
   value: unknown
-  source: "legacy_reader" | "approved_correction"
+  source: "legacy_reader" | "approved_correction" | "tms_resolution"
   resolved: boolean
   state: string
   correction_id: number | null
@@ -794,6 +819,8 @@ export interface RunInput {
   consumed_by: string[]
   structured: { extraction_id: number; state: string; value: unknown; agrees: boolean | null } | null
   calculation_version: string
+  /** the TMS record beside the value (runs recorded before have none) */
+  tms?: { external_id: string; integration_name: string; value: unknown; state: TmsState; resolution_id: number | null } | null
 }
 
 export interface RunInputs {
@@ -1501,4 +1528,135 @@ export interface IntegrationDashboard {
     window: SyncCounts & { error_categories: Record<string, number> }
     recent_runs: SyncRun[]
   }[]
+}
+
+// ---------------------------------------------------------------------------
+// Controlled re-audit and TMS comparison
+// ---------------------------------------------------------------------------
+
+export interface FreightImpact {
+  currency: string | null
+  billed_above_contract: number
+  without_evidence: number
+  pending_review: number
+}
+
+export interface ReAuditFinding {
+  finding_key: string
+  category: string
+  severity: string
+  summary: string
+  difference: number | null
+}
+
+/** GET /api/shipments/{id}/re-audit: what recording a re-audit would change against the latest recorded run */
+export interface ReAuditPreview {
+  shipment_id: string
+  shipment_key: string
+  needed: boolean
+  /** send it back to record exactly this state */
+  token: string
+  recorded: { run_id: number; recorded_at: string; label: string | null; final_status: string | null; freight_outcome: FreightOutcome | null; financial_impact: FreightImpact | null } | null
+  current: { final_status: string | null; freight_outcome: FreightOutcome | null; financial_impact: FreightImpact | null }
+  status_change: (string | null)[] | null
+  value_changes: { field: string; label: string; previous: unknown; current: unknown }[]
+  state_changes: { audit: string; previous: string; current: string }[]
+  findings: { new: ReAuditFinding[]; resolved: ReAuditFinding[]; changed: ReAuditFinding[]; unverified: ReAuditFinding[] }
+  corrections: { applied: number[]; added: number[]; line_items: number[] }
+  tms_resolutions: number[]
+  open_tms_conflicts: number
+}
+
+export interface ReAuditRecorded {
+  recorded: boolean
+  run_id: number
+  shipment_id: string
+  shipment_key: string
+  previous_run_id: number | null
+  snapshot_written: boolean
+  corrections_added: number[]
+  tms_resolutions: number[]
+}
+
+export interface ReAuditQueue {
+  re_audits: { shipment_id: string; shipment_key: string; recorded_run_id: number; line_item_correction_ids: number[]; tms_resolution_ids: number[] }[]
+}
+
+export type TmsState = "agrees" | "not_compared" | "conflict" | "document_missing" | "resolved_document" | "resolved_tms" | "protected"
+
+export interface TmsMatch {
+  integration_id: number
+  integration_name: string
+  provider: string
+  record_id: number
+  external_id: string
+  reference: string | null
+  status: string | null
+  source_updated_at: string
+  imported_at: string
+  first_run_id: number
+  last_run_id: number
+  corrected_fields: string[]
+  data: Record<string, unknown>
+}
+
+export interface TmsResolution {
+  id: number
+  choice: "document" | "tms"
+  reason: string
+  actor: string
+  at: string
+  record_id: number
+  external_id: string
+  source_updated_at: string | null
+  tms_value: string | number | null
+  document_value: string | number | null
+}
+
+export interface TmsComparison {
+  field: string
+  label: string
+  consumed: boolean
+  tms_field: string
+  tms_value: string | number | null
+  document_value: string | number | null
+  /** the values as written (tms_value and document_value are in the compared form a decision names) */
+  tms_text: string | number | null
+  document_text: string | number | null
+  document_state: string
+  document_source: string | null
+  state: TmsState
+  open: boolean
+  tms_corrected_by_hand: boolean
+  choices: ("document" | "tms")[]
+  resolution: TmsResolution | null
+  currency: { tms: string | null; documents: string | null } | null
+  protected_by: number | null
+}
+
+/** GET /api/shipments/{id}/tms */
+export interface TmsShipmentView {
+  shipment_id: string
+  shipment_key: string
+  /** an integration store exists */
+  configured: boolean
+  match: TmsMatch | null
+  matches: TmsMatch[]
+  ambiguous: boolean
+  comparisons: TmsComparison[]
+  open_conflicts: number
+  applied_resolution_ids: number[]
+  history: (TmsResolution & { shipment_key: string; field: string; integration_id: number })[]
+  unavailable: { integration_id: number | null; reason: string }[]
+}
+
+export interface TmsResolutionResult {
+  resolution: TmsResolution & { shipment_key: string; field: string; integration_id: number }
+  shipment_id: string
+  re_audit: "required" | "not_needed"
+}
+
+export interface TmsConflictQueue {
+  conflicts: { shipment_id: string; shipment_key: string; field: string | null; label: string; state: string; tms_value: unknown; document_value: unknown; integration_name: string | null; external_id: string | null }[]
+  unavailable: { integration_id: number | null; reason: string }[]
 }

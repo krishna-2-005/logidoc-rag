@@ -1,5 +1,6 @@
 import { RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react"
 import { useRef, useState } from "react"
+import { Link } from "react-router-dom"
 import { errorMessage } from "@/components/common/states"
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -142,7 +143,23 @@ export function RecomputeStatus({ shipmentKey }: { shipmentKey?: string }) {
         </Alert>
       )}
 
-      {entries.map((item) => (
+      {entries.filter((item) => item.controlled).map((item) => (
+        <Alert key={`controlled-${item.shipment_key}`} tone="warn" className="items-start" data-testid={`controlled-${item.shipment_key}`}>
+          <div className="flex-1">
+            <p className="font-medium">An approved charge correction is waiting for a re-audit{shipmentKey ? "" : ` of ${item.shipment_key}`}.</p>
+            <p className="mt-0.5">
+              The audit already reads it; the latest recorded run (#{item.recorded_run_id}) does not. A charge changes money figures, so an administrator previews the re-audit and confirms it with a reason{shipmentKey ? " in the Re-audit section of this page" : ""}.
+            </p>
+            {!shipmentKey && (
+              <Link className="mt-2 inline-block text-sm font-medium underline" to={`/shipments/${encodeURIComponent(item.shipment_key)}`}>
+                Review the re-audit
+              </Link>
+            )}
+          </div>
+        </Alert>
+      ))}
+
+      {entries.filter((item) => !item.controlled).map((item) => (
         <Alert key={item.shipment_key} tone="warn" className="items-start">
           <div className="flex-1">
             <p className="font-medium">A recalculated audit run is waiting to be recorded{shipmentKey ? "" : ` for ${item.shipment_key}`}.</p>
@@ -188,7 +205,7 @@ export function RecomputeStatus({ shipmentKey }: { shipmentKey?: string }) {
         </p>
       )}
 
-      {canRecord && !shipmentKey && entries.length > 1 && (
+      {canRecord && !shipmentKey && entries.filter((item) => !item.controlled).length > 1 && (
         <Button variant="outline" size="sm" onClick={() => run(undefined)} disabled={recompute.isPending}>
           <RefreshCw /> {recompute.isPending ? "Recording…" : "Record every pending run"}
         </Button>

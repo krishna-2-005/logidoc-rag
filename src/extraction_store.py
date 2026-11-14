@@ -286,6 +286,15 @@ def now_text():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def money_equal(first, second):
+    """Whether two amounts are the same to the cent."""
+
+    try:
+        return de.money(first) == de.money(second)
+    except (TypeError, ValueError, ArithmeticError):
+        return False
+
+
 def sha256_text(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -797,6 +806,163 @@ class ExtractionStore:
                     "corrected": corrected, "reason": reason, "actor": principal.username,
                     "authenticated": principal.authenticated, "at": at, "based_on": based_on, "status": PENDING,
                     "legacy": False}
+
+    def propose_line_item(self, principal, extraction_id, index, text, reason, *, based_on):
+        """
+        Records a reviewer's proposed correction of the amount of one invoice
+        charge: the line item at position `index` (0 = the first line the
+        extractor read). The same workflow as propose(): a proposal with no
+        effect until a different administrator approves it, based_on the latest
+        correction of that line the reviewer saw (StaleCorrection otherwise), one
+        pending proposal per line, the value parsed as money and pinned to the
+        line as read (line_item_corrections.coerce). Returns the proposal.
+        """
+
+        import line_item_corrections as items
+
+        authz.require(principal, authz.EXTRACTION_CORRECT)
+
+        reason = " ".join((reason or "").split())
+
+        if len(reason) < MIN_REASON:
+            raise StoreError(f"Write why the amount is being corrected (at least {MIN_REASON} characters).")
+
+        if len(reason) > MAX_REASON:
+            raise StoreError(f"The reason is longer than {MAX_REASON} characters.")
+
+        if based_on is not None and (not isinstance(based_on, int) or isinstance(based_on, bool)):
+            raise StoreError("based_on must be a correction id or None.")
+
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+            raise StoreError("The line item must be a position from 0.")
+
+        field_name = items.field_name(index)
+
+        with self.write() as connection:
+            row = connection.execute("SELECT * FROM extractions WHERE id = ?", (extraction_id,)).fetchone()
+
+            if row is None:
+                raise StoreError(f"Unknown extraction {extraction_id}.")
+
+            if row["document_type"] != de.INVOICE:
+                raise StoreError("Only the charges of an invoice can be corrected line by line.")
+
+            lines = json.loads(row["payload"]).get("line_items") or []
+
+            if index >= len(lines):
+                raise StoreError(f"The invoice has no line item {index + 1} (it has {len(lines)}).")
+
+            try:
+                corrected = items.coerce(lines[index], text)
+            except ValueError as error:
+                raise StoreError(str(error)) from error
+
+            latest = connection.execute(
+                "SELECT c.id, d.id AS decision_id FROM field_corrections c LEFT JOIN correction_decisions d ON d.correction_id = c.id "
+                "WHERE c.extraction_id = ? AND c.field_name = ? ORDER BY c.id DESC LIMIT 1",
+                (extraction_id, field_name),
+            ).fetchone()
+            latest_id = latest["id"] if latest else None
+
+            if latest_id != based_on:
+                raise StaleCorrection(
+                    f"Line {index + 1} was corrected (correction {latest_id}) after the version this change is based on "
+                    f"({'none' if based_on is None else based_on}). Reload it and decide again."
+                )
+
+            if latest and latest["decision_id"] is None:
+                raise StoreError(f"A correction of line {index + 1} (correction {latest_id}) is awaiting a decision.")
+
+            # The value being replaced: the latest approval of this line of this file's content, else the line as read
+            approved = connection.execute(
+                "SELECT c.corrected FROM field_corrections c JOIN correction_decisions d ON d.correction_id = c.id "
+                "JOIN extractions e ON e.id = c.extraction_id WHERE e.sha256 = ? AND e.document_type = ? AND c.field_name = ? "
+                "AND c.legacy = 0 AND d.decision = 'approved' ORDER BY d.id DESC LIMIT 1",
+                (row["sha256"], row["document_type"], field_name),
+            ).fetchone()
+            approved_value = json.loads(approved["corrected"]) if approved else None
+
+            if approved_value is not None and items.same_line(approved_value.get("of") or {}, corrected["of"]):
+                previous = {"value": items.line_value(approved_value), "state": de.EXTRACTED, "source": "approved_correction"}
+            else:
+                previous = {"value": {"description": lines[index]["description"], "amount": lines[index]["amount"]},
+                            "state": de.EXTRACTED, "source": "extracted"}
+
+            if money_equal(previous["value"]["amount"], corrected["amount"]):
+                raise StoreError("The corrected amount is the same as the current amount.")
+
+            at = now_text()
+            previous_text, corrected_text = json.dumps(previous), json.dumps(corrected)
+            tip = connection.execute("SELECT hash FROM field_corrections WHERE hash IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
+            prev_hash = tip["hash"] if tip else ""
+            digest = correction_hash(prev_hash, extraction_id, field_name, previous_text, corrected_text, reason,
+                                     principal.username, principal.authenticated, at, based_on)
+
+            cursor = connection.execute(
+                "INSERT INTO field_corrections (extraction_id, field_name, previous, corrected, reason, actor, "
+                "authenticated, at, based_on, prev_hash, hash, legacy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                (extraction_id, field_name, previous_text, corrected_text, reason, principal.username,
+                 int(principal.authenticated), at, based_on, prev_hash, digest),
+            )
+
+            return {"id": cursor.lastrowid, "extraction_id": extraction_id, "field_name": field_name, "previous": previous,
+                    "corrected": corrected, "reason": reason, "actor": principal.username,
+                    "authenticated": principal.authenticated, "at": at, "based_on": based_on, "status": PENDING,
+                    "legacy": False}
+
+    def line_items(self, extraction_id):
+        """
+        The charges of an invoice extraction, each with what was read, what is
+        proposed and what is approved, kept apart like effective():
+
+            index, field_name, extracted {description, amount, page}
+            proposed            the pending proposal of this line, or None
+            approved            the latest approved correction of this line of
+                                this file's content (any extraction), or None
+            applies             whether that approval is pinned to this line as
+                                read here (a new extractor version may read the
+                                lines differently: then it does not apply)
+            amount, source, correction_id   what the freight audit reads
+            latest_correction_id            what a further proposal names as based_on
+
+        An extraction of any other document type has none.
+        """
+
+        import line_item_corrections as items
+
+        record = self.row(extraction_id)
+
+        if record is None:
+            raise StoreError(f"Unknown extraction {extraction_id}.")
+
+        if record["document_type"] != de.INVOICE:
+            return []
+
+        result = []
+        corrections = [c for c in self.corrections(extraction_id) if items.index_of(c["field_name"]) is not None]
+
+        for index, line in enumerate(record["payload"].get("line_items") or []):
+            name = items.field_name(index)
+            own = [c for c in corrections if c["field_name"] == name]
+            entry = {
+                "index": index, "field_name": name,
+                "extracted": {"description": line.get("description"), "amount": line.get("amount"), "page": line.get("page")},
+                "proposed": next((c for c in reversed(own) if c["status"] == PENDING), None),
+                "approved": None, "applies": False, "latest_correction_id": own[-1]["id"] if own else None,
+                "amount": line.get("amount"), "source": "extracted", "correction_id": None,
+            }
+            approved = self.approved_for_content(record["sha256"], record["document_type"], name)
+
+            if approved is not None:
+                entry["approved"] = approved
+                entry["applies"] = items.same_line(line, (approved["corrected"] or {}).get("of"))
+
+                if entry["applies"]:
+                    entry.update(amount=approved["corrected"]["amount"], source="approved_correction", correction_id=approved["id"])
+
+            result.append(entry)
+
+        return result
 
     @staticmethod
     def is_legacy(connection, correction_id):

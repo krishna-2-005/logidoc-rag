@@ -676,12 +676,15 @@ def test_a_version_1_integration_store_is_upgraded_keeping_its_rows(tmp_path):
 
     store = integration_store.IntegrationStore(path)
 
-    assert store.version() == integration_store.SCHEMA_VERSION == 2
+    assert store.version() == integration_store.SCHEMA_VERSION == 3
     with closing(sqlite3.connect(path)) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(integrations)")}
         run_columns = {row[1] for row in connection.execute("PRAGMA table_info(sync_runs)")}
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert connection.execute("SELECT name FROM integrations").fetchall() == [("Old",)]
     assert "lease_owner" in columns and "stale" in run_columns
+    # Version 3: the TMS resolutions of the audit (src/tms_audit.py)
+    assert "tms_resolutions" in tables
 
 
 # ============================================================

@@ -25,6 +25,7 @@ import audit_inputs
 import authz
 import document_extraction as de
 import extraction_store as store_module
+from api import schemas
 from api.core import ApiState, get_state, require
 from extraction_store import ExtractionStore
 from shipment_identity import identifier_key
@@ -45,8 +46,10 @@ Approve = Depends(require(authz.EXTRACTION_APPROVE))
 LIMITATIONS = [
     "A correction is a proposal until a different administrator approves it; only an approved correction reaches an audit.",
     "Approved corrections are read by the quantity, delivery and invoice audits (and so the financial exposure) for these fields only: "
-    "BOL piece_count and expected_delivery_date, POD delivered_pieces and delivery_date, INVOICE invoice_total. "
-    "Charges by label, carrier, route and document completeness still use the original readers.",
+    "BOL piece_count and expected_delivery_date, POD delivered_pieces and delivery_date, INVOICE invoice_total, and the "
+    "amount of an invoice's charge (a line-item correction). Carrier, route and document completeness still use the original readers.",
+    "An approved line-item correction is recorded in the audit history by a controlled re-audit (previewed, then confirmed by "
+    "an administrator), never by the approval itself.",
     "No OCR: scanned pages are reported as needing OCR.",
     "No calibrated confidence: a field is trusted because its label matched, and validation says what was checked.",
 ]
@@ -63,6 +66,14 @@ class CorrectionBody(BaseModel):
     value: str = Field(min_length=1, max_length=500)
     reason: str = Field(min_length=1, max_length=1000)
     # Required, may be null: the latest correction of this field the reviewer saw
+    based_on: int | None = Field(..., ge=1, le=MAX_ID)
+
+
+class LineItemCorrectionBody(BaseModel):
+
+    amount: str = Field(min_length=1, max_length=60)
+    reason: str = Field(min_length=1, max_length=1000)
+    # Required, may be null: the latest correction of this line the reviewer saw
     based_on: int | None = Field(..., ge=1, le=MAX_ID)
 
 
@@ -240,7 +251,37 @@ def extraction_detail(extraction_id: RowId, principal=View, state: ApiState = De
     aliases = store.aliases(extraction_id)
 
     return {**record, "effective": store.effective(extraction_id), "corrections": store.corrections(extraction_id),
+            "line_items": store.line_items(extraction_id),
             "aliases": aliases or [], "aliases_available": aliases is not None, "limitations": LIMITATIONS}
+
+
+@router.post("/{extraction_id}/line-items/{index}/corrections", response_model=schemas.LineItemProposal,
+             responses={**schemas.ERRORS, 404: {"model": schemas.ErrorResponse, "description": "No such extraction"},
+                        409: {"model": schemas.ErrorResponse, "description": "The line changed since it was shown"}})
+def propose_line_item(extraction_id: RowId, index: Annotated[int, PathParam(ge=0, le=999)], body: LineItemCorrectionBody,
+                      principal=Correct, state: ApiState = Depends(get_state)):
+    """
+    Records a proposed correction of one invoice charge's amount (the line item at
+    this position, 0 = the first). It has no effect until a different
+    administrator approves it; its effect is then recorded by a controlled
+    re-audit of the shipment.
+    """
+
+    store = writable_store_of(state)
+
+    if store is None or store.row(extraction_id) is None:
+        raise HTTPException(status_code=404, detail="No such extraction.")
+
+    try:
+        return store.propose_line_item(principal, extraction_id, index, body.amount, body.reason, based_on=body.based_on)
+    except authz.PermissionDenied as error:
+        raise denied(error) from None
+    except store_module.StaleCorrection as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    except store_module.STORE_STATE_ERRORS:
+        raise
+    except store_module.StoreError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
 
 
 @router.post("/{extraction_id}/corrections")
