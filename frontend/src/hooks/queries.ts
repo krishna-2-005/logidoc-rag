@@ -26,6 +26,13 @@ import type {
   ReAuditQueue,
   ReAuditRecorded,
   RecomputeResult,
+  ReportCatalog,
+  ReportName,
+  ReportPreview,
+  RiskOverview,
+  RiskShipment,
+  RiskShipmentPage,
+  RiskTrends,
   ReviewRow,
   RunInputs,
   Session,
@@ -378,3 +385,59 @@ export const useResolveTms = () =>
 
 export const useTmsConflicts = (enabled: boolean) =>
   useQuery({ queryKey: [AUDIT, "tms-conflicts"], queryFn: () => get<TmsConflictQueue>("/api/tms/conflicts"), enabled })
+
+// ---------------------------------------------------------------------------
+// Shipment risk analytics and reporting
+// ---------------------------------------------------------------------------
+
+export interface RiskFilters {
+  search?: string
+  category?: string[]
+  carrier?: string
+  start?: string
+  end?: string
+}
+
+export const useRiskOverview = (filters: RiskFilters) =>
+  useQuery({ queryKey: [AUDIT, "risk-overview", filters], queryFn: () => get<RiskOverview>("/api/risk/overview", { ...filters }), placeholderData: (previous) => previous })
+
+export interface RiskTableQuery extends RiskFilters {
+  sort?: "score" | "shipment" | "carrier" | "date"
+  order?: "asc" | "desc"
+  offset: number
+  limit: number
+}
+
+export const useRiskShipments = (query: RiskTableQuery) =>
+  useQuery({ queryKey: [AUDIT, "risk-shipments", query], queryFn: () => get<RiskShipmentPage>("/api/risk/shipments", { ...query }), placeholderData: (previous) => previous })
+
+export const useRiskShipment = (shipmentId: string | null) =>
+  useQuery({
+    queryKey: [AUDIT, "risk-shipment", shipmentId],
+    queryFn: () => get<RiskShipment>(`/api/risk/shipments/${encodeURIComponent(shipmentId ?? "")}`),
+    enabled: !!shipmentId,
+  })
+
+export const useRiskTrends = (period: "month" | "week") =>
+  useQuery({ queryKey: [AUDIT, "risk-trends", period], queryFn: () => get<RiskTrends>("/api/risk/trends", { period }) })
+
+export interface ReportFilters {
+  start?: string
+  end?: string
+  carrier?: string
+  shipment?: string
+  outcome?: string[]
+  exception_status?: string[]
+  risk_category?: string[]
+}
+
+export const useReportCatalog = (enabled: boolean) =>
+  useQuery({ queryKey: [AUDIT, "report-catalog"], queryFn: () => get<ReportCatalog>("/api/reporting/catalog"), enabled })
+
+export const useReportPreview = (report: ReportName | null, filters: ReportFilters, offset: number, limit = 25) =>
+  useQuery({
+    queryKey: [AUDIT, "report", report, filters, offset, limit],
+    queryFn: () => get<ReportPreview>(`/api/reporting/${report}`, { ...filters, offset, limit }),
+    enabled: report !== null,
+    placeholderData: (previous) => previous,
+  })

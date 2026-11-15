@@ -25,6 +25,7 @@ import { Invoices } from "@/pages/Invoices"
 import { Login } from "@/pages/Login"
 import { Overview } from "@/pages/Overview"
 import { Reports } from "@/pages/Reports"
+import { Risk } from "@/pages/Risk"
 import { SettingsPage } from "@/pages/Settings"
 import { ShipmentDetailPage } from "@/pages/ShipmentDetail"
 import { Shipments } from "@/pages/Shipments"
@@ -76,6 +77,7 @@ export default function App() {
         <Route path="exceptions" element={<Exceptions />} />
         <Route path="history" element={<AuditHistory />} />
         <Route path="carriers" element={<CarrierIntelligence />} />
+        <Route path="risk" element={<Risk />} />
         <Route path="carrier-registry" element={<CarrierRegistry />} />
         <Route path="carrier-registry/links" element={<CarrierLinks />} />
         <Route path="carrier-registry/:id" element={<CarrierRegistryDetail />} />

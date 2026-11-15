@@ -20,6 +20,7 @@ import {
   Scale,
   Search,
   Settings as SettingsIcon,
+  ShieldAlert,
   TriangleAlert,
   Truck,
   X,
@@ -70,6 +71,7 @@ const NAV: { label: string; items: Item[] }[] = [
     label: "Insights",
     items: [
       { to: "/carriers", label: "Carrier Intelligence", icon: Truck },
+      { to: "/risk", label: "Shipment Risk", icon: ShieldAlert },
       { to: "/history", label: "Audit History", icon: History },
       { to: "/reports", label: "Reports", icon: FileDown },
     ],

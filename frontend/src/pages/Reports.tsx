@@ -1,6 +1,7 @@
 import { Download, FileSpreadsheet, FileText } from "lucide-react"
 import { useState } from "react"
 import { PageHeader, Section } from "@/components/common/PageHeader"
+import { ReportBuilder } from "@/components/reporting/ReportBuilder"
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/common/states"
 import { useToast } from "@/components/common/toast"
 import { Alert } from "@/components/ui/alert"
@@ -44,9 +45,13 @@ export function Reports() {
 
   return (
     <>
-      <PageHeader title="Reports" description="Download the audit as spreadsheets and PDFs. They are produced by the same code as the Streamlit application, from the same audit results." />
+      <PageHeader title="Reports" description="Freight audit, exception, carrier and correction reports with their filters, previewed here and downloaded as CSV or PDF. Every figure comes from the audit as it is; money is never added across currencies." />
 
       {!allowed && session.data && <Alert tone="warn" className="mb-5"><p>Your role cannot download reports.</p></Alert>}
+
+      <Section title="Portfolio reports" description="Choose a report and its filters, check the preview, then download the same report as CSV or PDF. Each states when it was generated, the filters applied and where its figures come from.">
+        <ReportBuilder allowed={allowed} />
+      </Section>
 
       <Section title="Freight audit for one shipment" description="The CSV lists every compared value with its source; the PDF is the printable audit.">
         {shipments.isPending && <LoadingBlock rows={2} label="Loading shipments" />}
@@ -76,7 +81,7 @@ export function Reports() {
         )}
       </Section>
 
-      <Section title="Portfolio exports" description="Every cell is protected against spreadsheet formula injection. A missing value is exported as NOT AVAILABLE, never 0.">
+      <Section title="Quick exports" description="Every cell is protected against spreadsheet formula injection. A missing value is exported as NOT AVAILABLE, never 0.">
         <div className="grid gap-4 md:grid-cols-2">
           {REPORTS.map((report) => (
             <Card key={report.path}>

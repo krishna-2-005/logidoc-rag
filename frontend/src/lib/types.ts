@@ -1660,3 +1660,127 @@ export interface TmsConflictQueue {
   conflicts: { shipment_id: string; shipment_key: string; field: string | null; label: string; state: string; tms_value: unknown; document_value: unknown; integration_name: string | null; external_id: string | null }[]
   unavailable: { integration_id: number | null; reason: string }[]
 }
+
+// ---------------------------------------------------------------------------
+// Shipment risk analytics and reporting
+// ---------------------------------------------------------------------------
+
+export type RiskCategory = "low" | "medium" | "high" | "critical"
+
+export interface RiskStamp {
+  version: string
+  digest: string
+}
+
+export interface RiskThresholds {
+  medium: number
+  high: number
+  critical: number
+}
+
+export interface RiskEvidence {
+  type: "exception" | "document" | "freight_audit" | "amount"
+  reference: string
+  category?: string | null
+  severity?: string | null
+  status?: string | null
+  amount?: number | null
+  currency?: string | null
+}
+
+export interface RiskFactor {
+  signal: string
+  label: string
+  /** unavailable: its evidence could not be read (never counted as "no risk") */
+  status: "scored" | "clear" | "unavailable"
+  points: number
+  max: number
+  uncapped_points: number
+  detail: string
+  evidence: RiskEvidence[]
+  not_counted: RiskEvidence[]
+}
+
+export interface RiskRow {
+  shipment_id: string
+  shipment_key: string
+  carrier_key: string | null
+  carrier: string
+  date: string | null
+  final_status: string | null
+  freight_outcome: string | null
+  open_exceptions: number
+  score: number
+  category: RiskCategory
+  partial: boolean
+  top_factors: { signal: string; label: string; points: number }[]
+}
+
+export interface RiskShipmentPage {
+  rows: RiskRow[]
+  total: number
+  offset: number
+  limit: number
+  model: RiskStamp
+}
+
+export interface RiskShipment extends Omit<RiskRow, "top_factors"> {
+  date_basis: string | null
+  currency: string
+  factors: RiskFactor[]
+  unavailable: string[]
+  basis: "current" | "recorded"
+  model: RiskStamp
+  thresholds: RiskThresholds
+}
+
+export interface RiskOverview {
+  model: RiskStamp & { thresholds: RiskThresholds }
+  totals: { shipments: number; high_risk: number; partial: number; mean_score: number | null; by_category: Record<RiskCategory, number> }
+  histogram: { band: string; lower: number; upper: number; count: number }[]
+  exceptions: { category: string; total: number; by_status: Record<string, number> }[]
+  carriers: { carrier_key: string | null; carrier: string; shipments: number; mean_score: number; high_risk: number; by_category: Record<RiskCategory, number>; partial: number; top_signals: { signal: string; label: string; shipments: number }[] }[]
+  signals: { signal: string; label: string; shipments_scored: number; shipments_unavailable: number; points: number }[]
+}
+
+export interface RiskTrends {
+  model: RiskStamp
+  period: "month" | "week"
+  points: { period: string; shipments: number; mean_score: number; high_risk: number; by_category: Record<RiskCategory, number> }[]
+  signals_used: string[]
+  signals_unavailable: string[]
+  note: string
+}
+
+export interface ReportDefinition {
+  report: ReportName
+  title: string
+  description: string
+  filters: string[]
+  date_basis: string
+}
+
+export type ReportName = "freight-audit-summary" | "discrepancies" | "carrier-performance" | "corrections"
+
+export interface ReportCatalog {
+  reports: ReportDefinition[]
+  options: { carriers: { key: string; name: string }[]; outcomes: string[]; statuses: string[]; categories: string[] }
+  can_view_history: boolean
+}
+
+export interface ReportPreview {
+  report: ReportName
+  title: string
+  description: string
+  generated_at: string
+  date_basis: string
+  filters: string[]
+  provenance: string[]
+  columns: { key: string; label: string; kind: "text" | "count" | "money" | "date" | "number" }[]
+  rows: Record<string, unknown>[]
+  total_rows: number
+  offset: number
+  limit: number
+  totals: { title: string; rows: { label: string; value: number | null; display: string; note: string | null }[] }[]
+  notes: string[]
+}

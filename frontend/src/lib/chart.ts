@@ -68,3 +68,20 @@ export function sentence(text: string): string {
 
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
+
+/**
+ * Shipment risk categories, low to critical (an ordered severity, always shown with its
+ * name). Checked with the dataviz palette validator in this order on the light surface:
+ * every check passes (lightness band, chroma floor, adjacent colour-blind separation,
+ * normal-vision floor); the amber is below 3:1 against the surface, so every risk chart
+ * has a legend or category labels and a visible table of its numbers. The application
+ * has no dark theme, so only the light surface applies.
+ */
+export const RISK: Record<string, string> = {
+  low: "#2a78d6",
+  medium: "#eda100",
+  high: "#e05a2b",
+  critical: "#8f1f3f",
+}
+
+export const RISK_ORDER = ["low", "medium", "high", "critical"] as const
