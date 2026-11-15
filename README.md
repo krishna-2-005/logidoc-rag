@@ -526,6 +526,34 @@ Audit history schema version 2 adds `carrier` and `currency` to
 The carrier name is stored as a structured field (like the shipment ID), never
 the text around it.
 
+### Shipment risk (`src/risk_analytics.py`, page *Shipment Risk*)
+
+- **Score.** An explainable score from 0 to 100 per shipment, made only of evidence the audit already holds:
+  - unresolved discrepancies and values not verified;
+  - a duplicate invoice number (an indicator to check, never a finding of fraud);
+  - the amounts at stake, per currency;
+  - missing documents;
+  - the freight audit outcome.
+- **Categories:** low, medium, high and critical, from versioned, configurable thresholds
+  (`LOGIDOC_RISK_MODEL`).
+- **No language model is involved.** The same evidence and model version always give the same score.
+- **Missing evidence** makes a score "partial", never "no risk".
+- **Trends** are scored from recorded audit runs.
+
+Details: [docs/SHIPMENT_RISK_ANALYTICS.md](docs/SHIPMENT_RISK_ANALYTICS.md).
+
+### Reporting (`src/reporting.py`, page *Reports*)
+
+- **Reports:** freight audit summary, discrepancies and exceptions, carrier performance, and corrections
+  and re-audits. Each is previewed on the page and downloaded as CSV or PDF from the same build.
+- **Filters:** date range, carrier, shipment, freight audit outcome, exception status and risk category.
+- **Every report states** when it was generated, the filters in words and where its figures come from.
+- **Money is totalled per currency only.** A missing value is NOT AVAILABLE, never 0.
+- **Safe files.** CSV cells are protected against formula injection, and the PDF is plain text with nothing
+  embedded or linked.
+
+Details: [docs/REPORTING.md](docs/REPORTING.md).
+
 ### Reliable ingestion (`src/document_validation.py`, `ingestion_register.py`, `ingestion_service.py`, `document_lifecycle.py`)
 
 - **Validation** before anything is written: name (no paths, no reserved
