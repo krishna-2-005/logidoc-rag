@@ -115,6 +115,7 @@ GET /api/admin/metrics?format=prometheus    Prometheus text format (0.0.4)
 | `logidoc_disk_free_bytes` | gauge | volume (data, index, backups) | each monitor check |
 | `logidoc_readiness` | gauge | status | each `/api/ready` |
 | `logidoc_alerts_total` | counter | rule, severity | an alert is sent |
+| `logidoc_rate_limited_total` | counter | rule (sign_in, assistant, documents, audit_jobs, exports, accounts) | a request is refused with 429 ([RATE_LIMITING.md](RATE_LIMITING.md)) |
 
 Labels are fixed words and route templates. They never hold a raw path, a
 shipment ID, a file name or a user, so the number of series stays small.

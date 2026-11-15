@@ -15,8 +15,10 @@ Review states:
     dismissed   not a real problem; a reason is required
 
 The audit decides whether an exception exists; the store only records
-what people did about it. Each time the exceptions are shown, sync()
-compares them with the stored states:
+what people did about it. sync() compares the detected exceptions with the
+stored states (on a change made through the API and in the server's
+background loop, never on a read request: a read sees the same result
+through ReviewView, which writes nothing):
 
     - a new exception is recorded as open
     - an exception that is no longer detected keeps its state and is
@@ -700,91 +702,111 @@ class ReviewStore:
     # Detection (the audit decides what exists)
     # --------------------------------------------------------
 
-    def sync(self, exceptions, at=None):
+    def sync(self, exceptions, at=None, detected_at=None):
         """
         Records the currently detected exceptions (see the module
         docstring) and returns {exception_key: review row} for them.
         exceptions: dicts with exception_key, shipment_key,
-        shipment_id, category and signature.
+        shipment_id, category and signature. detected_at: {exception_key:
+        time} when the audit first detected a new exception (its creation
+        time and the time of its "detected" event); by default, at.
         """
 
         at = at or now_text()
         detected = {item["exception_key"]: item for item in exceptions}
-        system = Actor.system()
 
         with self.write() as connection:
-
-            stored = {
-                row["exception_key"]: dict(row)
-                for row in connection.execute("SELECT * FROM exception_reviews")
-            }
-
-            for key, item in detected.items():
-
-                row = stored.get(key)
-
-                if row is None:
-
-                    connection.execute(
-                        "INSERT INTO exception_reviews "
-                        "(exception_key, shipment_key, shipment_id, category, status, "
-                        " signature, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (key, item["shipment_key"], item["shipment_id"],
-                         item["category"], OPEN, item["signature"], at, at),
-                    )
-
-                    self.record_event(connection, key, None, OPEN, None,
-                                      "Detected", item["signature"], at,
-                                      event_type=EVENT_DETECTED, actor=system)
-                    continue
-
-                changed = row["signature"] != item["signature"]
-                returned = row["absent_since"] is not None
-
-                if row["status"] in CLOSED and (changed or returned):
-
-                    note = (
-                        "Reopened: the audited values changed since it was "
-                        f"{row['status']}" if changed else
-                        f"Reopened: detected again after being {row['status']} "
-                        "and no longer detected"
-                    )
-
-                    connection.execute(
-                        "UPDATE exception_reviews SET status = ?, needs_recheck = 1, "
-                        "signature = ?, absent_since = NULL, approval_state = NULL, "
-                        "updated_at = ? WHERE exception_key = ?",
-                        (OPEN, item["signature"], at, key),
-                    )
-
-                    self.record_event(connection, key, row["status"], OPEN,
-                                      None, note, item["signature"], at,
-                                      event_type=EVENT_REOPENED_BY_AUDIT, actor=system)
-
-                elif changed or returned:
-
-                    # Still being handled: keep the state, but note
-                    # that the audit changed underneath it
-                    connection.execute(
-                        "UPDATE exception_reviews SET needs_recheck = ?, "
-                        "signature = ?, absent_since = NULL, updated_at = ? "
-                        "WHERE exception_key = ?",
-                        (1 if changed else row["needs_recheck"], item["signature"], at, key),
-                    )
-
-            for key, row in stored.items():
-
-                if key not in detected and row["absent_since"] is None:
-                    connection.execute(
-                        "UPDATE exception_reviews SET absent_since = ? "
-                        "WHERE exception_key = ?",
-                        (at, key),
-                    )
+            self.record_detected(connection, detected, at, detected_at or {})
 
         states = self.states()
 
         return {key: states[key] for key in detected}
+
+    def record_detected(self, connection, detected, at, detected_at):
+        """
+        sync's changes, inside the caller's transaction ({exception_key:
+        exception} detected now). Returns how many rows it changed: 0 when the
+        store already holds this audit.
+        """
+
+        system = Actor.system()
+        changes = 0
+
+        stored = {
+            row["exception_key"]: dict(row)
+            for row in connection.execute("SELECT * FROM exception_reviews")
+        }
+
+        for key, item in detected.items():
+
+            row = stored.get(key)
+
+            if row is None:
+
+                first = detected_at.get(key) or at
+
+                connection.execute(
+                    "INSERT INTO exception_reviews "
+                    "(exception_key, shipment_key, shipment_id, category, status, "
+                    " signature, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (key, item["shipment_key"], item["shipment_id"],
+                     item["category"], OPEN, item["signature"], first, first),
+                )
+
+                self.record_event(connection, key, None, OPEN, None,
+                                  "Detected", item["signature"], first,
+                                  event_type=EVENT_DETECTED, actor=system)
+                changes += 1
+                continue
+
+            changed = row["signature"] != item["signature"]
+            returned = row["absent_since"] is not None
+
+            if row["status"] in CLOSED and (changed or returned):
+
+                note = (
+                    "Reopened: the audited values changed since it was "
+                    f"{row['status']}" if changed else
+                    f"Reopened: detected again after being {row['status']} "
+                    "and no longer detected"
+                )
+
+                connection.execute(
+                    "UPDATE exception_reviews SET status = ?, needs_recheck = 1, "
+                    "signature = ?, absent_since = NULL, approval_state = NULL, "
+                    "updated_at = ? WHERE exception_key = ?",
+                    (OPEN, item["signature"], at, key),
+                )
+
+                self.record_event(connection, key, row["status"], OPEN,
+                                  None, note, item["signature"], at,
+                                  event_type=EVENT_REOPENED_BY_AUDIT, actor=system)
+                changes += 1
+
+            elif changed or returned:
+
+                # Still being handled: keep the state, but note
+                # that the audit changed underneath it
+                connection.execute(
+                    "UPDATE exception_reviews SET needs_recheck = ?, "
+                    "signature = ?, absent_since = NULL, updated_at = ? "
+                    "WHERE exception_key = ?",
+                    (1 if changed else row["needs_recheck"], item["signature"], at, key),
+                )
+                changes += 1
+
+        for key, row in stored.items():
+
+            if key not in detected and row["absent_since"] is None:
+                connection.execute(
+                    "UPDATE exception_reviews SET absent_since = ? "
+                    "WHERE exception_key = ?",
+                    (at, key),
+                )
+                changes += 1
+
+        return changes
 
     # --------------------------------------------------------
     # Legacy single-step change
@@ -1126,3 +1148,97 @@ class ReviewStore:
             )
 
         return self.states()[key]
+
+
+# ============================================================
+# The read-only view (what a read request sees)
+# ============================================================
+
+class Borrowed:
+    """The view's one connection, lent to ReviewStore's queries: their closing() leaves it open."""
+
+    def __init__(self, connection):
+
+        self.connection = connection
+
+    def close(self):
+
+        pass
+
+    def __getattr__(self, name):
+
+        return getattr(self.connection, name)
+
+
+class ReviewView(ReviewStore):
+    """
+    The review store as a read request sees it, without writing to it. The
+    database file is copied into memory through a read-only connection: it is
+    never created, initialized, migrated or locked for writing, and a file
+    awaiting its schema upgrade is upgraded in memory only (no copy is made
+    beside it). The detected exceptions, when given, are then recorded on the
+    copy by the same code as sync, so every query of ReviewStore (states,
+    list_reviews, history, all_events, assignees, verify_integrity) answers
+    what it would answer after a sync. A missing file reads as an empty store.
+
+    changes: how many rows a sync would write now (0: the file already holds
+    this audit). Anything that would write raises ReviewError.
+    """
+
+    def __init__(self, path, policy=None, exceptions=None, at=None, detected_at=None):
+
+        self.path = Path(path)
+        self.policy = policy or Policy()
+        self.memory = sqlite3.connect(":memory:", check_same_thread=False)
+        self.memory.row_factory = sqlite3.Row
+
+        if self.path.is_file():
+            with closing(sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)) as source:
+                source.backup(self.memory)
+
+        self.upgrade_copy()
+        self.changes = 0
+
+        if exceptions is not None:
+            detected = {item["exception_key"]: item for item in exceptions}
+
+            with self.memory:
+                self.changes = self.record_detected(self.memory, detected, at or now_text(), detected_at or {})
+
+    def upgrade_copy(self):
+        """The copy at SCHEMA_VERSION, with the same steps as the file's upgrade."""
+
+        connection = self.memory
+        connection.executescript(SCHEMA_V1)
+        row = connection.execute("SELECT version FROM schema_info").fetchone()
+        version = row[0] if row else None
+
+        if version is None:
+            connection.execute("INSERT INTO schema_info (version) VALUES (1)")
+            version = 1
+
+        if version > SCHEMA_VERSION:
+            raise ReviewError(f"Review database {self.path} has schema version {version}, expected {SCHEMA_VERSION}.")
+
+        with connection:
+
+            for target, statements in ((2, MIGRATION_V2), (3, MIGRATION_V3)):
+                if version < target:
+                    for statement in statements:
+                        connection.execute(statement)
+
+            connection.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
+
+    def connect(self):
+
+        return Borrowed(self.memory)
+
+    @contextmanager
+    def write(self):
+
+        raise ReviewError("The review view is read only: changes go through ReviewStore.")
+        yield  # pragma: no cover
+
+    def initialize(self):
+
+        raise ReviewError("The review view is read only: it never initializes the database.")

@@ -156,4 +156,5 @@ def verify_history(principal=Depends(require(authz.ADMIN_MAINTENANCE)), state: A
 
     from exception_workflow import ExceptionWorkflow
 
-    return ExceptionWorkflow(state.service.review_store()).verify_history(principal)
+    # A check, not a change: the review history is only read (never created or upgraded to be verified)
+    return ExceptionWorkflow(state.service.review_view(detect=False)).verify_history(principal)

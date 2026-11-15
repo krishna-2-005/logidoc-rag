@@ -109,6 +109,8 @@ class ApiSettings:
     hsts_seconds: int = 0
     forwarded_allow_ips: str | None = "127.0.0.1"
     background_jobs: bool = False
+    # The rate limits of the expensive and sensitive operations (api.rate_limit.RULES; a test may give others)
+    rate_limits: tuple | None = None
 
     @staticmethod
     def from_env(environ=None):
@@ -325,6 +327,9 @@ def require(permission):
             return authz.require(principal, permission)
         except authz.PermissionDenied as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
+
+    # Read by the permission inventory (scripts/api_permissions.py, docs/API_PERMISSIONS.md)
+    check.permission = permission
 
     return check
 

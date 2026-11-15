@@ -75,7 +75,8 @@ describe("Webhooks", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "I have stored it" }))
     await waitFor(() => expect(screen.queryByText(SECRET)).not.toBeInTheDocument())
-  })
+    // About 1.5 s alone; typing a URL key by key, it passed 5 s when every test file runs in parallel on a small machine
+  }, 15_000)
 
   it("says why delivery is off and offers no endpoint", async () => {
     mockApi({

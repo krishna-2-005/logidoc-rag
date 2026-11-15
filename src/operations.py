@@ -4,7 +4,8 @@ and the schedule, wired to one ApiState (docs/AUTOMATED_BACKUP_OPERATIONS.md,
 docs/OBSERVABILITY_AND_MONITORING.md).
 
     Operations.tick()      runs a scheduled backup when one is due, then the
-                           monitor when its interval has passed
+                           monitor when its interval has passed, then records
+                           newly detected exceptions in the review store
     Operations.start()     a daemon thread calling tick() every 30 s, started
                            by the server (src/api/serve.py) and never by the
                            tests or LOGIDOC_ENV=test
@@ -184,6 +185,25 @@ class Operations:
                 self.monitor_once()
             except Exception:
                 log.exception("The monitor could not complete its checks.")
+
+        self.record_detections()
+
+    def record_detections(self):
+        """
+        Records newly detected exceptions in the review store (AuditService.record_detections): read
+        requests only show them, so this is what dates them and emits their exception.created webhook
+        events. Does nothing when the store already holds the current audit.
+        """
+
+        service = getattr(self.state, "service", None)
+
+        if service is None:
+            return
+
+        try:
+            service.record_detections()
+        except Exception:
+            log.exception("The detected exceptions could not be recorded.")
 
     def start(self, tick_seconds=TICK_SECONDS):
 

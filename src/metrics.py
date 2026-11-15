@@ -40,6 +40,7 @@ HELP = {
     "logidoc_disk_free_bytes": ("gauge", "Free bytes on the volume of the data, index or backup folder."),
     "logidoc_readiness": ("gauge", "1 for the current readiness status (ready, degraded, not_ready), 0 for the others."),
     "logidoc_alerts_total": ("counter", "Alerts raised by rule and severity."),
+    "logidoc_rate_limited_total": ("counter", "Requests refused with 429 by rate limit rule."),
 }
 
 

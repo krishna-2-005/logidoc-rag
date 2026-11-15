@@ -526,6 +526,34 @@ Audit history schema version 2 adds `carrier` and `currency` to
 The carrier name is stored as a structured field (like the shipment ID), never
 the text around it.
 
+### Shipment risk (`src/risk_analytics.py`, page *Shipment Risk*)
+
+- **Score.** An explainable score from 0 to 100 per shipment, made only of evidence the audit already holds:
+  - unresolved discrepancies and values not verified;
+  - a duplicate invoice number (an indicator to check, never a finding of fraud);
+  - the amounts at stake, per currency;
+  - missing documents;
+  - the freight audit outcome.
+- **Categories:** low, medium, high and critical, from versioned, configurable thresholds
+  (`LOGIDOC_RISK_MODEL`).
+- **No language model is involved.** The same evidence and model version always give the same score.
+- **Missing evidence** makes a score "partial", never "no risk".
+- **Trends** are scored from recorded audit runs.
+
+Details: [docs/SHIPMENT_RISK_ANALYTICS.md](docs/SHIPMENT_RISK_ANALYTICS.md).
+
+### Reporting (`src/reporting.py`, page *Reports*)
+
+- **Reports:** freight audit summary, discrepancies and exceptions, carrier performance, and corrections
+  and re-audits. Each is previewed on the page and downloaded as CSV or PDF from the same build.
+- **Filters:** date range, carrier, shipment, freight audit outcome, exception status and risk category.
+- **Every report states** when it was generated, the filters in words and where its figures come from.
+- **Money is totalled per currency only.** A missing value is NOT AVAILABLE, never 0.
+- **Safe files.** CSV cells are protected against formula injection, and the PDF is plain text with nothing
+  embedded or linked.
+
+Details: [docs/REPORTING.md](docs/REPORTING.md).
+
 ### Reliable ingestion (`src/document_validation.py`, `ingestion_register.py`, `ingestion_service.py`, `document_lifecycle.py`)
 
 - **Validation** before anything is written: name (no paths, no reserved
@@ -735,6 +763,16 @@ errors never carry a stack trace or a path; the settings route lists a fixed
 set of harmless values. In production the API serves the build, and in
 development Vite proxies `/api`, so the page and the API share one origin.
 
+Who may call each of the 126 operations is generated from the routes into
+[docs/API_PERMISSIONS.md](docs/API_PERMISSIONS.md), and a test calls every one
+without a session, as a reviewer and as an administrator. A read never writes:
+the review states are read from an in-memory copy, and detected exceptions are
+recorded by changes and the server's background loop. Downloads, jobs, the
+assistant, document and account changes and failed sign-ins are rate limited
+(429 with `Retry-After`, [docs/RATE_LIMITING.md](docs/RATE_LIMITING.md)). CI
+audits the pinned dependencies for known vulnerabilities
+([docs/DEPENDENCY_SECURITY.md](docs/DEPENDENCY_SECURITY.md)).
+
 Endpoints, all under `/api`: `session`, `auth/login`, `auth/logout`,
 `overview`, `shipments`, `shipments/{id}`, `documents`, `documents/file`,
 `completeness`, `exposure`, `exceptions` (and `/{key}`, `/{key}/actions`,
@@ -764,8 +802,8 @@ returns; it never calculates an audit.
 
 | File (default in `data/`) | Schema | Content |
 |---|---|---|
-| `audit_reviews.sqlite3` | v3 (migrates older versions in one transaction) | `exception_reviews` (state, assignee, evidence references, approval), `review_events` (append-only, hash-chained) |
-| `audit_history.sqlite3` | v5 (migrates v1 to v4) | append-only runs, snapshots (with carrier, currency), findings, freight audit records, and per run the consumed `run_inputs`, `run_input_sets` and `run_supersessions` |
+| `audit_reviews.sqlite3` | v3 (migrates older versions in one transaction when a change opens it; a read never does) | `exception_reviews` (state, assignee, evidence references, approval), `review_events` (append-only, hash-chained) |
+| `audit_history.sqlite3` | v6 (migrates v1 to v5 when opened) | append-only runs, snapshots (with carrier, currency), findings, freight audit records, and per run the consumed `run_inputs`, `run_input_sets` and `run_supersessions` |
 | `auth.sqlite3` | v1 | `users` (password hashes), `sessions` (token hashes), `auth_events` |
 | `ingestion_register.sqlite3` | v1 | `ingestion_files`, append-only `ingestion_events` and `ingestion_actions`; metadata only, never file contents |
 | `extractions.sqlite3` | v5 (an older file is never upgraded by opening it: it reads as "migration pending" until `python scripts/migrate_extraction_store.py` makes a verified backup and migrates in one transaction; `--dry-run` first) | `extractions` (typed fields per file hash and extractor version, no raw text, payload hash; no update/delete), append-only hash-chained `field_corrections` (proposals) and `correction_decisions` (one approval or rejection each), append-only `extraction_aliases` (every file name a content was seen under) |
@@ -774,7 +812,9 @@ returns; it never calculates an audit.
 
 All databases are local runtime data and are git-ignored, as are
 `data/quarantine/` and `data/archive/`. A database with a newer schema than
-the code is refused, not guessed at.
+the code is refused, not guessed at. Upgrades are forward-only: rehearse them on
+a restored backup first (`scripts/rehearse_migration.py`,
+[docs/MIGRATION_REHEARSAL.md](docs/MIGRATION_REHEARSAL.md)).
 
 ### Deploying
 

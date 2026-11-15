@@ -8,6 +8,10 @@ on:
   push:
     branches: [main, "feature/**"]
   pull_request:
+  # Weekly, for advisories published since the last change (GitHub runs schedules on the default branch only).
+  # Only the dependency audit runs then (docs/DEPENDENCY_SECURITY.md)
+  schedule:
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
@@ -19,6 +23,7 @@ concurrency:
 jobs:
   python:
     name: Python ${{ matrix.python }} tests
+    if: github.event_name != 'schedule'
     # The test suite has been verified on Windows, where the project is developed
     runs-on: windows-latest
     timeout-minutes: 45
@@ -67,6 +72,7 @@ jobs:
 
   frontend:
     name: Frontend typecheck, tests and build
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -89,8 +95,37 @@ jobs:
       - name: Known vulnerabilities in the runtime dependencies
         run: npm audit --omit=dev --audit-level=high
 
+  dependencies:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      # The pinned versions are looked up in the PyPI and OSV advisories; nothing of the project is installed.
+      # A finding fails the job. Triage, and the only way to accept one, with its justification and review
+      # date: docs/DEPENDENCY_SECURITY.md. No --ignore-vuln without an entry there.
+      - name: Known vulnerabilities in the pinned Python dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pip-audit==2.9.0
+          pip-audit --requirement requirements-dev.txt --no-deps --disable-pip --progress-spinner off --desc on
+
+      # From the lockfile alone (no install), like the frontend job's check, so the weekly run covers it too
+      - name: Known vulnerabilities in the web application's runtime dependencies
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
   hygiene:
     name: Whitespace and authorship checks
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

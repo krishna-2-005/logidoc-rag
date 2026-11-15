@@ -1675,3 +1675,267 @@ class TmsConflict(Contract):
 class TmsConflictQueue(Contract):
     conflicts: list[TmsConflict]
     unavailable: list[TmsUnavailable]
+
+
+# ============================================================
+# SHIPMENT RISK ANALYTICS (src/risk_analytics.py)
+# ============================================================
+
+RiskCategory = Literal["low", "medium", "high", "critical"]
+
+
+class RiskThresholds(Contract):
+    medium: int
+    high: int
+    critical: int
+
+
+class RiskStamp(Contract):
+    """The model a score was computed with: its version and the digest of its weights and thresholds."""
+
+    version: str
+    digest: str
+
+
+class RiskModelSignal(Contract):
+    signal: str
+    label: str
+    description: str
+    max: int
+    rule: dict[str, Any]
+
+
+class RiskModelView(Contract):
+    version: str
+    digest: str
+    thresholds: RiskThresholds
+    signals: list[RiskModelSignal]
+
+
+class RiskEvidence(Contract):
+    """What a factor rests on: an exception, a document type, a freight audit outcome or an amount."""
+
+    type: Literal["exception", "document", "freight_audit", "amount"]
+    reference: str
+    category: str | None = None
+    severity: str | None = None
+    status: str | None = None
+    amount: float | None = None
+    currency: str | None = None
+
+
+class RiskFactor(Contract):
+    """One signal: unavailable means its evidence could not be read (never counted as no risk)."""
+
+    signal: str
+    label: str
+    status: Literal["scored", "clear", "unavailable"]
+    points: int
+    max: int
+    uncapped_points: int
+    detail: str
+    evidence: list[RiskEvidence]
+    not_counted: list[RiskEvidence]
+
+
+class RiskTopFactor(Contract):
+    signal: str
+    label: str
+    points: int
+
+
+class RiskRow(Contract):
+    shipment_id: str
+    shipment_key: str
+    carrier_key: str | None
+    carrier: str
+    date: str | None
+    final_status: str | None
+    freight_outcome: str | None
+    open_exceptions: int
+    score: int
+    category: RiskCategory
+    partial: bool
+    top_factors: list[RiskTopFactor]
+
+
+class RiskShipmentPage(Contract):
+    rows: list[RiskRow]
+    total: int
+    offset: int
+    limit: int
+    model: RiskStamp
+
+
+class RiskShipment(Contract):
+    """One shipment's score with every factor, its evidence and what was not available."""
+
+    shipment_id: str
+    shipment_key: str
+    carrier_key: str | None
+    carrier: str
+    date: str | None
+    date_basis: str | None
+    currency: str
+    final_status: str | None
+    freight_outcome: str | None
+    open_exceptions: int
+    score: int
+    category: RiskCategory
+    partial: bool
+    factors: list[RiskFactor]
+    unavailable: list[str]
+    basis: Literal["current", "recorded"]
+    model: RiskStamp
+    thresholds: RiskThresholds
+
+
+class RiskTotals(Contract):
+    """mean_score null: no shipment in the selection."""
+
+    shipments: int
+    high_risk: int
+    partial: int
+    mean_score: float | None
+    by_category: dict[str, int]
+
+
+class RiskBand(Contract):
+    band: str
+    lower: int
+    upper: int
+    count: int
+
+
+class RiskExceptionGroup(Contract):
+    category: str
+    total: int
+    by_status: dict[str, int]
+
+
+class RiskCarrierSignal(Contract):
+    signal: str
+    label: str
+    shipments: int
+
+
+class RiskCarrier(Contract):
+    carrier_key: str | None
+    carrier: str
+    shipments: int
+    mean_score: float
+    high_risk: int
+    by_category: dict[str, int]
+    partial: int
+    top_signals: list[RiskCarrierSignal]
+
+
+class RiskSignalCount(Contract):
+    signal: str
+    label: str
+    shipments_scored: int
+    shipments_unavailable: int
+    points: int
+
+
+class RiskOverviewModel(Contract):
+    version: str
+    digest: str
+    thresholds: RiskThresholds
+
+
+class RiskOverview(Contract):
+    model: RiskOverviewModel
+    totals: RiskTotals
+    histogram: list[RiskBand]
+    exceptions: list[RiskExceptionGroup]
+    carriers: list[RiskCarrier]
+    signals: list[RiskSignalCount]
+
+
+class RiskTrendPoint(Contract):
+    period: str
+    shipments: int
+    mean_score: float
+    high_risk: int
+    by_category: dict[str, int]
+
+
+class RiskTrends(Contract):
+    """From recorded audit runs only; points is empty when nothing was recorded."""
+
+    model: RiskStamp
+    period: Literal["month", "week"]
+    points: list[RiskTrendPoint]
+    signals_used: list[str]
+    signals_unavailable: list[str]
+    note: str
+
+
+# ============================================================
+# REPORTING (src/reporting.py)
+# ============================================================
+
+class ReportDefinition(Contract):
+    report: str
+    title: str
+    description: str
+    filters: list[str]
+    date_basis: str
+
+
+class ReportCarrierOption(Contract):
+    key: str
+    name: str
+
+
+class ReportOptions(Contract):
+    carriers: list[ReportCarrierOption]
+    outcomes: list[str]
+    statuses: list[str]
+    categories: list[str]
+
+
+class ReportCatalog(Contract):
+    reports: list[ReportDefinition]
+    options: ReportOptions
+    can_view_history: bool
+
+
+class ReportColumn(Contract):
+    key: str
+    label: str
+    kind: Literal["text", "count", "money", "date", "number"]
+
+
+class ReportTotalRow(Contract):
+    """value: the number (null for a rate shown as text); display: as written in the files."""
+
+    label: str
+    value: float | int | None
+    display: str
+    note: str | None
+
+
+class ReportTotalSection(Contract):
+    title: str
+    rows: list[ReportTotalRow]
+
+
+class ReportPreview(Contract):
+    """A page of the report's rows (offset, limit); total_rows and every total cover all of them."""
+
+    report: str
+    title: str
+    description: str
+    generated_at: str
+    date_basis: str
+    filters: list[str]
+    provenance: list[str]
+    columns: list[ReportColumn]
+    rows: list[dict[str, Any]]
+    total_rows: int
+    offset: int
+    limit: int
+    totals: list[ReportTotalSection]
+    notes: list[str]
