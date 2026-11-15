@@ -49,7 +49,8 @@ import metrics
 import readiness
 from api import (routes_assistant, routes_audit, routes_audit_review, routes_auth, routes_carriers, routes_extraction,
                  routes_ingestion, routes_integrations, routes_operations, routes_reporting, routes_risk, routes_workflow)
-from api.core import ApiSettings, ApiState, csrf_guard
+from api.core import SESSION_COOKIE, ApiSettings, ApiState, csrf_guard
+from api.rate_limit import RULES, RateLimit
 from api.middleware import BodyLimit, HttpsPolicy, TrustedHosts
 from observability import RequestContext, set_error_category
 from audit_service import Locations
@@ -68,6 +69,15 @@ log = logging.getLogger("logidoc.api")
 # ENTERPRISE_INTEGRATION_READINESS.md, "Versioning").
 API_VERSION = "1"
 VERSIONED_PREFIX = f"/api/v{API_VERSION}/"
+
+# Every router of /api, each included behind the CSRF guard. scripts/api_permissions.py reads the routes
+# from here to publish who may call each operation (docs/API_PERMISSIONS.md).
+ROUTERS = (
+    routes_auth.router, routes_audit.router, routes_workflow.router, routes_ingestion.router,
+    routes_assistant.router, routes_extraction.router, routes_extraction.history_router,
+    routes_carriers.router, routes_operations.router, routes_integrations.router, routes_audit_review.router,
+    routes_risk.router, routes_reporting.router,
+)
 
 
 class ApiVersions:
@@ -164,6 +174,12 @@ def create_app(state=None, settings=None):
 
     app.state.logidoc = state
 
+    # The rate limits, added first, sit inside every other middleware: they see /api paths (ApiVersions) and
+    # the client address the server trusts (ProxyHeadersMiddleware), and a 429 is logged, measured and
+    # carries the CORS headers
+    app.add_middleware(RateLimit, rules=settings.rate_limits if settings.rate_limits is not None else RULES,
+                       cookie_name=SESSION_COOKIE, registry=metrics.REGISTRY)
+
     app.add_middleware(
         CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH"],
@@ -198,10 +214,7 @@ def create_app(state=None, settings=None):
 
         return response
 
-    for router in (routes_auth.router, routes_audit.router, routes_workflow.router, routes_ingestion.router,
-                   routes_assistant.router, routes_extraction.router, routes_extraction.history_router,
-                   routes_carriers.router, routes_operations.router, routes_integrations.router, routes_audit_review.router,
-                   routes_risk.router, routes_reporting.router):
+    for router in ROUTERS:
         app.include_router(router, dependencies=[Depends(csrf_guard)])
 
     @app.get("/api/health")

@@ -22,8 +22,11 @@ logidoc.example.com {
 	respond @internal 404
 
 	reverse_proxy 127.0.0.1:8000 {
-		# Caddy sends X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host itself;
-		# the API trusts them from 127.0.0.1 (LOGIDOC_FORWARDED_ALLOW_IPS)
+		# Caddy sends X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host itself,
+		# replacing what a client sent (no trusted_proxies is set here); the API trusts
+		# them from 127.0.0.1 (LOGIDOC_FORWARDED_ALLOW_IPS) and its rate limits use that
+		# address. Caddy has no rate limiting of its own without a plugin: the API's
+		# limits apply (docs/RATE_LIMITING.md); nginx can add limits at the proxy too.
 		header_up X-Request-ID {http.request.uuid}
 
 		# A generated answer may take up to LOGIDOC_LLM_TIMEOUT (120 s)

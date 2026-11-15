@@ -14722,7 +14722,7 @@
     },
     "/api/exceptions": {
       "get": {
-        "description": "The exception queue with the filters of the screen. Reading it records\nnewly detected exceptions as open, like the dashboard. search matches\nthe shipment, the exception and the shipment's invoice numbers; each row\ncarries its severity, financial impact (when determinable), recommended\naction and evidence from the current audit.",
+        "description": "The exception queue with the filters of the screen. A read writes\nnothing: newly detected exceptions are shown as open, and the server\nrecords them in the background. search matches\nthe shipment, the exception and the shipment's invoice numbers; each row\ncarries its severity, financial impact (when determinable), recommended\naction and evidence from the current audit.",
         "operationId": "exceptions_api_exceptions_get",
         "parameters": [
           {
@@ -14969,7 +14969,7 @@
     },
     "/api/exceptions/{key}/actions": {
       "post": {
-        "description": "One workflow step on a detected exception. 403 when the role does not\nallow it, 422 when a rule is broken (a missing note, no evidence, an\nimpossible transition, a stale audit). Nothing is written on a refusal.",
+        "description": "One workflow step on a detected exception. Every step needs\nexceptions.view, then the permission of the action itself (checked by the\nworkflow: assign, dismiss, waive, approve...). 403 when the role does not\nallow it, 422 when a rule is broken (a missing note, no evidence, an\nimpossible transition, a stale audit). The step writes nothing on a\nrefusal; the exceptions the audit detects are recorded first (as the\nserver's background loop records them), so the exception is in the store.",
         "operationId": "exception_action_api_exceptions__key__actions_post",
         "parameters": [
           {

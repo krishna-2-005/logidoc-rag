@@ -26,6 +26,9 @@ from ingestion_register import IngestionRegister, STATUSES
 router = APIRouter(prefix="/api")
 
 ViewIngestion = Depends(require(authz.INGESTION_VIEW))
+# Every change to the documents: checked here, before the request is read or anything is opened or created,
+# and again by the ingestion and lifecycle services
+WriteIngestion = Depends(require(authz.INGESTION_WRITE))
 
 # Uploads and replacements embed every chunk and hold the ingestion lock
 # while they do, so they run in a worker thread: the event loop keeps
@@ -132,7 +135,7 @@ def errors(principal=ViewIngestion, state: ApiState = Depends(get_state)):
 
 @router.post("/ingestion/upload")
 async def upload(
-    files: list[UploadFile] = File(), principal=Depends(get_principal), state: ApiState = Depends(get_state),
+    files: list[UploadFile] = File(), principal=WriteIngestion, state: ApiState = Depends(get_state),
 ):
     """
     Ingests PDFs (administrators). Every file gets a status in the
@@ -182,7 +185,7 @@ def shape_summary(summary):
 
 
 @router.post("/ingestion/{file_id}/retry")
-def retry(file_id: int, principal=Depends(get_principal), state: ApiState = Depends(get_state)):
+def retry(file_id: int, principal=WriteIngestion, state: ApiState = Depends(get_state)):
 
     register = register_of(state)
 
@@ -206,7 +209,7 @@ def retry(file_id: int, principal=Depends(get_principal), state: ApiState = Depe
 
 
 @router.post("/ingestion/{file_id}/resolve")
-def resolve(file_id: int, body: ResolveBody, principal=Depends(get_principal), state: ApiState = Depends(get_state)):
+def resolve(file_id: int, body: ResolveBody, principal=WriteIngestion, state: ApiState = Depends(get_state)):
 
     register = register_of(state)
 
@@ -244,7 +247,7 @@ def lifecycle_call(state, action):
 
 
 @router.post("/documents/reprocess")
-def reprocess(name: str = Query(max_length=200), principal=Depends(get_principal), state: ApiState = Depends(get_state)):
+def reprocess(name: str = Query(max_length=200), principal=WriteIngestion, state: ApiState = Depends(get_state)):
 
     locations = state.locations
 
@@ -255,7 +258,7 @@ def reprocess(name: str = Query(max_length=200), principal=Depends(get_principal
 
 @router.post("/documents/replace")
 async def replace(
-    name: str = Query(max_length=200), file: UploadFile = File(), principal=Depends(get_principal),
+    name: str = Query(max_length=200), file: UploadFile = File(), principal=WriteIngestion,
     state: ApiState = Depends(get_state),
 ):
 
@@ -275,7 +278,7 @@ async def replace(
 
 @router.post("/documents/remove")
 def remove(
-    name: str = Query(max_length=200), confirm: bool = Query(False), principal=Depends(get_principal),
+    name: str = Query(max_length=200), confirm: bool = Query(False), principal=WriteIngestion,
     state: ApiState = Depends(get_state),
 ):
     """

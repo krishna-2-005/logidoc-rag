@@ -252,6 +252,14 @@ def validate(environ):
                 errors.append(f"LOGIDOC_INTEGRATION_SANDBOX_DIR must not be inside {other} (or contain it): sandbox "
                               "records are kept apart from the real data.")
 
+    # With "*" every hop is trusted, and the server takes the left-most X-Forwarded-For address: one the client
+    # wrote itself. Sign-in limits and the logs would then use an address the client chose (docs/RATE_LIMITING.md)
+    forwarded = [item.strip() for item in value_of(environ, "LOGIDOC_FORWARDED_ALLOW_IPS").split(",") if item.strip()]
+    if "*" in forwarded:
+        message = ("LOGIDOC_FORWARDED_ALLOW_IPS must name the reverse proxy's addresses, not '*': with '*' a client "
+                   "can choose the address the server sees by sending its own X-Forwarded-For.")
+        (errors if production else warnings).append(message)
+
     if production:
 
         for name in PRODUCTION_REQUIRED:

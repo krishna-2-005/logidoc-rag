@@ -51,7 +51,7 @@ import tms_audit
 from audit_analytics import build_exceptions, build_snapshot, source_fingerprint, with_reviews
 from chunker import read_chunks
 from ingestion_manager import get_destination_collection
-from review_store import Policy, ReviewStore
+from review_store import Policy, ReviewStore, ReviewView, now_text
 from audit_history import HistoryStore
 import sqlite3
 
@@ -277,14 +277,45 @@ class AuditService:
         self.extractions = {}
         # The TMS integrations' shipment records (tms_audit.TmsSource), set by the API state; None: no TMS
         self.tms_source = None
+        # {exception_key: when this process first saw the audit detect it}: the creation time a read shows
+        # for an exception not recorded yet, and the time it is recorded with (survives invalidate())
+        self.first_seen = {}
+        # What record_detections last found already recorded (the audit and the review file): nothing to redo
+        self.recorded_marker = None
 
     # --------------------------------------------------------
     # Stores
     # --------------------------------------------------------
 
     def review_store(self):
+        """The review store for a change: opening it creates or upgrades the database when needed."""
 
         return ReviewStore(self.locations.review_db, self.policy)
+
+    def review_view(self, detect=True):
+        """
+        The review states as a read request sees them (review_store.ReviewView): the database is only read,
+        never created, upgraded or written. detect: with the exceptions the audit detects now recorded on the
+        in-memory copy, as the next sync will record them (this computes the audit when it is not cached).
+        """
+
+        if not detect:
+            return ReviewView(self.locations.review_db, self.policy)
+
+        found = build_exceptions(self.snapshot())
+
+        return ReviewView(self.locations.review_db, self.policy, found, detected_at=self.first_seen_of(found))
+
+    def first_seen_of(self, found):
+
+        now = now_text()
+
+        with self.lock:
+
+            for item in found:
+                self.first_seen.setdefault(item["exception_key"], now)
+
+            return {item["exception_key"]: self.first_seen[item["exception_key"]] for item in found}
 
     def history_store(self):
 
@@ -521,21 +552,57 @@ class AuditService:
 
         return analytics.register_rows(self.snapshot())
 
-    def exceptions(self, sync=True):
+    def exceptions(self, record=False, view=None):
         """
-        The exceptions of every shipment with their review state. sync
-        records newly detected exceptions in the review store (the audit
-        decides what exists; the store remembers what people did).
+        The exceptions of every shipment with their review state (the audit
+        decides what exists; the store remembers what people did). A read:
+        the states come from a ReviewView (view, or a new one), and nothing is
+        written. record: first records the detected exceptions in the review
+        store (record_detections), for a change about to be made to one.
         """
+
+        if record:
+            self.record_detections()
 
         found = build_exceptions(self.snapshot())
+        states = (view or ReviewView(self.locations.review_db, self.policy, found,
+                                     detected_at=self.first_seen_of(found))).states()
 
-        if not sync:
-            return with_reviews(found, {})
+        return with_reviews(found, {item["exception_key"]: states.get(item["exception_key"]) for item in found})
 
-        reviews = self.review_store().sync(found)
+    def record_detections(self):
+        """
+        Records the exceptions the audit detects now in the review store
+        (ReviewStore.sync), when the store does not hold them yet. Called before
+        a change to an exception and by the server's background loop
+        (operations.Operations.tick), never by a read request. Returns how many
+        rows were written (0: nothing to record, or no documents).
+        """
 
-        return with_reviews(found, reviews)
+        if not self.has_documents():
+            return 0
+
+        found = build_exceptions(self.snapshot())
+        path = Path(self.locations.review_db)
+        stat = path.stat() if path.is_file() else None
+
+        with self.lock:
+            entry = self.cache.get("snapshot")
+            marker = (entry[0] if entry else None, stat and (stat.st_mtime_ns, stat.st_size))
+
+            if marker == self.recorded_marker:
+                return 0
+
+        detected_at = self.first_seen_of(found)
+        changes = ReviewView(path, self.policy, found, detected_at=detected_at).changes
+
+        if changes:
+            # The store re-reads every row inside its write transaction: two callers at once record once
+            self.review_store().sync(found, detected_at=detected_at)
+        else:
+            self.recorded_marker = marker
+
+        return changes
 
     def shipment(self, shipment_id):
         """

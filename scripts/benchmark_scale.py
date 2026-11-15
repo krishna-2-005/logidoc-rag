@@ -13,7 +13,8 @@ Python memory (tracemalloc) of:
 
 and, with --pdfs N, the real end-to-end audit (AuditService.snapshot) on N
 generated shipments of 4 PDFs each: reading, classifying, extracting and
-reconciling every document, cold and cached.
+reconciling every document, cold and cached; then the main read endpoints
+through the real API, warm (median and slowest of 5 calls each).
 
 The in-memory structures are the audit's own (a snapshot item with its
 reconciliation result and freight audit), built by hand: they measure the
@@ -252,7 +253,49 @@ def run_pdfs(count, folder):
 
     return {"shipments": len(snapshot["shipments"]), "reconciled": reconciled, "freight_discrepancies": audited, "pdfs": count * 4,
             "snapshot_cold": cold, "snapshot_cached": warm, "carrier_aggregation_with_inputs": carriers,
-            "cold_ms_per_pdf": round(cold["seconds"] / (count * 4) * 1000, 2)}
+            "cold_ms_per_pdf": round(cold["seconds"] / (count * 4) * 1000, 2),
+            "api": api_timings(rig, "BENCH-000001")}
+
+
+# The read endpoints the screens call most, timed warm through the real API (sign-in mode local)
+API_ROUTES = (
+    ("overview", "/api/overview"),
+    ("shipment list", "/api/shipments"),
+    ("shipment detail", "/api/shipments/{id}"),
+    ("exceptions", "/api/exceptions"),
+    ("carriers", "/api/carriers"),
+    ("risk overview", "/api/risk/overview"),
+    ("risk table", "/api/risk/shipments"),
+    ("risk explanation", "/api/risk/shipments/{id}"),
+    ("re-audit preview", "/api/shipments/{id}/re-audit"),
+    ("summary report preview", "/api/reporting/freight-audit-summary"),
+    ("summary report CSV", "/api/reporting/freight-audit-summary.csv"),
+    ("summary report PDF", "/api/reporting/freight-audit-summary.pdf"),
+)
+
+
+def api_timings(rig, sample, repeat=5):
+    """Median and slowest of `repeat` warm calls per endpoint (after one call that warms the caches)."""
+
+    client = rig.client()
+    figures = {}
+    print(f"\nAPI, warm, median of {repeat} calls", flush=True)
+
+    for label, route in API_ROUTES:
+        url = route.format(id=sample)
+        assert client.get(url).status_code == 200, url
+        samples = []
+
+        for _ in range(repeat):
+            started = time.perf_counter()
+            client.get(url)
+            samples.append(time.perf_counter() - started)
+
+        samples.sort()
+        figures[label] = {"median_ms": round(samples[len(samples) // 2] * 1000, 1), "slowest_ms": round(samples[-1] * 1000, 1)}
+        print(f"  {label:<34} {figures[label]['median_ms']:9.1f} ms   slowest {figures[label]['slowest_ms']:8.1f} ms", flush=True)
+
+    return figures
 
 
 def main():

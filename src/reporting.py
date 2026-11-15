@@ -46,6 +46,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
+import audit_analytics as analytics
 import carrier_intelligence as carriers_module
 import risk_analytics as risk
 from audit_export import NOT_AVAILABLE, safe_cell
@@ -444,7 +445,7 @@ def discrepancies(inputs, filters):
         statuses[status] += 1
         categories[exception["category"]] += 1
         # The reference only (file, page, document type): the passage it quotes stays out of the report
-        evidence = "; ".join(sorted({str(item).split(": ", 1)[0] for item in exception.get("evidence") or [] if item}))
+        evidence = analytics.evidence_summary(exception.get("evidence"))
 
         rows.append({
             "shipment_id": exception["shipment_id"], "carrier": fact["carrier"],

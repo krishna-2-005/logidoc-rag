@@ -18,7 +18,7 @@ import audit_history
 import authz
 import trend_analytics as trends
 from api import schemas
-from api.core import ApiState, get_principal, get_state, require
+from api.core import ApiState, get_state, require
 from api.routes_audit import attachment
 from exception_workflow import ExceptionWorkflow
 from review_store import STATUSES, ReviewError
@@ -53,22 +53,28 @@ class RecordBody(BaseModel):
     label: str | None = Field(default=None, max_length=100)
 
 
-def workflow_of(state):
+def workflow_of(state, store=None):
+    """
+    The exception workflow over store: for a read, a ReviewView (nothing is written); by default the review
+    store itself, for a change.
+    """
 
     assignable = None
 
     if state.mode == "required":
         assignable = lambda: [user["username"] for user in state.users().users() if user["active"]]  # noqa: E731
 
-    return ExceptionWorkflow(state.service.review_store(), assignable)
+    return ExceptionWorkflow(store or state.service.review_store(), assignable)
 
 
-def find(state, key):
+def find(state, key, record=False, view=None):
     """
-    The detected exception with a key, with its review state.
+    The detected exception with a key, with its review state. record: for a
+    change, the detected exceptions are recorded in the review store first.
     """
 
-    found = next((item for item in state.service.exceptions() if item["exception_key"] == key), None)
+    found = next((item for item in state.service.exceptions(record=record, view=view)
+                  if item["exception_key"] == key), None)
 
     if found is None:
         raise HTTPException(status_code=404, detail="The audit does not detect this exception (any more).")
@@ -82,15 +88,16 @@ def find(state, key):
 
 @router.get("/exceptions", response_model=schemas.ExceptionList, response_model_exclude_unset=True, responses=schemas.ERRORS)
 def exceptions(
-    principal=Depends(get_principal), state: ApiState = Depends(get_state),
+    principal=ViewAudit, state: ApiState = Depends(get_state),
     search: str = Query("", max_length=100), assignee: str | None = Query(None, max_length=64),
     unassigned: bool = False, status: list[str] = Query(default=[]), category: list[str] = Query(default=[]),
     min_age_days: int | None = Query(None, ge=0, le=100000), max_age_days: int | None = Query(None, ge=0, le=100000),
     pending_approval: bool = False, include_absent: bool = False, severity: list[str] = Query(default=[]),
 ):
     """
-    The exception queue with the filters of the screen. Reading it records
-    newly detected exceptions as open, like the dashboard. search matches
+    The exception queue with the filters of the screen. A read writes
+    nothing: newly detected exceptions are shown as open, and the server
+    records them in the background. search matches
     the shipment, the exception and the shipment's invoice numbers; each row
     carries its severity, financial impact (when determinable), recommended
     action and evidence from the current audit.
@@ -99,18 +106,15 @@ def exceptions(
     if not state.service.has_documents():
         return {"exceptions": [], "assignees": [], "categories": [], "statuses": list(STATUSES), "total": 0}
 
-    try:
-        authz.require(principal, authz.EXCEPTIONS_VIEW)
-    except authz.PermissionDenied as error:
-        raise HTTPException(status_code=403, detail=str(error)) from None
-
     unknown = set(status) - set(STATUSES)
 
     if unknown:
         raise HTTPException(status_code=422, detail=f"Unknown state: {sorted(unknown)}.")
 
-    detected = {item["exception_key"]: item for item in state.service.exceptions()}
-    flow = workflow_of(state)
+    # Read only: the review states as the next sync will record them, nothing written (ReviewView)
+    view = state.service.review_view()
+    detected = {item["exception_key"]: item for item in state.service.exceptions(view=view)}
+    flow = workflow_of(state, view)
     snapshot = state.service.snapshot()
     numbers = invoice_numbers(snapshot)
     wanted = search.strip().lower()
@@ -137,7 +141,7 @@ def exceptions(
         for item in explanations.explain_all(snapshot, list(detected.values()))
     }
 
-    store = state.service.review_store()
+    store = view
 
     def current(row, name):
         return detected.get(row["exception_key"], {}).get(name)
@@ -184,21 +188,22 @@ def invoice_numbers(snapshot):
 @router.get("/exceptions/activity")
 def activity(principal=ViewAudit, state: ApiState = Depends(get_state)):
 
-    return workflow_of(state).activity(principal, 200)
+    return workflow_of(state, state.service.review_view(detect=False)).activity(principal, 200)
 
 
 @router.get("/exceptions/{key:path}/history", response_model=list[schemas.ReviewEvent], response_model_exclude_unset=True, responses=schemas.ERRORS)
 def exception_history(key: str, principal=ViewAudit, state: ApiState = Depends(get_state)):
 
-    return workflow_of(state).history(principal, key)
+    return workflow_of(state, state.service.review_view(detect=False)).history(principal, key)
 
 
 @router.get("/exceptions/{key:path}")
 def exception_detail(key: str, principal=ViewAudit, state: ApiState = Depends(get_state)):
 
-    item = find(state, key)
-    flow = workflow_of(state)
-    row = state.service.review_store().states()[key]
+    view = state.service.review_view()
+    item = find(state, key, view=view)
+    flow = workflow_of(state, view)
+    row = view.states()[key]
 
     return {
         **item, "review": row, "allowed_actions": flow.allowed_actions(principal, row),
@@ -208,15 +213,19 @@ def exception_detail(key: str, principal=ViewAudit, state: ApiState = Depends(ge
 
 @router.post("/exceptions/{key:path}/actions", response_model=schemas.ActionResult, response_model_exclude_unset=True, responses=schemas.ERRORS)
 def exception_action(
-    key: str, body: ActionBody, principal=Depends(get_principal), state: ApiState = Depends(get_state),
+    key: str, body: ActionBody, principal=ViewAudit, state: ApiState = Depends(get_state),
 ):
     """
-    One workflow step on a detected exception. 403 when the role does not
+    One workflow step on a detected exception. Every step needs
+    exceptions.view, then the permission of the action itself (checked by the
+    workflow: assign, dismiss, waive, approve...). 403 when the role does not
     allow it, 422 when a rule is broken (a missing note, no evidence, an
-    impossible transition, a stale audit). Nothing is written on a refusal.
+    impossible transition, a stale audit). The step writes nothing on a
+    refusal; the exceptions the audit detects are recorded first (as the
+    server's background loop records them), so the exception is in the store.
     """
 
-    item = find(state, key)
+    item = find(state, key, record=True)
     flow = workflow_of(state)
 
     try:

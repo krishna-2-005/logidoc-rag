@@ -335,12 +335,39 @@ def filter_rows(
 # ============================================================
 
 def evidence_references(items):
+    """
+    Each evidence item as "<file> p.<page> (<document type>): <passage>": the
+    passage is for the screens of the application (evidence_reference gives the
+    part that may leave it).
+    """
 
     return [
         f"{item.get('source') or NOT_AVAILABLE} p.{item.get('page') if item.get('page') is not None else '?'} "
         f"({item.get('document_type') or NOT_AVAILABLE}): {item.get('text') or ''}".strip()
         for item in items or []
     ]
+
+
+# "<file> p.<page> (<document type>)" at the start of an evidence string, then the passage after ":"
+EVIDENCE_REFERENCE = re.compile(r"(?s)^(?P<reference>[^\n]*? p\.(?:\d+|\?) \([^()\n]*\))(?::.*)?$")
+
+
+def evidence_reference(evidence):
+    """
+    The reference of an evidence string (evidence_references): file, page and
+    document type, never the quoted passage. A string that is not in that form
+    gives None: it could be document text itself, so it is left out.
+    """
+
+    match = EVIDENCE_REFERENCE.match(str(evidence or ""))
+
+    return match.group("reference").strip() if match else None
+
+
+def evidence_summary(evidence):
+    """The distinct references of a list of evidence strings, sorted and joined with "; " (no passage)."""
+
+    return "; ".join(sorted({reference for reference in map(evidence_reference, evidence or []) if reference}))
 
 
 def signature(exception):
@@ -663,7 +690,10 @@ def register_csv(rows):
 
 def exceptions_csv(exceptions):
     """
-    The exceptions given (with their review state) as CSV.
+    The exceptions given (with their review state) as CSV. The evidence
+    column holds references only (file, page and document type): a file that
+    leaves the application never quotes the documents' text. Every cell is
+    formula-protected (write_csv).
     """
 
     return write_csv(EXCEPTION_COLUMNS, [
@@ -674,7 +704,7 @@ def exceptions_csv(exceptions):
             item.get("unit") or "", item.get("review_status") or "open",
             cell(bool(item.get("needs_recheck"))), item.get("reviewer") or "",
             item.get("review_note") or "", item.get("review_updated") or "",
-            " | ".join(item["evidence"]),
+            evidence_summary(item["evidence"]),
         ]
         for item in exceptions
     ])
