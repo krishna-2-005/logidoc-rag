@@ -56,6 +56,9 @@ date. With a date range, undated shipments are left out and counted in a note.
   interpreted as markup, nothing is embedded, linked or scripted, and characters the fonts cannot show are
   replaced. Wide reports print their main columns; the CSV has every column.
 - **Evidence is referenced, not quoted.** A report gives the file, page and document type, never the passage.
+  The older exceptions CSV (`/api/reports/exceptions.csv`) does the same since Sprint 4: its `evidence` column
+  lists the distinct references, and anything that is not a reference is left out
+  (`audit_analytics.evidence_reference`).
 
 ## 5. API (`reports.download`; the corrections report also needs `history.view`; also under `/api/v1`)
 
