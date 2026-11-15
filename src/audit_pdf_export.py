@@ -220,10 +220,16 @@ class Report:
     does not fit.
     """
 
-    def __init__(self, shipment_id):
+    def __init__(self, shipment_id, header=None, metadata=None):
 
         self.document = pymupdf.open()
         self.shipment_id = shipment_id
+        # The line at the top of every page, and the document's title and subject (reporting.to_pdf passes its own)
+        self.header = header or f"LogiDoc-RAG Freight Audit Report — Shipment {shipment_id}"
+        self.metadata = metadata or {
+            "title": f"Freight Audit Report {shipment_id}",
+            "subject": f"Freight audit of shipment {shipment_id}",
+        }
         self.page = None
         self.y = 0
         self.pending_heading = None
@@ -234,11 +240,7 @@ class Report:
         self.page = self.document.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
         self.y = TOP
 
-        self.text(
-            MARGIN, 36,
-            f"LogiDoc-RAG Freight Audit Report — Shipment {self.shipment_id}",
-            REGULAR, 8, GREY,
-        )
+        self.text(MARGIN, 36, self.header, REGULAR, 8, GREY)
 
         self.page.draw_line((MARGIN, 44), (PAGE_WIDTH - MARGIN, 44), color=RULE, width=0.5)
 
@@ -447,11 +449,7 @@ class Report:
                 PAGE_HEIGHT - 30, label, REGULAR, 8, GREY,
             )
 
-        self.document.set_metadata({
-            "title": f"Freight Audit Report {self.shipment_id}",
-            "subject": f"Freight audit of shipment {self.shipment_id}",
-            "creator": "LogiDoc-RAG",
-        })
+        self.document.set_metadata({**self.metadata, "creator": "LogiDoc-RAG"})
 
         # Embed only the characters used
         self.document.subset_fonts()

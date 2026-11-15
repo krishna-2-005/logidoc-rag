@@ -7728,6 +7728,320 @@
         "title": "RepeatedException",
         "type": "object"
       },
+      "ReportCarrierOption": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ],
+        "title": "ReportCarrierOption",
+        "type": "object"
+      },
+      "ReportCatalog": {
+        "properties": {
+          "can_view_history": {
+            "title": "Can View History",
+            "type": "boolean"
+          },
+          "options": {
+            "$ref": "#/components/schemas/ReportOptions"
+          },
+          "reports": {
+            "items": {
+              "$ref": "#/components/schemas/ReportDefinition"
+            },
+            "title": "Reports",
+            "type": "array"
+          }
+        },
+        "required": [
+          "reports",
+          "options",
+          "can_view_history"
+        ],
+        "title": "ReportCatalog",
+        "type": "object"
+      },
+      "ReportColumn": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "text",
+              "count",
+              "money",
+              "date",
+              "number"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "kind"
+        ],
+        "title": "ReportColumn",
+        "type": "object"
+      },
+      "ReportDefinition": {
+        "properties": {
+          "date_basis": {
+            "title": "Date Basis",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "filters": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Filters",
+            "type": "array"
+          },
+          "report": {
+            "title": "Report",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "report",
+          "title",
+          "description",
+          "filters",
+          "date_basis"
+        ],
+        "title": "ReportDefinition",
+        "type": "object"
+      },
+      "ReportOptions": {
+        "properties": {
+          "carriers": {
+            "items": {
+              "$ref": "#/components/schemas/ReportCarrierOption"
+            },
+            "title": "Carriers",
+            "type": "array"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "outcomes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Statuses",
+            "type": "array"
+          }
+        },
+        "required": [
+          "carriers",
+          "outcomes",
+          "statuses",
+          "categories"
+        ],
+        "title": "ReportOptions",
+        "type": "object"
+      },
+      "ReportPreview": {
+        "description": "A page of the report's rows (offset, limit); total_rows and every total cover all of them.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ReportColumn"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "date_basis": {
+            "title": "Date Basis",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "filters": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Filters",
+            "type": "array"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "provenance": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Provenance",
+            "type": "array"
+          },
+          "report": {
+            "title": "Report",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "total_rows": {
+            "title": "Total Rows",
+            "type": "integer"
+          },
+          "totals": {
+            "items": {
+              "$ref": "#/components/schemas/ReportTotalSection"
+            },
+            "title": "Totals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "report",
+          "title",
+          "description",
+          "generated_at",
+          "date_basis",
+          "filters",
+          "provenance",
+          "columns",
+          "rows",
+          "total_rows",
+          "offset",
+          "limit",
+          "totals",
+          "notes"
+        ],
+        "title": "ReportPreview",
+        "type": "object"
+      },
+      "ReportTotalRow": {
+        "description": "value: the number (null for a rate shown as text); display: as written in the files.",
+        "properties": {
+          "display": {
+            "title": "Display",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "label",
+          "value",
+          "display",
+          "note"
+        ],
+        "title": "ReportTotalRow",
+        "type": "object"
+      },
+      "ReportTotalSection": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ReportTotalRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "rows"
+        ],
+        "title": "ReportTotalSection",
+        "type": "object"
+      },
       "ResolveBody": {
         "properties": {
           "note": {
@@ -8167,6 +8481,940 @@
           "approval_note"
         ],
         "title": "ReviewRow",
+        "type": "object"
+      },
+      "RiskBand": {
+        "properties": {
+          "band": {
+            "title": "Band",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "lower": {
+            "title": "Lower",
+            "type": "integer"
+          },
+          "upper": {
+            "title": "Upper",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "band",
+          "lower",
+          "upper",
+          "count"
+        ],
+        "title": "RiskBand",
+        "type": "object"
+      },
+      "RiskCarrier": {
+        "properties": {
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Category",
+            "type": "object"
+          },
+          "carrier": {
+            "title": "Carrier",
+            "type": "string"
+          },
+          "carrier_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier Key"
+          },
+          "high_risk": {
+            "title": "High Risk",
+            "type": "integer"
+          },
+          "mean_score": {
+            "title": "Mean Score",
+            "type": "number"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "integer"
+          },
+          "shipments": {
+            "title": "Shipments",
+            "type": "integer"
+          },
+          "top_signals": {
+            "items": {
+              "$ref": "#/components/schemas/RiskCarrierSignal"
+            },
+            "title": "Top Signals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "carrier_key",
+          "carrier",
+          "shipments",
+          "mean_score",
+          "high_risk",
+          "by_category",
+          "partial",
+          "top_signals"
+        ],
+        "title": "RiskCarrier",
+        "type": "object"
+      },
+      "RiskCarrierSignal": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "shipments": {
+            "title": "Shipments",
+            "type": "integer"
+          },
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signal",
+          "label",
+          "shipments"
+        ],
+        "title": "RiskCarrierSignal",
+        "type": "object"
+      },
+      "RiskEvidence": {
+        "description": "What a factor rests on: an exception, a document type, a freight audit outcome or an amount.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "type": {
+            "enum": [
+              "exception",
+              "document",
+              "freight_audit",
+              "amount"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "reference"
+        ],
+        "title": "RiskEvidence",
+        "type": "object"
+      },
+      "RiskExceptionGroup": {
+        "properties": {
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Status",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "category",
+          "total",
+          "by_status"
+        ],
+        "title": "RiskExceptionGroup",
+        "type": "object"
+      },
+      "RiskFactor": {
+        "description": "One signal: unavailable means its evidence could not be read (never counted as no risk).",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/RiskEvidence"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "max": {
+            "title": "Max",
+            "type": "integer"
+          },
+          "not_counted": {
+            "items": {
+              "$ref": "#/components/schemas/RiskEvidence"
+            },
+            "title": "Not Counted",
+            "type": "array"
+          },
+          "points": {
+            "title": "Points",
+            "type": "integer"
+          },
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scored",
+              "clear",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "uncapped_points": {
+            "title": "Uncapped Points",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "signal",
+          "label",
+          "status",
+          "points",
+          "max",
+          "uncapped_points",
+          "detail",
+          "evidence",
+          "not_counted"
+        ],
+        "title": "RiskFactor",
+        "type": "object"
+      },
+      "RiskModelSignal": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "max": {
+            "title": "Max",
+            "type": "integer"
+          },
+          "rule": {
+            "additionalProperties": true,
+            "title": "Rule",
+            "type": "object"
+          },
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signal",
+          "label",
+          "description",
+          "max",
+          "rule"
+        ],
+        "title": "RiskModelSignal",
+        "type": "object"
+      },
+      "RiskModelView": {
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/RiskModelSignal"
+            },
+            "title": "Signals",
+            "type": "array"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/RiskThresholds"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "digest",
+          "thresholds",
+          "signals"
+        ],
+        "title": "RiskModelView",
+        "type": "object"
+      },
+      "RiskOverview": {
+        "properties": {
+          "carriers": {
+            "items": {
+              "$ref": "#/components/schemas/RiskCarrier"
+            },
+            "title": "Carriers",
+            "type": "array"
+          },
+          "exceptions": {
+            "items": {
+              "$ref": "#/components/schemas/RiskExceptionGroup"
+            },
+            "title": "Exceptions",
+            "type": "array"
+          },
+          "histogram": {
+            "items": {
+              "$ref": "#/components/schemas/RiskBand"
+            },
+            "title": "Histogram",
+            "type": "array"
+          },
+          "model": {
+            "$ref": "#/components/schemas/RiskOverviewModel"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/RiskSignalCount"
+            },
+            "title": "Signals",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/RiskTotals"
+          }
+        },
+        "required": [
+          "model",
+          "totals",
+          "histogram",
+          "exceptions",
+          "carriers",
+          "signals"
+        ],
+        "title": "RiskOverview",
+        "type": "object"
+      },
+      "RiskOverviewModel": {
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/RiskThresholds"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "digest",
+          "thresholds"
+        ],
+        "title": "RiskOverviewModel",
+        "type": "object"
+      },
+      "RiskRow": {
+        "properties": {
+          "carrier": {
+            "title": "Carrier",
+            "type": "string"
+          },
+          "carrier_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier Key"
+          },
+          "category": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "freight_outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freight Outcome"
+          },
+          "open_exceptions": {
+            "title": "Open Exceptions",
+            "type": "integer"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "shipment_id": {
+            "title": "Shipment Id",
+            "type": "string"
+          },
+          "shipment_key": {
+            "title": "Shipment Key",
+            "type": "string"
+          },
+          "top_factors": {
+            "items": {
+              "$ref": "#/components/schemas/RiskTopFactor"
+            },
+            "title": "Top Factors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shipment_id",
+          "shipment_key",
+          "carrier_key",
+          "carrier",
+          "date",
+          "final_status",
+          "freight_outcome",
+          "open_exceptions",
+          "score",
+          "category",
+          "partial",
+          "top_factors"
+        ],
+        "title": "RiskRow",
+        "type": "object"
+      },
+      "RiskShipment": {
+        "description": "One shipment's score with every factor, its evidence and what was not available.",
+        "properties": {
+          "basis": {
+            "enum": [
+              "current",
+              "recorded"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "carrier": {
+            "title": "Carrier",
+            "type": "string"
+          },
+          "carrier_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier Key"
+          },
+          "category": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "date_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Basis"
+          },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/RiskFactor"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
+          "final_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Status"
+          },
+          "freight_outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freight Outcome"
+          },
+          "model": {
+            "$ref": "#/components/schemas/RiskStamp"
+          },
+          "open_exceptions": {
+            "title": "Open Exceptions",
+            "type": "integer"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "shipment_id": {
+            "title": "Shipment Id",
+            "type": "string"
+          },
+          "shipment_key": {
+            "title": "Shipment Key",
+            "type": "string"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/RiskThresholds"
+          },
+          "unavailable": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unavailable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shipment_id",
+          "shipment_key",
+          "carrier_key",
+          "carrier",
+          "date",
+          "date_basis",
+          "currency",
+          "final_status",
+          "freight_outcome",
+          "open_exceptions",
+          "score",
+          "category",
+          "partial",
+          "factors",
+          "unavailable",
+          "basis",
+          "model",
+          "thresholds"
+        ],
+        "title": "RiskShipment",
+        "type": "object"
+      },
+      "RiskShipmentPage": {
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "model": {
+            "$ref": "#/components/schemas/RiskStamp"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/RiskRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rows",
+          "total",
+          "offset",
+          "limit",
+          "model"
+        ],
+        "title": "RiskShipmentPage",
+        "type": "object"
+      },
+      "RiskSignalCount": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "points": {
+            "title": "Points",
+            "type": "integer"
+          },
+          "shipments_scored": {
+            "title": "Shipments Scored",
+            "type": "integer"
+          },
+          "shipments_unavailable": {
+            "title": "Shipments Unavailable",
+            "type": "integer"
+          },
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signal",
+          "label",
+          "shipments_scored",
+          "shipments_unavailable",
+          "points"
+        ],
+        "title": "RiskSignalCount",
+        "type": "object"
+      },
+      "RiskStamp": {
+        "description": "The model a score was computed with: its version and the digest of its weights and thresholds.",
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "digest"
+        ],
+        "title": "RiskStamp",
+        "type": "object"
+      },
+      "RiskThresholds": {
+        "properties": {
+          "critical": {
+            "title": "Critical",
+            "type": "integer"
+          },
+          "high": {
+            "title": "High",
+            "type": "integer"
+          },
+          "medium": {
+            "title": "Medium",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "medium",
+          "high",
+          "critical"
+        ],
+        "title": "RiskThresholds",
+        "type": "object"
+      },
+      "RiskTopFactor": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "points": {
+            "title": "Points",
+            "type": "integer"
+          },
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signal",
+          "label",
+          "points"
+        ],
+        "title": "RiskTopFactor",
+        "type": "object"
+      },
+      "RiskTotals": {
+        "description": "mean_score null: no shipment in the selection.",
+        "properties": {
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Category",
+            "type": "object"
+          },
+          "high_risk": {
+            "title": "High Risk",
+            "type": "integer"
+          },
+          "mean_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Score"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "integer"
+          },
+          "shipments": {
+            "title": "Shipments",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "shipments",
+          "high_risk",
+          "partial",
+          "mean_score",
+          "by_category"
+        ],
+        "title": "RiskTotals",
+        "type": "object"
+      },
+      "RiskTrendPoint": {
+        "properties": {
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Category",
+            "type": "object"
+          },
+          "high_risk": {
+            "title": "High Risk",
+            "type": "integer"
+          },
+          "mean_score": {
+            "title": "Mean Score",
+            "type": "number"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "shipments": {
+            "title": "Shipments",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "period",
+          "shipments",
+          "mean_score",
+          "high_risk",
+          "by_category"
+        ],
+        "title": "RiskTrendPoint",
+        "type": "object"
+      },
+      "RiskTrends": {
+        "description": "From recorded audit runs only; points is empty when nothing was recorded.",
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/RiskStamp"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "period": {
+            "enum": [
+              "month",
+              "week"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/RiskTrendPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "signals_unavailable": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Signals Unavailable",
+            "type": "array"
+          },
+          "signals_used": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Signals Used",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model",
+          "period",
+          "points",
+          "signals_used",
+          "signals_unavailable",
+          "note"
+        ],
+        "title": "RiskTrends",
         "type": "object"
       },
       "RunBody": {
@@ -17566,6 +18814,743 @@
         "summary": "Ready"
       }
     },
+    "/api/reporting/catalog": {
+      "get": {
+        "description": "The reports, the filters each takes, and the values the filters offer.",
+        "operationId": "report_catalog_api_reporting_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The configured risk model cannot be used"
+          }
+        },
+        "summary": "Report Catalog"
+      }
+    },
+    "/api/reporting/{report}": {
+      "get": {
+        "description": "The report with a page of its rows; the totals cover every row.",
+        "operationId": "report_preview_api_reporting__report__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report",
+            "required": true,
+            "schema": {
+              "enum": [
+                "freight-audit-summary",
+                "discrepancies",
+                "carrier-performance",
+                "corrections"
+              ],
+              "title": "Report",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "in": "query",
+            "name": "carrier",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Carrier"
+            }
+          },
+          {
+            "in": "query",
+            "name": "shipment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Shipment"
+            }
+          },
+          {
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "MATCHED",
+                  "MATCHED_WITH_TOLERANCE",
+                  "DISCREPANCY",
+                  "INSUFFICIENT_EVIDENCE",
+                  "DUPLICATE",
+                  "PENDING_REVIEW",
+                  "NOT_RUN"
+                ],
+                "type": "string"
+              },
+              "title": "Outcome",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exception_status",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "open",
+                  "in_review",
+                  "disputed",
+                  "resolved",
+                  "dismissed",
+                  "waived"
+                ],
+                "type": "string"
+              },
+              "title": "Exception Status",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "risk_category",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              "title": "Risk Category",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The configured risk model cannot be used"
+          }
+        },
+        "summary": "Report Preview"
+      }
+    },
+    "/api/reporting/{report}.csv": {
+      "get": {
+        "description": "The whole report as CSV (header block, table, totals; every cell protected against formula injection).",
+        "operationId": "report_csv_api_reporting__report__csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report",
+            "required": true,
+            "schema": {
+              "enum": [
+                "freight-audit-summary",
+                "discrepancies",
+                "carrier-performance",
+                "corrections"
+              ],
+              "title": "Report",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "in": "query",
+            "name": "carrier",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Carrier"
+            }
+          },
+          {
+            "in": "query",
+            "name": "shipment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Shipment"
+            }
+          },
+          {
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "MATCHED",
+                  "MATCHED_WITH_TOLERANCE",
+                  "DISCREPANCY",
+                  "INSUFFICIENT_EVIDENCE",
+                  "DUPLICATE",
+                  "PENDING_REVIEW",
+                  "NOT_RUN"
+                ],
+                "type": "string"
+              },
+              "title": "Outcome",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exception_status",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "open",
+                  "in_review",
+                  "disputed",
+                  "resolved",
+                  "dismissed",
+                  "waived"
+                ],
+                "type": "string"
+              },
+              "title": "Exception Status",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "risk_category",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              "title": "Risk Category",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The configured risk model cannot be used"
+          }
+        },
+        "summary": "Report Csv"
+      }
+    },
+    "/api/reporting/{report}.pdf": {
+      "get": {
+        "description": "The whole report as PDF (plain text, standard fonts, nothing embedded or linked).",
+        "operationId": "report_pdf_api_reporting__report__pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report",
+            "required": true,
+            "schema": {
+              "enum": [
+                "freight-audit-summary",
+                "discrepancies",
+                "carrier-performance",
+                "corrections"
+              ],
+              "title": "Report",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "in": "query",
+            "name": "carrier",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Carrier"
+            }
+          },
+          {
+            "in": "query",
+            "name": "shipment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Shipment"
+            }
+          },
+          {
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "MATCHED",
+                  "MATCHED_WITH_TOLERANCE",
+                  "DISCREPANCY",
+                  "INSUFFICIENT_EVIDENCE",
+                  "DUPLICATE",
+                  "PENDING_REVIEW",
+                  "NOT_RUN"
+                ],
+                "type": "string"
+              },
+              "title": "Outcome",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exception_status",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "open",
+                  "in_review",
+                  "disputed",
+                  "resolved",
+                  "dismissed",
+                  "waived"
+                ],
+                "type": "string"
+              },
+              "title": "Exception Status",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "risk_category",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              "title": "Risk Category",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The configured risk model cannot be used"
+          }
+        },
+        "summary": "Report Pdf"
+      }
+    },
     "/api/reports/carriers.csv": {
       "get": {
         "operationId": "report_carriers_api_reports_carriers_csv_get",
@@ -17844,6 +19829,650 @@
           }
         },
         "summary": "Report Shipment Pdf"
+      }
+    },
+    "/api/risk/model": {
+      "get": {
+        "description": "The risk model in force: its version, digest, thresholds and every signal's weights.",
+        "operationId": "risk_model_api_risk_model_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskModelView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The configured risk model cannot be used"
+          }
+        },
+        "summary": "Risk Model"
+      }
+    },
+    "/api/risk/overview": {
+      "get": {
+        "description": "The dashboard's figures over the selected shipments (the same filters as the table).",
+        "operationId": "risk_overview_api_risk_overview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              "title": "Category",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "carrier",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Carrier"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The configured risk model cannot be used"
+          }
+        },
+        "summary": "Risk Overview"
+      }
+    },
+    "/api/risk/shipments": {
+      "get": {
+        "description": "A page of scored shipments, highest score first by default.",
+        "operationId": "risk_shipments_api_risk_shipments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              "title": "Category",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "carrier",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Carrier"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "partial",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Partial"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "score",
+              "enum": [
+                "score",
+                "shipment",
+                "carrier",
+                "date"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 1000000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskShipmentPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The configured risk model cannot be used"
+          }
+        },
+        "summary": "Risk Shipments"
+      }
+    },
+    "/api/risk/shipments/{shipment_id}": {
+      "get": {
+        "description": "One shipment's score, every factor with its evidence, and what could not be assessed.",
+        "operationId": "risk_shipment_api_risk_shipments__shipment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shipment_id",
+            "required": true,
+            "schema": {
+              "title": "Shipment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskShipment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such shipment"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The configured risk model cannot be used"
+          }
+        },
+        "summary": "Risk Shipment"
+      }
+    },
+    "/api/risk/trends": {
+      "get": {
+        "description": "The risk of what recorded audit runs found, per month or ISO week (empty without recorded history).",
+        "operationId": "risk_trends_api_risk_trends_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "default": "month",
+              "enum": [
+                "month",
+                "week"
+              ],
+              "title": "Period",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskTrends"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not signed in"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not allowed for this role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A rule or a value was refused"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The configured risk model cannot be used"
+          }
+        },
+        "summary": "Risk Trends"
       }
     },
     "/api/session": {

@@ -634,6 +634,14 @@ class ExtractionStore:
 
         return self.shaped_correction(row) if row else None
 
+    def all_corrections(self):
+        """Every correction with its decision, document and shipment, oldest first (the corrections report)."""
+
+        with closing(self.connect()) as connection:
+            rows = connection.execute(self.CORRECTION_SELECT + "ORDER BY c.id").fetchall()
+
+        return [self.shaped_correction(r) for r in rows]
+
     def pending(self):
         """Proposals waiting for a decision, oldest first."""
 

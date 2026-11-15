@@ -1007,6 +1007,43 @@ class HistoryStore:
         return {"run_id": row["run_id"], "recorded_at": row["created_at"], "label": row["label"], "snapshot": snapshot,
                 "applied_correction_ids": json.loads(applied["applied"]) if applied else None}
 
+    def re_audits(self):
+        """
+        Every controlled re-audit recorded (audit_service.re_audit labels them
+        "Re-audit by <user>: <reason>"): [{run_id, created_at, label,
+        shipment_keys}], oldest first. Read only.
+        """
+
+        with closing(self.connect()) as connection:
+
+            runs = connection.execute(
+                "SELECT id, created_at, label FROM audit_runs WHERE label LIKE 'Re-audit by %' ORDER BY id").fetchall()
+
+            return [{"run_id": run["id"], "created_at": run["created_at"], "label": run["label"],
+                     "shipment_keys": [row["shipment_key"] for row in connection.execute(
+                         "SELECT shipment_key FROM run_shipments WHERE run_id = ? ORDER BY shipment_key", (run["id"],))]}
+                    for run in runs]
+
+    def freight_facts(self):
+        """
+        {snapshot id: {"outcome", "financial_impact"}} of every recorded freight
+        audit (snapshots recorded before version 4, or without one, are absent).
+        Read only; for the risk trends (risk_analytics.trends).
+        """
+
+        result = {}
+
+        with closing(self.connect()) as connection:
+
+            for row in connection.execute("SELECT snapshot_id, outcome, payload FROM freight_audit_records"):
+                try:
+                    impact = json.loads(row["payload"]).get("financial_impact")
+                except ValueError:
+                    impact = None
+                result[row["snapshot_id"]] = {"outcome": row["outcome"], "financial_impact": impact}
+
+        return result
+
     def observations(self):
         """
         Every time a shipment was audited: one entry per (audit run,

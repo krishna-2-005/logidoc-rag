@@ -191,6 +191,16 @@ def validate(environ):
     if level and level not in LOG_LEVELS:
         errors.append(f"LOGIDOC_LOG_LEVEL must be one of {', '.join(LOG_LEVELS)}.")
 
+    # The shipment risk model (src/risk_analytics.py): weights and thresholds, versioned
+    risk_model = value_of(environ, "LOGIDOC_RISK_MODEL")
+    if risk_model:
+        import risk_analytics
+
+        try:
+            risk_analytics.load_model(risk_model)
+        except risk_analytics.ModelError as error:
+            errors.append(f"LOGIDOC_RISK_MODEL: {error}")
+
     origins = [item.strip() for item in value_of(environ, "LOGIDOC_CORS_ORIGINS").split(",") if item.strip()]
     if "*" in origins:
         errors.append("LOGIDOC_CORS_ORIGINS must list origins; '*' is not allowed with credentials.")
