@@ -65,6 +65,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+import migration_guard
+
 
 SCHEMA_VERSION = 6
 
@@ -620,6 +622,9 @@ class HistoryStore:
         return connection
 
     def initialize(self):
+
+        # The installation's database is upgraded only at startup, after a fresh verified backup (migration_guard)
+        migration_guard.check(self.path, "audit_history", SCHEMA_VERSION)
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
 

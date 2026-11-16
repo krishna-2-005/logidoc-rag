@@ -37,6 +37,13 @@ TEMP_PREFIXES = (
 )
 
 
+# The installation's own databases, captured before hermetic_databases points the settings elsewhere
+PRODUCTION_DATABASES = (
+    config.REVIEW_DB_PATH, config.HISTORY_DB_PATH,
+    config.AUTH_DB_PATH, config.INGESTION_DB_PATH,
+)
+
+
 def production_snapshot():
 
     state = {}
@@ -54,10 +61,7 @@ def production_snapshot():
 
     # The exception review, audit history, user and ingestion databases (and their
     # journal files) must not be created or changed by the tests either
-    for database in (
-        config.REVIEW_DB_PATH, config.HISTORY_DB_PATH,
-        config.AUTH_DB_PATH, config.INGESTION_DB_PATH,
-    ):
+    for database in PRODUCTION_DATABASES:
 
         for suffix in ("", "-journal", "-wal", "-shm"):
 
@@ -106,3 +110,25 @@ def protect_production_data():
     assert not leftovers, (
         f"Ingestion staging folders were left behind: {sorted(leftovers)}"
     )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def hermetic_databases(protect_production_data, tmp_path_factory):
+    """
+    The review and history databases and the backup folder of a test that does not
+    choose its own are temporary ones. The Streamlit app checks the installation's
+    databases for pending upgrades when it starts (src/migration_guard.py), and a
+    test must never read, let alone upgrade, the real ones.
+    """
+
+    folder = tmp_path_factory.mktemp("installation")
+    saved = {name: getattr(config, name) for name in ("REVIEW_DB_PATH", "HISTORY_DB_PATH", "BACKUP_DIR")}
+
+    config.REVIEW_DB_PATH = folder / "audit_reviews.sqlite3"
+    config.HISTORY_DB_PATH = folder / "audit_history.sqlite3"
+    config.BACKUP_DIR = folder / "backups"
+
+    yield
+
+    for name, value in saved.items():
+        setattr(config, name, value)

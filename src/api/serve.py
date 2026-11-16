@@ -79,6 +79,7 @@ def main(argv=None):
     from auth import ConfigError
     from backup import server_lock_path
     from file_lock import FileLock, LockBusy
+    from migration_guard import MigrationBlocked
 
     production = report["environment"] == environment.PRODUCTION
     observability.configure_logging(
@@ -122,7 +123,15 @@ def main(argv=None):
              "server runs on the same data folder.")
 
     try:
-        uvicorn.run(create_app(settings=settings), host=settings.host, port=settings.port, log_config=None,
+
+        try:
+            application = create_app(settings=settings)
+        except MigrationBlocked as error:
+            # A schema upgrade is due and no fresh verified backup holds the current data: nothing was upgraded
+            print(str(error), file=sys.stderr)
+            return 4
+
+        uvicorn.run(application, host=settings.host, port=settings.port, log_config=None,
                     access_log=False, proxy_headers=False, server_header=False)
     finally:
         lock.release()

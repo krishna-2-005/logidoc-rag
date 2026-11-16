@@ -247,4 +247,3 @@ def test_a_refused_document_change_creates_or_opens_no_store(tmp_path):
         assert reviewer.post(path, json={}).status_code == 403, path
 
     assert (register.read_bytes() if register.exists() else None) == before
-

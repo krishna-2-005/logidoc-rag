@@ -71,8 +71,10 @@ from review_store import (
     STATUS_LABELS,
     STATUSES,
     Policy,
+    FirstSeen,
     ReviewError,
-    ReviewStore,
+    ReviewSession,
+    ReviewView,
 )
 from shipment_identity import belongs_to_shipment, identifier_key
 
@@ -87,6 +89,37 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+# ============================================================
+# DATABASE UPGRADES (src/migration_guard.py)
+# ============================================================
+
+@st.cache_resource(show_spinner=False)
+def prepare_databases():
+    """
+    Once per process, before any page opens a store: a pending schema upgrade of
+    the review or history database runs only with a fresh verified backup.
+    """
+
+    import migration_guard
+    from audit_service import Locations
+
+    return migration_guard.prepare(Locations.from_config(config), config.BACKUP_DIR)
+
+
+def guard_databases():
+
+    from migration_guard import MigrationBlocked
+
+    try:
+        prepare_databases()
+    except MigrationBlocked as error:
+        st.error(str(error))
+        st.stop()
+
+
+guard_databases()
 
 
 # ============================================================
@@ -2245,6 +2278,23 @@ def review_policy():
     )
 
 
+@st.cache_resource(show_spinner=False)
+def review_first_seen():
+    """When this app process first showed each detected exception: its creation time until it is recorded."""
+
+    return FirstSeen()
+
+
+def review_session(exceptions):
+    """
+    The review store for one page: read only (review_store.ReviewSession) until
+    a review is saved, which first records the detected exceptions.
+    """
+
+    return ReviewSession(config.REVIEW_DB_PATH, review_policy(), exceptions,
+                         detected_at=review_first_seen().of(exceptions))
+
+
 def assignable_users():
     """
     Who an exception can be assigned to: the active accounts when users
@@ -2389,8 +2439,9 @@ def show_audit_analytics(shipment_options):
     exceptions = build_exceptions(snapshot)
 
     try:
-        store = ReviewStore(config.REVIEW_DB_PATH, review_policy())
-        reviews = store.sync(exceptions)
+        # Read only until a review is saved (review_store.ReviewSession)
+        store = review_session(exceptions)
+        reviews = store.states()
     except Exception as error:
         store, reviews = None, {}
         st.warning(
@@ -2641,7 +2692,8 @@ def show_audit_operations():
     review_store = history = review_error = history_error = None
 
     try:
-        review_store = ReviewStore(config.REVIEW_DB_PATH, review_policy())
+        # Read only until a review is saved (review_store.ReviewSession)
+        review_store = review_session(build_exceptions(snapshot))
     except Exception as error:
         review_error = str(error)
 
@@ -2675,8 +2727,9 @@ def show_exception_queue():
         with st.spinner("Reconciling every shipment..."):
             snapshot = load_audit_snapshot(str(RAW_DATA_DIR), fingerprint, ingestion_problems())
 
-        store = ReviewStore(config.REVIEW_DB_PATH, review_policy())
-        reviews = store.sync(build_exceptions(snapshot))
+        # Read only until an action is taken (review_store.ReviewSession)
+        store = review_session(build_exceptions(snapshot))
+        reviews = store.states()
     except Exception as error:
         st.error(f"The exception queue could not be loaded: {error}")
         return
@@ -2714,7 +2767,8 @@ def show_administration():
     stores = {}
 
     if PRINCIPAL.can(authz.ADMIN_MAINTENANCE):
-        stores["exception review history"] = lambda: ReviewStore(
+        # A check, not a change: the review history is read, never created or upgraded to be verified
+        stores["exception review history"] = lambda: ReviewView(
             config.REVIEW_DB_PATH, review_policy()
         ).verify_integrity()
 

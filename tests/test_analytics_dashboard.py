@@ -89,6 +89,16 @@ def button(at, label):
     return [item for item in at.button if item.label == label][0]
 
 
+def record_through_the_page(at):
+    """
+    Saves a review state from the analytics page, which first records every detected
+    exception in the review database (review_store.ReviewSession): showing writes nothing.
+    """
+
+    [item for item in at.tabs[4].selectbox if item.label == "Review state"][0].select("in_review").run()
+    button(at, "Save review state").click().run()
+
+
 def test_existing_tabs_are_kept_and_analytics_loads_on_request(dashboard):
 
     at = AppTest.from_file(str(APP_FILE), default_timeout=240)
@@ -193,8 +203,9 @@ def test_exception_register_and_review_workflow(dashboard):
     assert sorted(exceptions["Category"]) == ["Delivery delay", "Invoice mismatch", "Quantity shortage"]
     assert set(exceptions["Review state"]) == {"Open"}
 
-    store = ReviewStore(dashboard)
-    assert {row["status"] for row in store.states().values()} == {"open"}
+    # Five page views and nothing written: the first saved review records the detected exceptions
+    # (review_store.ReviewSession)
+    assert not Path(dashboard).exists()
 
     label = f"{A} · Invoice mismatch (Discrepancy)"
     at.selectbox(key="an_exception").select(label).run()
@@ -229,6 +240,9 @@ def test_review_states_never_change_the_audit_or_the_kpis(dashboard):
 
     kpis = metrics(before)
     register = [frame.value for frame in before.tabs[4].dataframe if "Final status" in frame.value.columns][0]
+
+    # Saving a review from the page records the detected exceptions (a page view writes nothing)
+    record_through_the_page(before)
 
     # Resolve every exception of SHJ-2026-001 directly in the database
     store = ReviewStore(dashboard)

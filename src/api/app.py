@@ -46,6 +46,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 import config
 import metrics
+import migration_guard
 import readiness
 from api import (routes_assistant, routes_audit, routes_audit_review, routes_auth, routes_carriers, routes_extraction,
                  routes_ingestion, routes_integrations, routes_operations, routes_reporting, routes_risk, routes_workflow)
@@ -146,7 +147,12 @@ def create_app(state=None, settings=None):
     """
 
     settings = settings or (state.settings if state else ApiSettings.from_env())
-    state = state or default_state(settings)
+
+    if state is None:
+        # The installation's own data: a pending schema upgrade runs here, before anything is served, and only
+        # with a fresh verified backup; otherwise migration_guard.MigrationBlocked stops the start
+        state = default_state(settings)
+        migration_guard.prepare(state.locations, state.backup_dir)
 
     @asynccontextmanager
     async def lifespan(application):

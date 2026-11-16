@@ -71,11 +71,15 @@ and authenticated = 0, and no hash.
 
 import hashlib
 import json
+import os
 import sqlite3
+import threading
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+import migration_guard
 
 
 OPEN = "open"
@@ -341,6 +345,9 @@ class ReviewStore:
             connection.close()
 
     def initialize(self):
+
+        # The installation's database is upgraded only at startup, after a fresh verified backup (migration_guard)
+        migration_guard.check(self.path, "audit_reviews", SCHEMA_VERSION)
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1242,3 +1249,82 @@ class ReviewView(ReviewStore):
     def initialize(self):
 
         raise ReviewError("The review view is read only: it never initializes the database.")
+
+
+def creatable(path):
+    """Whether a database file could be created at path, checked without creating anything."""
+
+    folder = Path(path).parent
+
+    while not folder.exists() and folder != folder.parent:
+        folder = folder.parent
+
+    return folder.is_dir() and os.access(folder, os.W_OK)
+
+
+class FirstSeen:
+    """{exception_key: when this process first saw the audit detect it}: one creation time across reads."""
+
+    def __init__(self):
+
+        self.seen = {}
+        self.lock = threading.Lock()
+
+    def of(self, exceptions):
+
+        now = now_text()
+
+        with self.lock:
+
+            for item in exceptions:
+                self.seen.setdefault(item["exception_key"], now)
+
+            return {item["exception_key"]: self.seen[item["exception_key"]] for item in exceptions}
+
+
+class ReviewSession:
+    """
+    The review store as a screen uses it (the Streamlit app). Every read comes
+    from a ReviewView, so a page that only shows exceptions never creates,
+    upgrades or writes the database. The first change (apply, set_status)
+    records the detected exceptions with ReviewStore.sync, so the exception is
+    stored, then makes the change through the ReviewStore; later reads of the
+    session come from the store.
+    """
+
+    WRITES = ("apply", "set_status")
+
+    def __init__(self, path, policy=None, exceptions=(), detected_at=None):
+
+        self.path = Path(path)
+        self.policy = policy or Policy()
+        self.exceptions = list(exceptions)
+        self.detected_at = detected_at or {}
+        self.view = ReviewView(self.path, self.policy, self.exceptions, detected_at=self.detected_at)
+        self.store = None
+
+        # Checked without creating anything: a review could not be saved here
+        if not self.path.is_file() and not creatable(self.path):
+            raise ReviewError("The review database cannot be created: its folder is missing, not a folder or "
+                              "not writable.")
+
+    def writable(self):
+
+        if self.store is None:
+            store = ReviewStore(self.path, self.policy)
+            store.sync(self.exceptions, detected_at=self.detected_at)
+            self.store = store
+
+        return self.store
+
+    def apply(self, *arguments, **options):
+
+        return self.writable().apply(*arguments, **options)
+
+    def set_status(self, *arguments, **options):
+
+        return self.writable().set_status(*arguments, **options)
+
+    def __getattr__(self, name):
+
+        return getattr(self.store if self.store is not None else self.view, name)
