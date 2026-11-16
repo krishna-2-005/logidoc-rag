@@ -814,7 +814,11 @@ All databases are local runtime data and are git-ignored, as are
 `data/quarantine/` and `data/archive/`. A database with a newer schema than
 the code is refused, not guessed at. Upgrades are forward-only: rehearse them on
 a restored backup first (`scripts/rehearse_migration.py`,
-[docs/MIGRATION_REHEARSAL.md](docs/MIGRATION_REHEARSAL.md)).
+[docs/MIGRATION_REHEARSAL.md](docs/MIGRATION_REHEARSAL.md)). The installation's
+review and history databases are upgraded only when the API server or the
+Streamlit app starts, and only if a fresh, verified backup in
+`LOGIDOC_BACKUP_DIR` holds their current contents; otherwise the start is refused
+with the steps to follow (`src/migration_guard.py`).
 
 ### Deploying
 

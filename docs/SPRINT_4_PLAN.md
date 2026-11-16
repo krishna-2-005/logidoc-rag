@@ -1,7 +1,8 @@
 # Sprint 4 plan: end-to-end validation, security, performance, release readiness
 
-Status: **approved; phases 0 and 1 implemented** (section 6, and
-[SPRINT_4_PHASE_0_1_REPORT.md](SPRINT_4_PHASE_0_1_REPORT.md)). Phases 2–4 are not started.
+Status: **approved; phases 0, 1 and 2 implemented** (section 6,
+[SPRINT_4_PHASE_0_1_REPORT.md](SPRINT_4_PHASE_0_1_REPORT.md) and [SPRINT_4_PHASE_2_REPORT.md](SPRINT_4_PHASE_2_REPORT.md)).
+Phases 3 and 4 are not started.
 
 Prepared on 2026-11-15 from branch `feature/production-readiness` at `6002747` (local equals remote; all four CI jobs
 passed on it; working tree clean).
@@ -327,7 +328,10 @@ Updated 2026-11-15, after phases 0 and 1.
 | T2.5 `pip-audit` | **done**: a CI job, also weekly; no known vulnerability today | [DEPENDENCY_SECURITY.md](DEPENDENCY_SECURITY.md) |
 | T2.6 the exceptions CSV | **done**: references only, never a passage; tests for formula injection and sensitive text | `audit_analytics.evidence_reference` |
 | T2.6 sensitive-data inventory (the table) | not started: carried to phase 4 with T2.7 | — |
-| T4.7 migration guard | not started (not in the phase 0–1 brief): carried to phase 4, before any production upgrade | — |
+| T4.7 migration guard | **done in phase 2**: upgrades of the real review and history databases only at startup, with a fresh verified backup; API, server command and Streamlit | `src/migration_guard.py`, [MIGRATION_REHEARSAL.md](MIGRATION_REHEARSAL.md) section 6 |
+| T1.1 and T1.2 end to end | **done in phase 2**: one synthetic shipment from upload to report through the real API, then backed up, restored and compared | `tests/test_end_to_end_workflow.py`, [SPRINT_4_PHASE_2_REPORT.md](SPRINT_4_PHASE_2_REPORT.md) |
+| G1.4 backup reproduces results | **done in phase 2**: a restored copy gives identical audit, corrections, history, reviews, risk and reports | as above |
+| Streamlit reads | **done in phase 2**: showing exceptions never writes the review database | [EXCEPTION_RECORDING.md](EXCEPTION_RECORDING.md) |
 
 **Plan changes:**
 
