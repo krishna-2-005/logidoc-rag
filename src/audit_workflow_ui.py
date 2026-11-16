@@ -616,7 +616,8 @@ def show_shipment_workflow(
 
     if review_store is not None:
         try:
-            reviews = review_store.sync(build_exceptions(snapshot))
+            # A read: the states as the next sync will record them (review_store.ReviewSession), nothing written
+            reviews = review_store.states()
         except Exception as error:
             review_error = str(error)
 

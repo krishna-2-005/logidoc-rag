@@ -277,13 +277,14 @@ def test_review_state_does_not_leak_between_review_databases(tmp_path):
         at = open_analytics()
 
         assert review_states() == {"Open"}
+        assert not first.exists()          # showing writes nothing (review_store.ReviewSession)
 
-        store = ReviewStore(first)
-        invoice = next(row for row in store.states().values() if row["category"] == "Invoice mismatch")
-        store.set_status(
-            {"exception_key": invoice["exception_key"], "signature": invoice["signature"]},
-            "in_review", reviewer="krishna",
-        )
+        # Saving a review from the page records the detected exceptions, then the state
+        label = next(option for option in at.selectbox(key="an_exception").options if "Invoice mismatch" in option)
+        at.selectbox(key="an_exception").select(label).run()
+        [item for item in at.tabs[4].selectbox if item.label == "Review state"][0].select("in_review").run()
+        [item for item in at.tabs[4].text_input if item.label == "Reviewer (optional)"][0].input("krishna").run()
+        [item for item in at.tabs[4].button if item.label == "Save review state"][0].click().run()
 
         refresh(at)
 
@@ -296,7 +297,7 @@ def test_review_state_does_not_leak_between_review_databases(tmp_path):
         at = open_analytics()
 
         assert review_states() == {"Open"}
-        assert {row["status"] for row in ReviewStore(second).states().values()} == {"open"}
+        assert not second.exists()
 
     # The first database kept its state
     assert {row["status"] for row in ReviewStore(first).states().values()} == {"open", "in_review"}

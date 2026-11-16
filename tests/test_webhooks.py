@@ -243,7 +243,8 @@ def test_freight_audit_and_exception_events_come_from_recorded_history(rig):
     register(alice)
     service = runtime(rig).webhooks
 
-    # Exceptions are recorded as open when the queue is read; a run is recorded; a review changes a status
+    # The queue shows the exceptions (a read records nothing); a run is recorded; the first review records
+    # every detected exception, then changes a status
     exceptions = alice.get("/api/exceptions").json()["exceptions"]
     assert alice.post("/api/history/runs", json={"label": "Month end"}).status_code == 201
     key = exceptions[0]["exception_key"]

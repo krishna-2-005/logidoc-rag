@@ -14,14 +14,9 @@ itself. Sprint 4, phase 1, 2026-11-15.
 The other stores (sign-in, extractions, carrier registry, integrations) do not exist in the real data: they are
 created at their current version when first used, with nothing to upgrade.
 
-**When an upgrade runs:**
-
-- **Reviews:** only when a change opens the store: an exception action, or the server's background loop recording
-  newly detected exceptions. Since this phase a read never opens it for writing, so a read never upgrades it
-  (section 5).
-- **History:** whenever the history store is opened, which includes reading the history.
-
-Either way, the first start of the new code on the real data folder upgrades both databases.
+**When an upgrade runs:** since phase 2, only when LogiDoc-RAG starts (the API server or the Streamlit app), and only
+if a fresh, verified backup holds the current data (section 6). Otherwise the start is refused. A read never
+upgrades the review database (section 5), and no store upgrades a guarded database on its own.
 
 ## 2. How it was rehearsed
 
@@ -126,4 +121,45 @@ a version 2 database and checks:
 - it stays at version 2;
 - no `.before-v3` copy is made.
 
-The history store still upgrades when opened, and a history read opens it.
+Since phase 2 the history store does not upgrade the installation's database on open either (section 6).
+
+## 6. The migration guard (Sprint 4, phase 2)
+
+Starting LogiDoc-RAG no longer upgrades the real databases blindly (`src/migration_guard.py`).
+
+**At startup** (`src/api/serve.py`, the API's `create_app` for the installation's own data, and the Streamlit
+app):
+
+1. The installation's review and history databases are registered as guarded.
+2. If either is older than the code, the newest backups in `LOGIDOC_BACKUP_DIR` are examined, read-only. One
+   qualifies only if:
+   - it passes `backup.verify_backup`: manifest, every checksum, each database copy's integrity and recorded
+     contents;
+   - its copy of every database to upgrade holds exactly the rows the live file holds now, compared by a digest
+     of every table. A backup made before the last change is stale.
+3. **With such a backup**, the upgrade runs there and then, once, before anything is served.
+4. **Without one**, nothing is opened for writing:
+   - the server exits with code 4;
+   - the Streamlit app shows the reason;
+   - both say what to do: stop every process, `python scripts/manage_backups.py create`, optionally rehearse,
+     start again.
+
+**After a refused start, the stores refuse too:** neither store upgrades a guarded database on its own, so a
+request or a background job never does. A read through `ReviewView` still works on the older file. Databases
+that do not exist yet are created at the current version: that is not an upgrade, and needs no backup.
+
+**For the real data**, set `LOGIDOC_BACKUP_DIR` to the folder that holds the backup. Checked read-only on
+2026-11-16:
+
+- the real databases (reviews 2, history 3) still match the 2026-11-15 backup in `D:\LogiDoc-backups`, so that
+  backup qualifies;
+- with the default backup folder (`backups/` in the project, which is empty), the start is refused.
+
+Tests: `tests/test_migration_guard.py`, on isolated old-schema copies:
+
+- missing, stale, corrupted and incomplete backups;
+- a valid backup;
+- current and missing databases;
+- an unreadable database;
+- the stores' own refusal;
+- the API, the server command and the Streamlit app.
