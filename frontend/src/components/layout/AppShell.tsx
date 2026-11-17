@@ -27,6 +27,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
+import { RouteBoundary } from "@/components/common/RouteBoundary"
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Tooltip } from "@/components/ui/tooltip"
@@ -400,7 +401,9 @@ export function AppShell({ session }: { session: Session }) {
 
         <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[88rem] flex-1 px-4 py-6 sm:px-8 sm:py-8">
           <div key={location.pathname} className="page-enter">
-            <Outlet />
+            <RouteBoundary>
+              <Outlet />
+            </RouteBoundary>
           </div>
         </main>
       </div>

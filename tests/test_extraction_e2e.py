@@ -517,6 +517,8 @@ def test_no_document_text_or_path_reaches_extraction_responses_or_logs(rig, tmp_
         assert SENTINEL not in reply.text and str(tmp_path) not in reply.text and "Traceback" not in reply.text, reply.request.url
 
     assert SENTINEL not in caplog.text
+    # No store holds document text. (The page text cache, data/cache/page_text.cache, does by design: it is
+    # what was parsed from the PDFs, kept beside them like the search index, and is not a store.)
     assert SENTINEL.encode() not in b"".join(p.read_bytes() for p in tmp_path.rglob("*.sqlite3*"))
 
 

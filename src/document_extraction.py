@@ -1013,10 +1013,13 @@ def empty_fields(document_type, filename, state, warning):
             for name, spec in schema.items()}
 
 
-def extract_document(path, filename=None):
+def extract_document(path, filename=None, cache=None):
     """
     Extracts one PDF. Never raises for a damaged or image-only file: the
     result says so (status unreadable / needs_ocr, every field UNREADABLE).
+    cache: a page_text_cache.PageTextCache; the page text of content it has
+    parsed before is not read from the PDF again (the fields are extracted
+    from the same text either way).
     """
 
     path = Path(path)
@@ -1030,14 +1033,18 @@ def extract_document(path, filename=None):
     digest = hashlib.sha256(data).hexdigest()
 
     try:
-        # PyMuPDF is single-threaded: one document at a time (pdf_access)
-        with pdf_access.PDF_LOCK:
-            document = pymupdf.open(stream=data, filetype="pdf")
-            try:
-                texts = [(n, page.get_text("text", sort=True).strip()) for n, page in enumerate(document, start=1)]
-                total = len(document)
-            finally:
-                document.close()
+        if cache is not None:
+            texts = cache.pages_of(data, digest)
+            total = len(texts)
+        else:
+            # PyMuPDF is single-threaded: one document at a time (pdf_access)
+            with pdf_access.PDF_LOCK:
+                document = pymupdf.open(stream=data, filetype="pdf")
+                try:
+                    texts = [(n, page.get_text("text", sort=True).strip()) for n, page in enumerate(document, start=1)]
+                    total = len(document)
+                finally:
+                    document.close()
     except Exception as error:
         return DocumentExtraction(filename, digest, "UNKNOWN", S_UNREADABLE, error=f"{type(error).__name__}: {error}"[:200],
                                   fields=empty_fields("UNKNOWN", filename, UNREADABLE, "The PDF could not be opened."),

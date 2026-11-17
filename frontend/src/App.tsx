@@ -1,34 +1,38 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect } from "react"
+import { lazy, useEffect } from "react"
 import { Navigate, Route, Routes } from "react-router-dom"
 import { ErrorState, LoadingBlock } from "@/components/common/states"
 import { AppShell, Centered } from "@/components/layout/AppShell"
 import { useSession } from "@/hooks/queries"
 import { UNAUTHORIZED_EVENT } from "@/lib/api"
-import { Assistant } from "@/pages/Assistant"
-import { CarrierIntelligence } from "@/pages/CarrierIntelligence"
-import { CarrierLinks } from "@/pages/CarrierLinks"
-import { CarrierRegistry } from "@/pages/CarrierRegistry"
-import { CarrierRegistryDetail } from "@/pages/CarrierRegistryDetail"
-import { IntegrationDetail } from "@/pages/IntegrationDetail"
-import { Integrations } from "@/pages/Integrations"
-import { ScheduledJobs } from "@/pages/ScheduledJobs"
-import { DeliveryDetail, WebhookDetail } from "@/pages/WebhookDetail"
-import { Webhooks } from "@/pages/Webhooks"
-import { Completeness } from "@/pages/Completeness"
-import { Corrections } from "@/pages/Corrections"
-import { Documents } from "@/pages/Documents"
-import { Exceptions } from "@/pages/Exceptions"
-import { FreightAudit } from "@/pages/FreightAudit"
-import { AuditHistory } from "@/pages/History"
-import { Invoices } from "@/pages/Invoices"
 import { Login } from "@/pages/Login"
-import { Overview } from "@/pages/Overview"
-import { Reports } from "@/pages/Reports"
-import { Risk } from "@/pages/Risk"
-import { SettingsPage } from "@/pages/Settings"
-import { ShipmentDetailPage } from "@/pages/ShipmentDetail"
-import { Shipments } from "@/pages/Shipments"
+
+// Every page is its own chunk, fetched when its route is first opened (the sign-in page and the shell are in
+// the first load). AppShell wraps the routed page in a RouteBoundary: a loading state, and an error on failure.
+const Assistant = lazy(() => import("@/pages/Assistant").then((module) => ({ default: module.Assistant })))
+const CarrierIntelligence = lazy(() => import("@/pages/CarrierIntelligence").then((module) => ({ default: module.CarrierIntelligence })))
+const CarrierLinks = lazy(() => import("@/pages/CarrierLinks").then((module) => ({ default: module.CarrierLinks })))
+const CarrierRegistry = lazy(() => import("@/pages/CarrierRegistry").then((module) => ({ default: module.CarrierRegistry })))
+const CarrierRegistryDetail = lazy(() => import("@/pages/CarrierRegistryDetail").then((module) => ({ default: module.CarrierRegistryDetail })))
+const IntegrationDetail = lazy(() => import("@/pages/IntegrationDetail").then((module) => ({ default: module.IntegrationDetail })))
+const Integrations = lazy(() => import("@/pages/Integrations").then((module) => ({ default: module.Integrations })))
+const ScheduledJobs = lazy(() => import("@/pages/ScheduledJobs").then((module) => ({ default: module.ScheduledJobs })))
+const WebhookDetail = lazy(() => import("@/pages/WebhookDetail").then((module) => ({ default: module.WebhookDetail })))
+const DeliveryDetail = lazy(() => import("@/pages/WebhookDetail").then((module) => ({ default: module.DeliveryDetail })))
+const Webhooks = lazy(() => import("@/pages/Webhooks").then((module) => ({ default: module.Webhooks })))
+const Completeness = lazy(() => import("@/pages/Completeness").then((module) => ({ default: module.Completeness })))
+const Corrections = lazy(() => import("@/pages/Corrections").then((module) => ({ default: module.Corrections })))
+const Documents = lazy(() => import("@/pages/Documents").then((module) => ({ default: module.Documents })))
+const Exceptions = lazy(() => import("@/pages/Exceptions").then((module) => ({ default: module.Exceptions })))
+const FreightAudit = lazy(() => import("@/pages/FreightAudit").then((module) => ({ default: module.FreightAudit })))
+const AuditHistory = lazy(() => import("@/pages/History").then((module) => ({ default: module.AuditHistory })))
+const Invoices = lazy(() => import("@/pages/Invoices").then((module) => ({ default: module.Invoices })))
+const Overview = lazy(() => import("@/pages/Overview").then((module) => ({ default: module.Overview })))
+const Reports = lazy(() => import("@/pages/Reports").then((module) => ({ default: module.Reports })))
+const Risk = lazy(() => import("@/pages/Risk").then((module) => ({ default: module.Risk })))
+const SettingsPage = lazy(() => import("@/pages/Settings").then((module) => ({ default: module.SettingsPage })))
+const ShipmentDetailPage = lazy(() => import("@/pages/ShipmentDetail").then((module) => ({ default: module.ShipmentDetailPage })))
+const Shipments = lazy(() => import("@/pages/Shipments").then((module) => ({ default: module.Shipments })))
 
 export default function App() {
   const client = useQueryClient()

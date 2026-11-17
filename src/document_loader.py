@@ -66,10 +66,19 @@ def classify_document(filename, text=None):
     return "UNKNOWN"
 
 
-def extract_pdf(pdf_path):
+def extract_pdf(pdf_path, cache=None):
     """
-    Extract text from a PDF page by page.
+    Extract text from a PDF page by page. cache: a
+    page_text_cache.PageTextCache; content it has parsed before is not parsed
+    again (the pages are the same either way).
     """
+
+    if cache is not None:
+        return [
+            {"page": number, "text": text}
+            for number, text in cache.pages_of(Path(pdf_path).read_bytes())
+            if text
+        ]
 
     pages = []
 
@@ -106,12 +115,13 @@ def extract_pdf(pdf_path):
     return pages
 
 
-def load_document(pdf_path):
+def load_document(pdf_path, cache=None):
     """
     Load one logistics PDF and return structured document data.
 
     Document type and identifiers are detected from the
     actual PDF content rather than relying on the filename.
+    cache: see extract_pdf.
     """
 
     pdf_path = Path(pdf_path)
@@ -120,7 +130,7 @@ def load_document(pdf_path):
     # 1. Extract PDF pages
     # --------------------------------------------------------
 
-    pages = extract_pdf(pdf_path)
+    pages = extract_pdf(pdf_path, cache)
 
     # Combine page text for analysis
     full_text = "\n".join(

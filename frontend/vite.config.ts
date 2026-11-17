@@ -12,7 +12,7 @@ export default defineConfig({
     port: 5173,
     proxy: { "/api": { target: process.env.LOGIDOC_API_URL ?? "http://127.0.0.1:8000", changeOrigin: false } },
   },
-  build: { outDir: "dist", sourcemap: false, chunkSizeWarningLimit: 900 },
+  build: { outDir: "dist", sourcemap: false, chunkSizeWarningLimit: 500 },
   test: {
     environment: "jsdom",
     globals: true,

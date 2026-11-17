@@ -41,9 +41,11 @@ Exception severity (the rules of Shipment Intelligence):
 """
 
 import csv
+import fnmatch
 import hashlib
 import io
 import json
+import os
 import re
 from pathlib import Path
 
@@ -87,13 +89,26 @@ def source_fingerprint(raw_dir):
 
     raw_dir = Path(raw_dir)
 
-    if not raw_dir.exists():
+    try:
+        with os.scandir(raw_dir) as entries:
+            # The same names as glob("*.pdf") (the platform's own case rule), listed without a stat each
+            names = sorted(entry.name for entry in entries if fnmatch.fnmatch(entry.name, "*.pdf"))
+    except (FileNotFoundError, NotADirectoryError):
         return ()
 
-    return tuple(
-        (path.name, path.stat().st_size, path.stat().st_mtime_ns)
-        for path in sorted(raw_dir.glob("*.pdf"))
-    )
+    found = []
+
+    for name in names:
+
+        # One stat per file, of the file itself: a directory listing's own sizes and times can lag on Windows
+        try:
+            status = os.stat(raw_dir / name)
+        except FileNotFoundError:
+            continue  # removed since it was listed
+
+        found.append((name, status.st_size, status.st_mtime_ns))
+
+    return tuple(found)
 
 
 def shipment_fingerprint(chunks):
