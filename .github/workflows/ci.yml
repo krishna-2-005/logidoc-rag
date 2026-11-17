@@ -92,6 +92,9 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      # The first load and every chunk stay within their budget (frontend/scripts/check-bundle.mjs)
+      - run: npm run size
+
       - name: Known vulnerabilities in the runtime dependencies
         run: npm audit --omit=dev --audit-level=high
 

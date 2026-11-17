@@ -54,7 +54,7 @@ from api.core import SESSION_COOKIE, ApiSettings, ApiState, csrf_guard
 from api.rate_limit import RULES, RateLimit
 from api.middleware import BodyLimit, HttpsPolicy, TrustedHosts
 from observability import RequestContext, set_error_category
-from audit_service import Locations
+from audit_service import Locations, request_scope
 from auth import ConfigError
 from extraction_store import STORE_STATE_ERRORS
 from model_client import ModelRejected, ModelServiceError, ModelTimeout
@@ -104,6 +104,11 @@ class ApiVersions:
             if message["type"] == "http.response.start":
                 message = dict(message, headers=[*message.get("headers", []), (b"api-version", API_VERSION.encode())])
             await send(message)
+
+        if scope["method"] in ("GET", "HEAD"):
+            # A read: the audit's state is looked up once for the whole request (audit_service.request_scope)
+            with request_scope():
+                return await self.app(scope, receive, versioned)
 
         return await self.app(scope, receive, versioned)
 

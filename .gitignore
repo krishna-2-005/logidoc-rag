@@ -30,6 +30,8 @@ data/integrations.sqlite3*
 data/.integrations-scheduler.lock
 data/quarantine/
 data/archive/
+# The cache of parsed page text (src/page_text_cache.py): document text, rebuilt when missing
+data/cache/
 
 # Backups (src/backup.py) and the API server's data-folder lock
 backups/

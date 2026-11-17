@@ -1,8 +1,8 @@
 # Sprint 4 plan: end-to-end validation, security, performance, release readiness
 
-Status: **approved; phases 0, 1 and 2 implemented** (section 6,
-[SPRINT_4_PHASE_0_1_REPORT.md](SPRINT_4_PHASE_0_1_REPORT.md) and [SPRINT_4_PHASE_2_REPORT.md](SPRINT_4_PHASE_2_REPORT.md)).
-Phases 3 and 4 are not started.
+Status: **approved; phases 0 to 3 implemented** (section 6,
+[SPRINT_4_PHASE_0_1_REPORT.md](SPRINT_4_PHASE_0_1_REPORT.md), [SPRINT_4_PHASE_2_REPORT.md](SPRINT_4_PHASE_2_REPORT.md) and
+[SPRINT_4_PHASE_3_REPORT.md](SPRINT_4_PHASE_3_REPORT.md)). Phase 4 is not started.
 
 Prepared on 2026-11-15 from branch `feature/production-readiness` at `6002747` (local equals remote; all four CI jobs
 passed on it; working tree clean).
@@ -332,6 +332,10 @@ Updated 2026-11-15, after phases 0 and 1.
 | T1.1 and T1.2 end to end | **done in phase 2**: one synthetic shipment from upload to report through the real API, then backed up, restored and compared | `tests/test_end_to_end_workflow.py`, [SPRINT_4_PHASE_2_REPORT.md](SPRINT_4_PHASE_2_REPORT.md) |
 | G1.4 backup reproduces results | **done in phase 2**: a restored copy gives identical audit, corrections, history, reviews, risk and reports | as above |
 | Streamlit reads | **done in phase 2**: showing exceptions never writes the review database | [EXCEPTION_RECORDING.md](EXCEPTION_RECORDING.md) |
+| T3.1 code splitting | **done in phase 3**: every page and the charts are separate chunks; a size budget checked in CI | [SPRINT_4_PHASE_3_REPORT.md](SPRINT_4_PHASE_3_REPORT.md) |
+| T3.2 and T3.3 cheaper requests | **done in phase 3**, more narrowly than planned: the audit's state is looked up once per read request and the folder listing costs one `stat` per file; no result is cached across requests | as above |
+| T3.4 cold start | **done in phase 3**, differently: a persistent cache of parsed page text by content hash, rather than reusing stored extractions | `src/page_text_cache.py` |
+| T3.7 indexes | **measured, not added**: on 200,000 deliveries and 100,000 sync runs the planned indexes sped nothing up and slowed two queries | as above |
 
 **Plan changes:**
 

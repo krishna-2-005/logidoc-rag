@@ -31,10 +31,12 @@ Paths are fixed when the service is built (config.py or the tests); no
 method takes a path from a caller.
 """
 
+import contextvars
 import hashlib
 import json
 import logging
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +44,7 @@ import audit_analytics as analytics
 import audit_inputs
 import authz
 import document_extraction
+import document_loader
 import document_completeness as completeness
 import financial_exposure as exposure
 import ingestion_service
@@ -51,6 +54,7 @@ import tms_audit
 from audit_analytics import build_exceptions, build_snapshot, source_fingerprint, with_reviews
 from chunker import read_chunks
 from ingestion_manager import get_destination_collection
+from page_text_cache import PageTextCache
 from review_store import Policy, ReviewStore, ReviewView, now_text
 from audit_history import HistoryStore
 import sqlite3
@@ -117,7 +121,7 @@ def freight_skipped(reason):
             "currency": None, "charges": [], "checks": [], "financial_impact": None, "tolerances": {}}
 
 
-def add_freight_audits(snapshot, by_key, raw_dir, corrections_of, extraction_cache=None):
+def add_freight_audits(snapshot, by_key, raw_dir, corrections_of, extraction_cache=None, page_cache=None):
     """
     Adds item["freight_audit"] to every shipment of the snapshot: its carrier
     invoice matched against its rate confirmation and BOL/POD (freight_audit),
@@ -164,7 +168,7 @@ def add_freight_audits(snapshot, by_key, raw_dir, corrections_of, extraction_cac
                     key = (str(name), hashlib.sha256(path.read_bytes()).hexdigest(), document_extraction.EXTRACTOR_VERSION)
                     kept.add(key)
                     if key not in cache:
-                        cache[key] = document_extraction.extract_document(path)
+                        cache[key] = document_extraction.extract_document(path, cache=page_cache)
                     extracted[name] = cache[key]
             except Exception as error:  # one unreadable file must not hide the other shipments' audits
                 log.warning("freight audit: %s could not be extracted: %s", name, error)
@@ -219,6 +223,26 @@ def add_freight_audits(snapshot, by_key, raw_dir, corrections_of, extraction_cac
         del cache[key]
 
 
+# The state key of each AuditService, for the duration of one read request (request_scope): {id(service): key}
+REQUEST_MEMO = contextvars.ContextVar("logidoc_request_memo", default=None)
+
+
+@contextmanager
+def request_scope():
+    """
+    One read request: AuditService.state_key is computed once inside it. Only for
+    requests that change nothing (the API opens it for GET): a change made
+    through the service clears it (invalidate), and nothing outlives the block.
+    """
+
+    token = REQUEST_MEMO.set({})
+
+    try:
+        yield
+    finally:
+        REQUEST_MEMO.reset(token)
+
+
 @dataclass(frozen=True)
 class Locations:
     """
@@ -245,6 +269,14 @@ class Locations:
         """The extraction store: its own setting, or next to the raw folder."""
 
         return Path(self.extraction_db) if self.extraction_db else Path(self.raw_dir).parent / "extractions.sqlite3"
+
+    def page_cache_path(self):
+        """
+        The cache of parsed page text (page_text_cache): a cache folder next to the raw folder. Not named
+        like a store on purpose: the stores (*.sqlite3) never hold document text, this file does.
+        """
+
+        return Path(self.raw_dir).parent / "cache" / "page_text.cache"
 
     def carrier_registry_path(self):
         """The carrier master data: its own setting, or next to the raw folder."""
@@ -277,6 +309,9 @@ class AuditService:
         self.extractions = {}
         # The TMS integrations' shipment records (tms_audit.TmsSource), set by the API state; None: no TMS
         self.tms_source = None
+        # The text of every parsed PDF page by content hash, kept on disk: an unchanged document is not parsed
+        # again after a restart or when another document changes (page_text_cache)
+        self.page_cache = PageTextCache(locations.page_cache_path())
         # {exception_key: when this process first saw the audit detect it}: the creation time a read shows
         # for an exception not recorded yet, and the time it is recorded with (survives invalidate())
         self.first_seen = {}
@@ -367,12 +402,24 @@ class AuditService:
 
     def state_key(self):
         """
-        Changes whenever a document or an open ingestion error does.
+        Changes whenever a document or an open ingestion error does. Inside
+        request_scope() (one read request of the API) it is computed once: every
+        cached value of that request is checked against the same state, and the
+        folder is listed once instead of once per value. Never kept beyond it.
         """
 
-        problems = ingestion_service.problems_token(self.offered_problems())
+        memo = REQUEST_MEMO.get()
 
-        return (source_fingerprint(self.locations.raw_dir), problems)
+        if memo is not None and id(self) in memo:
+            return memo[id(self)]
+
+        problems = ingestion_service.problems_token(self.offered_problems())
+        key = (source_fingerprint(self.locations.raw_dir), problems)
+
+        if memo is not None:
+            memo[id(self)] = key
+
+        return key
 
     def cached(self, name, compute, extra=None):
 
@@ -397,6 +444,11 @@ class AuditService:
         with self.lock:
             self.cache.clear()
 
+        memo = REQUEST_MEMO.get()
+
+        if memo is not None:
+            memo.pop(id(self), None)
+
     # --------------------------------------------------------
     # The audit
     # --------------------------------------------------------
@@ -410,7 +462,8 @@ class AuditService:
 
         def compute():
 
-            chunks, problems = read_chunks(self.locations.raw_dir)
+            chunks, problems = read_chunks(
+                self.locations.raw_dir, loader=lambda path: document_loader.load_document(path, cache=self.page_cache))
             problems = ingestion_service.merge_problems(problems, self.offered_problems())
 
             unavailable = False
@@ -494,7 +547,11 @@ class AuditService:
                     audit_inputs.mark_corrections_unavailable(item["inputs"])
 
             with metrics.timed("logidoc_freight_audit_duration_seconds"):
-                add_freight_audits(snapshot, by_key, self.locations.raw_dir, approved_of, self.extractions)
+                add_freight_audits(snapshot, by_key, self.locations.raw_dir, approved_of, self.extractions,
+                                   page_cache=self.page_cache)
+
+            # Every document was read in this pass: what the cache holds of removed or replaced ones goes
+            self.page_cache.prune()
 
             # A correction the freight audit used is consumed by the audit like the
             # reconciliation's: history records it, staleness and supersession see it
@@ -546,7 +603,7 @@ class AuditService:
 
     def has_documents(self):
 
-        return bool(source_fingerprint(self.locations.raw_dir))
+        return bool(self.state_key()[0])
 
     def rows(self):
 
