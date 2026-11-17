@@ -80,3 +80,19 @@ The committed code (`6002747`) and the phase 1 code were run alternately with th
   instead of 10 ms for 859 exceptions.
 - **The computation steps of section 1 are unchanged:** they were 0–10% faster in the same runs.
 - **The rate limits cost no measurable time:** a regular expression match per request.
+
+## 5. After Sprint 4 phase 3
+
+Measured the same way: committed code and new code back to back. Details and method:
+[SPRINT_4_PHASE_3_REPORT.md](SPRINT_4_PHASE_3_REPORT.md).
+
+| Measure | Before | After |
+|---|---|---|
+| First-load JavaScript | 1,168.9 kB, 327.5 kB gzip | 351.0 kB, 114.6 kB gzip |
+| Warm requests, 100 shipments | 36–131 ms | 17–71 ms |
+| Warm requests, 1,000 shipments | 2.1–5.6 s | 0.6–1.6 s |
+| Restart with nothing changed, 1,000 shipments | 121 s | 62 s |
+| Recalculation after one changed shipment, 1,000 shipments | 85 s | 48 s |
+| Document folder listings per read request | 2–5 | 1 |
+
+`npm run size` reports the bundle figures.

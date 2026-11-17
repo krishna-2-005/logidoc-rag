@@ -773,6 +773,13 @@ assistant, document and account changes and failed sign-ins are rate limited
 audits the pinned dependencies for known vulnerabilities
 ([docs/DEPENDENCY_SECURITY.md](docs/DEPENDENCY_SECURITY.md)).
 
+Performance: the web application loads each page, and the charts, as its own
+chunk when a route is first opened (`npm run size` checks the bundle budget).
+The text parsed from each PDF is cached on disk by content hash
+(`data/cache/`, `src/page_text_cache.py`), so an unchanged document is not
+parsed again after a restart; a damaged cache is ignored and rebuilt. Figures:
+[docs/PERFORMANCE_BASELINE.md](docs/PERFORMANCE_BASELINE.md).
+
 Endpoints, all under `/api`: `session`, `auth/login`, `auth/logout`,
 `overview`, `shipments`, `shipments/{id}`, `documents`, `documents/file`,
 `completeness`, `exposure`, `exceptions` (and `/{key}`, `/{key}/actions`,
