@@ -829,6 +829,12 @@ with the steps to follow (`src/migration_guard.py`).
 
 ### Deploying
 
+Release `1.0.0-rc.1` ([CHANGELOG.md](CHANGELOG.md)) is a release candidate, not yet ready for production: what is
+verified and what is not is in [docs/RELEASE_ACCEPTANCE_CHECKLIST.md](docs/RELEASE_ACCEPTANCE_CHECKLIST.md). Start
+from [docs/RELEASE_RUNBOOK.md](docs/RELEASE_RUNBOOK.md) (install, upgrade, monitor, recover, roll back) and
+[docs/CONFIGURATION_REFERENCE.md](docs/CONFIGURATION_REFERENCE.md). A deployment is rehearsed with
+`python scripts/staging_rehearsal.py --work <new folder>` ([docs/STAGING_REHEARSAL.md](docs/STAGING_REHEARSAL.md)).
+
 The full procedure, the settings, HTTPS with Caddy or nginx and a deployment
 checklist are in [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md).
 In short:

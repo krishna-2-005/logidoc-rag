@@ -19,6 +19,7 @@ import config
 import document_lifecycle as lifecycle
 import ingestion_register as register_module
 import ingestion_service as service
+import release
 from api.core import ApiState, get_principal, get_state, require
 from ingestion_register import IngestionRegister, STATUSES
 
@@ -309,6 +310,7 @@ def settings(principal=Depends(get_principal), state: ApiState = Depends(get_sta
     """
 
     return {
+        "release": release.VERSION,
         "auth_mode": state.mode,
         "resolution_needs_approval": state.policy.require_approval,
         "minimum_note_length": state.policy.min_note,

@@ -67,6 +67,10 @@ jobs:
       - name: Test suite
         run: python -m pytest -q -p no:cacheprovider
 
+      # The version, the changelog, the published contracts and the release documents agree
+      - name: Release readiness
+        run: python scripts/check_release.py
+
       - name: Deterministic evaluation guard (no language model)
         run: python scripts/evaluate_assistant.py --json "$RUNNER_TEMP/evaluation.json"
 

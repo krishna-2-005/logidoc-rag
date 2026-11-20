@@ -140,6 +140,7 @@ export function SettingsPage() {
           <Card>
             <CardContent className="pt-3">
               <dl>
+                {settings.data.release && <Row name="Release" value={settings.data.release} note="The version of LogiDoc-RAG this server runs." />}
                 <Row name="Sign-in" value={settings.data.auth_mode === "required" ? "Required" : "Local development mode"} note={settings.data.auth_mode === "required" ? "Every use needs a signed-in account." : "Nobody signs in. Never use this mode on a shared server."} />
                 <Row name="Resolutions need approval" value={settings.data.resolution_needs_approval ? "Yes" : "No"} note="When on, an administrator other than the resolver approves a resolution or dismissal." />
                 <Row name="Resolutions need evidence" value={settings.data.resolution_needs_evidence ? "Yes" : "No"} />
