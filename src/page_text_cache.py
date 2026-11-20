@@ -19,14 +19,18 @@ by the same code as without the cache, so results and provenance are identical.
 The cache is an optimisation only. It never raises: an unreadable, locked or
 damaged cache file, or an entry that does not decode, counts as a miss, and
 the document is parsed. A PDF that cannot be parsed is never stored. Entries
-of documents no longer present are removed by prune(). The file holds document
-text, like the documents and the search index: it lives in the data folder
-(Locations.page_cache_path) and is not part of a backup (it is rebuilt).
+of documents no longer present are removed by prune(), and their text is
+overwritten in the file (secure_delete). The file holds document text, like
+the documents and the search index: it lives in the data folder
+(Locations.page_cache_path), is created for its owner only where the platform
+has permission bits, is never logged (only an error's type is), and is not
+part of a backup (it is rebuilt). Operations: docs/DOCUMENT_TEXT_CACHE.md.
 """
 
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -51,6 +55,53 @@ CREATE TABLE IF NOT EXISTS page_text (
     PRIMARY KEY (sha256, parser)
 )
 """
+
+
+def restrict(path, mode):
+    """
+    Owner-only access where the platform has permission bits (POSIX). On
+    Windows the file inherits the data folder's access control list, which the
+    operator sets (docs/DOCUMENT_TEXT_CACHE.md); chmod changes nothing useful
+    there, so nothing is attempted. Never raises.
+    """
+
+    if os.name != "posix":
+        return
+
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
+def describe(path):
+    """
+    What a cache file holds, without any of its text: {"exists", "bytes",
+    "entries", "parsers", "mode"} (mode: the POSIX permission bits, else
+    None). Read-only; an unreadable file gives entries None.
+    """
+
+    path = Path(path)
+
+    if not path.is_file():
+        return {"exists": False, "bytes": 0, "entries": 0, "parsers": [], "mode": None}
+
+    status = path.stat()
+    found = {"exists": True, "bytes": status.st_size, "entries": None, "parsers": [],
+             "mode": oct(status.st_mode & 0o777) if os.name == "posix" else None}
+
+    try:
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+        try:
+            rows = connection.execute("SELECT parser, COUNT(*) FROM page_text GROUP BY parser ORDER BY parser").fetchall()
+        finally:
+            connection.close()
+        found["entries"] = sum(count for _, count in rows)
+        found["parsers"] = [parser for parser, _ in rows]
+    except sqlite3.Error:
+        pass
+
+    return found
 
 
 def parse_pages(data):
@@ -94,10 +145,18 @@ class PageTextCache:
 
         if self.connection is None:
             try:
+                created = not self.path.parent.exists()
                 self.path.parent.mkdir(parents=True, exist_ok=True)
+
+                if created:
+                    restrict(self.path.parent, 0o700)
+
                 self.connection = sqlite3.connect(self.path, timeout=5, check_same_thread=False)
+                # The text of a removed or replaced document is overwritten in the file, not only unlinked
+                self.connection.execute("PRAGMA secure_delete = ON")
                 self.connection.execute(SCHEMA)
                 self.connection.commit()
+                restrict(self.path, 0o600)
             except (sqlite3.Error, OSError) as error:
                 self.give_up(error)
 

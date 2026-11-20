@@ -51,11 +51,18 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
         sys.path.insert(0, str(path))
 
 import environment  # noqa: E402  (imports nothing of the application)
+import release  # noqa: E402  (a constant)
 
 
 def main(argv=None):
 
     argv = sys.argv[1:] if argv is None else argv
+
+    if "--version" in argv:
+        # The release only: nothing is read, validated or opened
+        print(f"LogiDoc-RAG {release.VERSION}")
+        return 0
+
     report = environment.validate(os.environ)
 
     if report["errors"]:
@@ -115,8 +122,8 @@ def main(argv=None):
                                 and (os.environ.get("LOGIDOC_BACKGROUND_JOBS") or "1").strip().lower()
                                 not in environment.FALSE)
 
-    log.info("LogiDoc-RAG API on %s:%s (environment %s, sign-in mode %s)", settings.host, settings.port,
-             report["environment"], mode)
+    log.info("LogiDoc-RAG %s API on %s:%s (environment %s, sign-in mode %s)", release.VERSION, settings.host,
+             settings.port, report["environment"], mode)
 
     # The ingestion lock works inside one process only
     log.info("One writer at a time: do not upload or change documents from the Streamlit app (app.py) while this "

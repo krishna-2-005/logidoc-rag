@@ -871,6 +871,8 @@ export interface Settings {
   auth_mode: string
   resolution_needs_approval: boolean
   minimum_note_length: number
+  /** The release the server runs (src/release.py); absent from servers older than 1.0.0-rc.1 */
+  release?: string
   resolution_needs_evidence: boolean
   upload_limit_mb: number
   max_files_per_upload: number
