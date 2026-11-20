@@ -1,8 +1,9 @@
 # Sprint 4 plan: end-to-end validation, security, performance, release readiness
 
-Status: **approved; phases 0 to 3 implemented** (section 6,
-[SPRINT_4_PHASE_0_1_REPORT.md](SPRINT_4_PHASE_0_1_REPORT.md), [SPRINT_4_PHASE_2_REPORT.md](SPRINT_4_PHASE_2_REPORT.md) and
-[SPRINT_4_PHASE_3_REPORT.md](SPRINT_4_PHASE_3_REPORT.md)). Phase 4 is not started.
+Status: **approved; phases 0 to 4 implemented** (section 6, and the phase reports:
+[0 and 1](SPRINT_4_PHASE_0_1_REPORT.md), [2](SPRINT_4_PHASE_2_REPORT.md), [3](SPRINT_4_PHASE_3_REPORT.md),
+[4](SPRINT_4_PHASE_4_REPORT.md)). Release candidate 1.0.0-rc.1 is not ready for production:
+[RELEASE_ACCEPTANCE_CHECKLIST.md](RELEASE_ACCEPTANCE_CHECKLIST.md).
 
 Prepared on 2026-11-15 from branch `feature/production-readiness` at `6002747` (local equals remote; all four CI jobs
 passed on it; working tree clean).
@@ -336,6 +337,11 @@ Updated 2026-11-15, after phases 0 and 1.
 | T3.2 and T3.3 cheaper requests | **done in phase 3**, more narrowly than planned: the audit's state is looked up once per read request and the folder listing costs one `stat` per file; no result is cached across requests | as above |
 | T3.4 cold start | **done in phase 3**, differently: a persistent cache of parsed page text by content hash, rather than reusing stored extractions | `src/page_text_cache.py` |
 | T3.7 indexes | **measured, not added**: on 200,000 deliveries and 100,000 sync runs the planned indexes sped nothing up and slowed two queries | as above |
+| T4.3 staging rehearsal | **done in phase 4**, locally: the real server in the production profile on synthetic data, 63 checks passed, 4 simulated. No real staging server was available | [STAGING_REHEARSAL.md](STAGING_REHEARSAL.md) |
+| T4.4 operational documentation | **done in phase 4**: release runbook, configuration reference, document text cache guide | [RELEASE_RUNBOOK.md](RELEASE_RUNBOOK.md) |
+| T4.5 release candidate | **done in phase 4**: `1.0.0-rc.1`, a changelog, the version reported by the server. No tag, release or merge | `src/release.py`, `CHANGELOG.md` |
+| T4.6 CI gates | **done**: the bundle budget (phase 3), `pip-audit` (phase 1) and release readiness (phase 4). The OpenAPI "nothing removed" gate was not added: the contract must already match the code exactly | `scripts/check_release.py` |
+| T2.6 inventory and T2.7 threat model | not done: open, and listed as release blockers | [RELEASE_ACCEPTANCE_CHECKLIST.md](RELEASE_ACCEPTANCE_CHECKLIST.md) |
 
 **Plan changes:**
 
